@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { PHONE_TOOL_ROW } from '../state/tools'
 import { TRANSPORT_COPY, visibleMenu } from '../ui/chrome'
 import { MainMenu } from '../ui/MainMenu'
 import { PhoneDock } from '../ui/phoneDock'
@@ -54,14 +53,14 @@ describe('removed duplicate controls', () => {
     expect(html).toContain('>Tools<')
   })
 
-  it('keeps New, Open, Save, and Export in the phone row and out of the menu sheet', () => {
+  it('keeps New, Open, Save, and Export in the menu and the edit row in the dock', () => {
     const store = new ProjectStore()
     const row = dock(store, true)
-    expect(actions(row)).toEqual(['new', 'open', 'save', 'export'])
+    expect(actions(row)).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
     const phone = visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: true })
     const desk = visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: true })
     for (const action of ['new', 'open', 'save', 'export']) {
-      expect(phone.map((item) => item.action)).not.toContain(action)
+      expect(phone.map((item) => item.action)).toContain(action)
       expect(desk.map((item) => item.action)).toContain(action)
     }
     const sheet = renderToStaticMarkup(createElement(MainMenu, {
@@ -72,22 +71,25 @@ describe('removed duplicate controls', () => {
       signature: '4/4',
       onSignature: () => undefined,
     }))
-    for (const action of ['new', 'open', 'save', 'export', 'box', 'erase', 'pan', 'signature']) {
+    for (const action of ['new', 'open', 'save', 'export']) {
+      expect(sheet).toContain(`data-menu-action="${action}"`)
+    }
+    for (const action of ['box', 'erase', 'pan', 'signature']) {
       expect(sheet).not.toContain(`data-menu-action="${action}"`)
     }
     expect(sheet).toContain('data-menu-action="shortcuts"')
   })
 
-  it('moves Box and Erase into the tools row and leaves Scroll only in the sheet', () => {
+  it('keeps every arrange tool, including Snap, in the phone tools sheet', () => {
     const store = new ProjectStore()
     const full = renderToStaticMarkup(createElement(ToolChoices, { store, onClose() {} }))
     for (const label of ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll']) {
       expect(full).toContain(`>${label}<`)
     }
     expect(full).toContain('not the mixer pan')
-    const phone = renderToStaticMarkup(createElement(ToolChoices, { store, onClose() {}, omit: PHONE_TOOL_ROW }))
+    const phone = renderToStaticMarkup(createElement(ToolChoices, { store, onClose() {}, showSnap: true }))
     const faces = [...phone.matchAll(/choice-chip-face">([^<]+)</g)].map((match) => match[1])
-    expect(faces).toEqual(['Scroll'])
+    expect(faces).toEqual(['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Snap 1/4', 'Scroll'])
     expect(phone).toContain('not the mixer pan')
     const menu = visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: false }).map((item) => item.action)
     for (const action of ['box', 'erase', 'pan']) expect(menu).not.toContain(action)

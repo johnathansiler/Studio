@@ -2044,6 +2044,7 @@ async function importDropped(files: FileList) {
         if (event.dataTransfer.files.length) void importDropped(event.dataTransfer.files)
       }}
     >
+      <div className={phone && !land ? 'phone-top' : 'chrome-stack'}>
       <header className="topbar">
         {!phone && menuButton}
         {!phone && (
@@ -2152,6 +2153,7 @@ async function importDropped(files: FileList) {
           assetTransfers={session.state.assetTransfers}
         />
       )}
+      </div>
       {phone && (
         <>
           <div id="phone-sheet-host" className="phone-sheet-host">

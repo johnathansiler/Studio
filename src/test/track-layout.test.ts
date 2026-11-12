@@ -84,6 +84,8 @@ describe('track view layout', () => {
     expect(keys).toBeLessThan(add)
     expect(ruler).toBeGreaterThan(view)
     expect(html).not.toContain('class="name"')
+    expect(html).toContain('class="track-title"')
+    expect(html).toContain('Double tap to rename')
     expect(html).toContain('>Mute<')
     expect(html).toContain('>Solo<')
     expect(html).toContain('>Arm<')

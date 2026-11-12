@@ -12,7 +12,7 @@ const VIEWPORTS = [
 ] as const
 
 const SELECT_LABELS = ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll']
-const PHONE_TOOL_LABELS = ['Scroll']
+const PHONE_TOOL_LABELS = ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Snap 1/4', 'Scroll']
 const SNAP_LABELS = ['On', 'Bar', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4T', '1/8T', '1/16T']
 
 async function waitForServer(url: string, child: ChildProcess) {
@@ -115,8 +115,13 @@ function assertTray(name: string, tray: Awaited<ReturnType<typeof readTray>>, la
   expect(tray.wellClass, name).toContain('btn-tray')
   expect(tray.position, name).not.toBe('fixed')
   expect(tray.inset, name).toContain('inset')
-  expect(tray.rows, name).toBe(labels.length <= 2 ? 1 : 2)
-  expect(Number(tray.cols), name).toBeGreaterThanOrEqual(Math.ceil(labels.length / 2))
+  if (labels.length > 8) {
+    expect(tray.rows, name).toBeGreaterThanOrEqual(2)
+    expect(Number(tray.cols), name).toBeGreaterThanOrEqual(2)
+  } else {
+    expect(tray.rows, name).toBe(labels.length <= 2 ? 1 : 2)
+    expect(Number(tray.cols), name).toBeGreaterThanOrEqual(Math.ceil(labels.length / 2))
+  }
   expect(tray.closeLabel, name).toBe('Close')
   expect(tray.closeText, name).toBe('')
   expect(tray.close!.width, name).toBeGreaterThanOrEqual(40)
@@ -230,7 +235,7 @@ describe('select and snap choice tray', () => {
         assertTray(`${viewport.name} select`, selectTray, selectLabels, browserHeight)
         if (viewport.phoneSheet) {
           const row = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
-          expect(row, viewport.name).toEqual(['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'snap'])
+          expect(row, viewport.name).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
         }
         await assertChipsReachable(page, '#tool-choices', `${viewport.name} select chips`)
         if (viewport.shot) await page.screenshot({ path: `/opt/cursor/artifacts/select_tray_${viewport.name}.png` })
@@ -257,10 +262,12 @@ describe('select and snap choice tray', () => {
           const off = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { snap?: boolean } } } }).__cueharbor.store.project.snap)
           expect(off).toBe(false)
           await page.getByRole('button', { name: 'Tools', exact: true }).click()
-          await page.locator('.phone-context [data-phone-action="pencil"]').click()
+          await page.locator('#tool-choices').getByRole('button', { name: /^Draw/ }).click()
           expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pencil')
-          await page.locator('.phone-context [data-phone-action="box"]').click()
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
+          await page.locator('#tool-choices').getByRole('button', { name: /^Box/ }).click()
           expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('box')
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
           await page.locator('#tool-choices').getByRole('button', { name: /^Scroll/ }).click()
           await page.locator('#tool-choices').waitFor({ state: 'detached' })
           expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pan')

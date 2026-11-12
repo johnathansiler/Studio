@@ -1,17 +1,24 @@
 import { useSyncExternalStore, type RefObject } from 'react'
 import { SNAP_DIVISIONS, normalizeSnapDivision, type SnapDivisionId } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
-import { PHONE_TOOL_ROW, TOOL_INFO, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { TOOL_INFO, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import type { AudioEngine } from '../audio/engine'
 import type { SessionClient } from '../remote/session'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { ChoiceChip, ChoiceTray } from './ChoiceTray'
 import { SongPanel } from './SongPanel'
-import type { UtilitySheet } from './arrangePanel'
+import { toggleArrangeSheet, type UtilitySheet } from './arrangePanel'
 import { useFormFactor } from './form'
 
 /** Tools the choice sheet can offer. Scroll is the pan tool, named so it is not the mixer pan. */
 const TRAY_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'pan']
+
+function snapFace(store: ProjectStore) {
+  const on = store.project.snap !== false
+  const division = normalizeSnapDivision(store.project.snapDivision)
+  const gridLabel = SNAP_DIVISIONS.find((item) => item.id === division)?.label ?? division
+  return { on, label: `Snap ${on ? gridLabel : 'Off'}` }
+}
 
 export function toolTrayIds(omit: readonly ArrangeTool[] = []) {
   return TRAY_TOOLS.filter((id) => !omit.includes(id))
@@ -62,7 +69,14 @@ export function UtilitySheets({
     )
   }
   if (utility === 'tools') {
-    return <ToolChoices store={store} onClose={onClose} omit={phone ? PHONE_TOOL_ROW : []} />
+    return (
+      <ToolChoices
+        store={store}
+        onClose={onClose}
+        showSnap={phone}
+        onSnap={phone ? () => toggleArrangeSheet('snap') : undefined}
+      />
+    )
   }
   if (utility === 'snap') {
     return <SnapChoices store={store} onClose={onClose} />
@@ -70,15 +84,55 @@ export function UtilitySheets({
   return null
 }
 
-export function ToolChoices({ store, onClose, omit = [] }: { store: ProjectStore; onClose: () => void; omit?: readonly ArrangeTool[] }) {
+export function ToolChoices({
+  store,
+  onClose,
+  omit = [],
+  showSnap = false,
+  onSnap,
+}: {
+  store: ProjectStore
+  onClose: () => void
+  omit?: readonly ArrangeTool[]
+  /** Phone tools panel keeps the snap grid with the other tools. */
+  showSnap?: boolean
+  onSnap?: () => void
+}) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const listed = toolTrayIds(omit)
-  if (listed.length === 0) return null
+  const snap = showSnap ? snapFace(store) : null
+  if (listed.length === 0 && !snap) return null
   const title = listed.includes('select') ? 'Select' : 'Tools'
-  const current = toolFace(value)
+  const current = listed.includes(value) ? toolFace(value) : null
+  const beforeScroll = listed.filter((id) => id !== 'pan')
+  const scroll = listed.filter((id) => id === 'pan')
   return (
-    <ChoiceTray id="tool-choices" label={title} title={title} value={listed.includes(value) ? current.label : (TOOL_INFO[value]?.label ?? title)} onClose={onClose}>
-      {listed.map((id) => {
+    <ChoiceTray id="tool-choices" label={title} title={title} value={current?.label ?? (TOOL_INFO[value]?.label ?? title)} onClose={onClose}>
+      {beforeScroll.map((id) => {
+        const face = toolFace(id)
+        const key = keyForTool(id)
+        const name = key ? `${face.label} (${key})` : face.label
+        return (
+          <ChoiceChip
+            key={id}
+            label={face.label}
+            name={`${name}. ${face.hint}`}
+            hint={face.hint}
+            pressed={value === id}
+            onClick={() => { store.setTool(id); onClose() }}
+          />
+        )
+      })}
+      {snap && (
+        <ChoiceChip
+          label={snap.label}
+          name={`${snap.label}. Snap grid.`}
+          hint="Snap grid."
+          pressed={snap.on}
+          onClick={() => { if (onSnap) onSnap(); else onClose() }}
+        />
+      )}
+      {scroll.map((id) => {
         const face = toolFace(id)
         const key = keyForTool(id)
         const name = key ? `${face.label} (${key})` : face.label

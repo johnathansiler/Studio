@@ -13,7 +13,7 @@ import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
 import { loopGridBeats } from '../model/loopEdit'
 import { gridBackground, gridPaint } from '../model/gridLines'
-import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout } from '../model/snapGrid'
+import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { editorForGesture, hasStepSequencer } from '../model/editorOpen'
 import { holdMeter } from './levels'
@@ -118,6 +118,77 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
   )
   if (host) return createPortal(buttons, host)
   return <div className="arrange-setup">{buttons}</div>
+}
+
+function TrackTitle({
+  name,
+  onSelect,
+  onRename,
+}: {
+  name: string
+  onSelect: () => void
+  onRename: (next: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const skipSave = useRef(false)
+  useEffect(() => {
+    if (!editing) setDraft(name)
+  }, [editing, name])
+  if (editing) {
+    return (
+      <input
+        className="track-title"
+        aria-label={`Rename ${name}`}
+        value={draft}
+        autoFocus
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (skipSave.current) {
+            skipSave.current = false
+            setEditing(false)
+            setDraft(name)
+            return
+          }
+          onRename(draft.trim() || name)
+          setEditing(false)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            event.currentTarget.blur()
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            skipSave.current = true
+            setDraft(name)
+            event.currentTarget.blur()
+          }
+        }}
+      />
+    )
+  }
+  return (
+    <button
+      type="button"
+      className="track-title"
+      title={name}
+      aria-label={`${name}. Double tap to rename.`}
+      onClick={(event) => {
+        event.stopPropagation()
+        onSelect()
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation()
+        setDraft(name)
+        setEditing(true)
+      }}
+    >
+      {name}
+    </button>
+  )
 }
 
 export function ArrangeView({
@@ -230,6 +301,57 @@ export function ArrangeView({
     return () => observer.disconnect()
   }, [phone, project.tracks.length])
   const innerRef = useRef<HTMLDivElement>(null)
+  const coastRef = useRef(0)
+  function onTouchpadDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 && event.pointerType !== 'touch') return
+    const body = scroller.current
+    const heads = headsRef.current
+    if (!body) return
+    event.preventDefault()
+    event.stopPropagation()
+    cancelAnimationFrame(coastRef.current)
+    const pointerId = event.pointerId
+    let x = event.clientX
+    let y = event.clientY
+    let stamp = performance.now()
+    let vx = 0
+    let vy = 0
+    const apply = (left: number, top: number) => {
+      body.scrollLeft = left
+      body.scrollTop = top
+      if (heads && heads.scrollTop !== body.scrollTop) heads.scrollTop = body.scrollTop
+    }
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return
+      const now = performance.now()
+      const dx = ev.clientX - x
+      const dy = ev.clientY - y
+      const dt = Math.max(8, now - stamp)
+      vx = dx / dt
+      vy = dy / dt
+      x = ev.clientX
+      y = ev.clientY
+      stamp = now
+      apply(body.scrollLeft - dx, body.scrollTop - dy)
+    }
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      const step = () => {
+        vx *= 0.9
+        vy *= 0.9
+        if (Math.hypot(vx, vy) < 0.02) return
+        apply(body.scrollLeft - vx * 16, body.scrollTop - vy * 16)
+        coastRef.current = requestAnimationFrame(step)
+      }
+      coastRef.current = requestAnimationFrame(step)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
   useEffect(() => subscribeTools(() => setToolState(activeTool())), [])
   useEffect(() => engine.subscribe(() => setPosition(engine.positionSamples)), [engine])
   useEffect(() => {
@@ -952,7 +1074,13 @@ export function ArrangeView({
           body.scrollTop += event.deltaY
         }}
       >
-        <div className="ruler-gap loop-gap">
+        <div
+          className={`ruler-gap loop-gap${phone ? ' arrange-touchpad' : ''}`}
+          data-arrange-touchpad={phone ? '' : undefined}
+          role={phone ? 'application' : undefined}
+          aria-label={phone ? 'Arrange touchpad. Drag to scroll the timeline.' : undefined}
+          onPointerDown={phone ? onTouchpadDown : undefined}
+        >
           <SongMapHead store={store} position={position} compact />
         </div>
         {project.tracks.map((track) => (
@@ -972,6 +1100,17 @@ export function ArrangeView({
                   />
                 </span>
                 <TrackPresence trackId={track.id} />
+              </div>
+              <div className="track-title-slot">
+                <TrackTitle
+                  name={track.name}
+                  onSelect={() => {
+                    if (phone) { setPhoneFocus('track'); store.selectClip(track.id, null, false, false) }
+                    store.selectTrack(track.id)
+                    revealTrack(track.id, 'select-track')
+                  }}
+                  onRename={(next) => store.updateTrack(track.id, { name: next })}
+                />
               </div>
               <div className="track-controls" data-track-controls="">
               <MixFlags store={store} trackId={track.id} compact />
@@ -1048,7 +1187,7 @@ export function ArrangeView({
                 const seek = (clientX: number) => {
                   const rect = node.getBoundingClientRect()
                   const sample = Math.max(0, ((clientX - rect.left) / pxRef.current) * project.sampleRate)
-                  onSeek(snapSampleToMap(sample, project))
+                  onSeek(snapSampleToMap(sample, project, subdivisionFor(project)))
                 }
                 seek(event.clientX)
                 const pointerId = event.pointerId
