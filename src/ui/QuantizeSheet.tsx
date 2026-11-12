@@ -37,8 +37,10 @@ export function QuantizeSheet({ store }: { store: ProjectStore }) {
           <option value="track">Track</option>
           <option value="pattern">Pat</option>
         </select>
+      </div>
+      <div className="eq-grid" style={{ ['--eq-cols' as string]: '2' }}>
         <button type="button" onClick={() => store.commitQuantize()}>Apply</button>
-        <button type="button" className="overlay-close" onClick={() => store.closeQuantize()}>Close</button>
+        <button type="button" onClick={() => store.closeQuantize()}>Close</button>
       </div>
       <details>
         <summary>More</summary>
@@ -73,7 +75,7 @@ export function QuantizeSheet({ store }: { store: ProjectStore }) {
           <input aria-label="Window" type="number" min={0} max={100} value={settings.window} onChange={(event) => store.setQuantizeDraft({ window: Number(event.target.value) })} />
           <input aria-label="Threshold" type="number" min={0} max={1} step={0.01} value={settings.threshold} onChange={(event) => store.setQuantizeDraft({ threshold: Number(event.target.value) })} />
         </div>
-        <div className="row">
+        <div className="eq-grid" style={{ ['--eq-cols' as string]: '7' }}>
           <button type="button" className={settings.starts ? 'on' : ''} onClick={() => store.setQuantizeDraft({ starts: !settings.starts })}>Start</button>
           <button type="button" className={settings.ends ? 'on' : ''} onClick={() => store.setQuantizeDraft({ ends: !settings.ends, keepLength: false })}>End</button>
           <button type="button" className={settings.keepLength ? 'on' : ''} onClick={() => store.setQuantizeDraft({ keepLength: !settings.keepLength })}>Len</button>

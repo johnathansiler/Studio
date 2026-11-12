@@ -241,7 +241,7 @@ export function UnstuckSheet({
             </div>
             <SheetClose className="guide-x" onClick={onClose} />
           </header>
-          <div className="unstuck-pages" role="tablist" aria-label="Ideas pages">
+          <div className="unstuck-pages eq-grid" style={{ ['--eq-cols' as string]: '3' }} role="tablist" aria-label="Ideas pages">
             <button type="button" role="tab" id="ideas-tab-write" aria-selected={page === 'write'} aria-controls="ideas-panel" className={page === 'write' ? 'on' : ''} onClick={() => choose('write')}>Write</button>
             <button type="button" role="tab" id="ideas-tab-progressions" aria-selected={page === 'progressions'} aria-controls="ideas-panel" className={page === 'progressions' ? 'on' : ''} onClick={() => choose('progressions')}>Progressions</button>
             <button type="button" role="tab" id="ideas-tab-players" aria-selected={page === 'players'} aria-controls="ideas-panel" className={page === 'players' ? 'on' : ''} onClick={() => choose('players')}>Players</button>

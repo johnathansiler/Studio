@@ -20,6 +20,7 @@ import { selectLiveCapture, selectMidiMaps, selectMidiOut, selectTrackFx } from 
 import type { ProjectStore } from '../state/store'
 import type { MidiFx, MidiFxKind, Track } from '../model/types'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
+import { eqCols } from './equalGrid'
 import './midiTools.css'
 
 const KINDS: MidiFxKind[] = ['arp', 'chord', 'scale']
@@ -68,13 +69,15 @@ export function MidiTools({ store, engine, phone = false }: { store: ProjectStor
   const tools = (
     <>
       {hide && <p className="midi-note">This browser has no hardware MIDI ports. Scale, arp, and chord still run on the track.</p>}
-      <div className="midi-tabs" role="tablist">
-        <Tab id="learn" label="Learn" hint="Map a knob or key to a control" section={section} setSection={setSection} store={store} />
-        <Tab id="fx" label="FX" hint="Effects before the instrument" section={section} setSection={setSection} store={store} />
-        <Tab id="out" label="Out" hint="Send notes to external gear" section={section} setSection={setSection} store={store} />
-        <Tab id="capture" label="Capture" hint="Keep what you just played" section={section} setSection={setSection} store={store} />
-        <Tab id="inputs" label="Inputs" hint="Record several inputs at once" section={section} setSection={setSection} store={store} />
-        {!phone && <button type="button" title="Hide MIDI tools" onPointerDown={hint(store, 'Hide MIDI tools')} onClick={() => store.setMidiToolsOpen(false)}>Close</button>}
+      <div className="midi-tabbar">
+        <div className="midi-tabs eq-grid" style={eqCols(5)} role="tablist">
+          <Tab id="learn" label="Learn" hint="Map a knob or key to a control" section={section} setSection={setSection} store={store} />
+          <Tab id="fx" label="FX" hint="Effects before the instrument" section={section} setSection={setSection} store={store} />
+          <Tab id="out" label="Out" hint="Send notes to external gear" section={section} setSection={setSection} store={store} />
+          <Tab id="capture" label="Capture" hint="Keep what you just played" section={section} setSection={setSection} store={store} />
+          <Tab id="inputs" label="Inputs" hint="Record several inputs at once" section={section} setSection={setSection} store={store} />
+        </div>
+        {!phone && <button type="button" className="midi-close" title="Hide MIDI tools" onPointerDown={hint(store, 'Hide MIDI tools')} onClick={() => store.setMidiToolsOpen(false)}>Close</button>}
       </div>
       {section === 'learn' && <LearnRow store={store} />}
       {section === 'fx' && <FxRow store={store} track={track} fx={fx} />}
@@ -171,8 +174,9 @@ function FxRow({ store, track, fx }: { store: ProjectStore; track: Track | null;
     : track?.midiClips[0]?.id
   return (
     <>
-      <div className="midi-row">
-        <span className="midi-note">{track ? track.name : 'No instrument track'}</span>
+      {!track && <span className="midi-note">No instrument track</span>}
+      <div className="midi-row eq-grid" style={eqCols(track ? 5 : 4)}>
+        {track && <span className="eq-label">{track.name}</span>}
         {KINDS.map((kind) => (
           <button key={kind} type="button" title={FX_HINT[kind]} disabled={!track} onPointerDown={hint(store, FX_HINT[kind])} onClick={() => track && store.addMidiFx(track.id, kind)}>
             {FX_LABEL[kind]}

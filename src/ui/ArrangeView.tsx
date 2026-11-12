@@ -206,6 +206,8 @@ export function ArrangeView({
   onOpenBeatMachine,
   onTrackAdded,
   onQuickPunch,
+  onReset,
+  onMidi,
   onAnalyze,
   libraryTab,
   onLibraryClose,
@@ -227,6 +229,8 @@ export function ArrangeView({
   onOpenBeatMachine?: (trackId: string) => void
   onTrackAdded?: (id: string, choice: TrackChoice) => void
   onQuickPunch: () => void
+  onReset?: () => void
+  onMidi?: () => void
   onAnalyze: (trackId: string) => void
   /** Menu asks the Arrange browser to open on this tab. */
   libraryTab?: BrowserTab | null
@@ -1543,6 +1547,9 @@ export function ArrangeView({
         setupButton={setupButton}
         onClose={closeSheets}
         onQuickPunch={onQuickPunch}
+        onReset={onReset}
+        onMidi={onMidi}
+        roomRole={session.state.role}
       />
       {sheetTrack && (
         <ArrangeBottomSheet

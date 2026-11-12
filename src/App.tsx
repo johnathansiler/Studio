@@ -2262,6 +2262,8 @@ async function importDropped(files: FileList) {
                   onOpenBeatMachine={openBeatMachine}
                   onTrackAdded={onTrackAdded}
                   onQuickPunch={() => void quickPunch()}
+                  onReset={() => { engine.unlock(); void resetRoom() }}
+                  onMidi={() => { setMenuOpen(false); store.setMidiToolsOpen(true) }}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
                   libraryTab={soundsOpen ? 'library' : null}
                   browserDock={soundsOpen}

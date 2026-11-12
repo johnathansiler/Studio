@@ -15,6 +15,12 @@
   height: auto;
 }
 
+.midi-tabbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
 .midi-tabs,
 .midi-row,
 .midi-maps,
@@ -23,7 +29,15 @@
   gap: 6px;
   align-items: center;
   min-width: 0;
+}
+.midi-maps,
+.midi-fx {
   overflow-x: auto;
+}
+.midi-close {
+  align-self: flex-end;
+  min-height: 40px;
+  min-width: 40px;
 }
 
 .midi-tools button,

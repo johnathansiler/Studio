@@ -229,7 +229,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
                   {plugin.pluginId === 'compressor' && (
                     <button type="button" className="text-btn" title="Ducking preset: heavy compression for a sidechain key." onClick={() => store.applyPluginPreset(focus.trackId, plugin.id, 'Duck')}>Duck</button>
                   )}
-                  <div className="row slot-actions">
+                  <div className="row slot-actions eq-grid" style={{ ['--eq-cols' as string]: '4' }}>
                     <button className="text-btn" title="Move this plugin earlier." aria-label="Move this plugin earlier." onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>Earlier</button>
                     <button className="text-btn" title="Move this plugin later." aria-label="Move this plugin later." onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>Later</button>
                     <button className="text-btn" title="Remove this plugin." aria-label="Remove this plugin." onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>

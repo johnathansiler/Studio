@@ -62,9 +62,11 @@ describe('track view layout', () => {
         expect(words(main)).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
       }
       const extras = html.slice(html.indexOf('transport-extras'))
-      expect(extras).toContain('>Punch<')
+      expect(extras).toContain('>Delete<')
       expect(extras).toContain('>Tempo<')
-      expect(extras).toContain('>Reset<')
+      expect(extras).toContain('>Duplicate<')
+      expect(extras).not.toContain('>Punch<')
+      expect(extras).not.toContain('>Reset<')
     }
   })
 

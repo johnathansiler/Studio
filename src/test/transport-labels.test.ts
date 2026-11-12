@@ -168,7 +168,7 @@ describe('transport words', () => {
           expect(order.icons, viewport.name).toEqual(['start', 'rewind', 'forward', 'play', 'record'])
           expect(order.words.filter((word) => ['Start', 'Rewind', 'Forward', 'Play', 'Record'].includes(word)), viewport.name).toEqual([])
         } else {
-          expect(order.words.filter((word) => word !== 'Tempo' && word !== 'Click' && word !== '1-2' && word !== 'Reset' && word !== 'Punch'), viewport.name).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
+          expect(order.words.filter((word) => word !== 'Tempo' && word !== 'Click' && word !== '1-2' && word !== 'Reset' && word !== 'Punch' && word !== 'Delete' && word !== 'Duplicate'), viewport.name).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
         }
         expect(order.rowCount, viewport.name).toBe(6)
         if (viewport.name === 'phone') {

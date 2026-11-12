@@ -373,7 +373,7 @@ function MixToolbar({
               <SheetClose onClick={close} />
             </header>
             <WidthBar axis="strip" value={strip} onChange={onStrip} onReset={onResetStrip} />
-            <div className="mix-chips" role="tablist" aria-label="Channel sections">
+            <div className="mix-chips eq-grid" style={{ ['--eq-cols' as string]: String(sections.length) }} role="tablist" aria-label="Channel sections">
               {sections.map((item) => (
                 <button
                   key={item.id}
@@ -426,7 +426,7 @@ function ChannelSection({
         <span className="mix-label">Automation</span>
         <ChannelAutomation store={store} trackId={track.id} />
       </div>
-      <div className="mix-pills">
+      <div className="mix-pills eq-grid" style={{ ['--eq-cols' as string]: String(track.type === 'audio' && onTune ? 4 : 3) }}>
         <PhaseButton store={store} trackId={track.id} name={track.name} />
         <MixFlags store={store} trackId={track.id} part="arm" />
         <MixFlags store={store} trackId={track.id} part="safe" />

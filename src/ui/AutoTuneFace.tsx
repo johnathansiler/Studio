@@ -270,17 +270,11 @@ export function AutoTuneFace({
         <ChoiceCard label="Reference" hint="Concert A, in Hz." value={String(Math.round(values.a4 ?? 440))} options={Array.from({ length: 21 }, (_, index) => ({ value: String(430 + index), label: `${430 + index} Hz` }))} onChange={(id) => set('a4', Number(id))} />
       </div>
 
-      <div className="tune-tools" role="group" aria-label="Note edit tool">
+      <div className="tune-tools eq-grid" style={{ ['--eq-cols' as string]: '4' }} role="group" aria-label="Note edit tool">
         <button type="button" className={tool === 'remove' ? 'on' : ''} aria-pressed={tool === 'remove'} title="Drop a scale note. Sung pitches move to a neighbor." aria-label="Remove. Drop a scale note." onClick={() => setTool('remove')}>Remove</button>
         <button type="button" className={tool === 'bypass' ? 'on' : ''} aria-pressed={tool === 'bypass'} title="Let that note through without correction." aria-label="Bypass note. Let that note through." onClick={() => setTool('bypass')}>Bypass</button>
         <button type="button" className={latch ? 'on' : ''} aria-pressed={latch} title="A tap sticks until you tap again." aria-label="Latch. A tap sticks." onClick={() => setLatch(true)}>Latch</button>
         <button type="button" className={latch ? '' : 'on'} aria-pressed={!latch} title="The edit lasts while your finger is down." aria-label="Momentary. The edit lasts while held." onClick={() => setLatch(false)}>Moment</button>
-        <button type="button" className="side" title="Set the key from the note you are singing." aria-label="Listen. Set the key from the sung note." onClick={() => {
-          const pc = heardPitchClass(shownTrace, a4)
-          if (pc != null) set('root', pc)
-        }}>Listen</button>
-        <button type="button" className={`side ${(values.hq ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.hq ?? 0) >= 0.5} title={(values.hq ?? 0) >= 0.5 ? 'HQ correction, with more delay.' : 'Low latency while you play.'} aria-label={(values.hq ?? 0) >= 0.5 ? 'HQ. Cleaner correction, more delay.' : 'Low latency. Short delay while you play.'} onClick={() => set('hq', (values.hq ?? 0) >= 0.5 ? 0 : 1)}>{(values.hq ?? 0) >= 0.5 ? 'HQ' : 'Low latency'}</button>
-        <button type="button" className={`side ${(values.color ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.color ?? 0) >= 0.5} title={(values.color ?? 0) >= 0.5 ? 'Classic is a harder snap. Tracking and note transition shape it.' : 'Modern keeps the flex window.'} aria-label={(values.color ?? 0) >= 0.5 ? 'Classic. Harder snap.' : 'Modern. Softer snap.'} onClick={() => set('color', (values.color ?? 0) >= 0.5 ? 0 : 1)}>{(values.color ?? 0) >= 0.5 ? 'Classic' : 'Modern'}</button>
         <button type="button" title="Set the key from the notes you just sang." aria-label="Auto Key. Set the key from the notes you just sang." onClick={() => {
           const found = detectKey(shownTrace, a4)
           if (!found) {
@@ -292,6 +286,12 @@ export function AutoTuneFace({
         }}>Auto Key</button>
         <button type="button" className={(values.autoKey ?? 0) >= 0.5 ? 'on' : ''} aria-pressed={(values.autoKey ?? 0) >= 0.5} title="Keep following the key you sing." aria-label="Follow key. Keep following the key you sing." onClick={() => set('autoKey', (values.autoKey ?? 0) >= 0.5 ? 0 : 1)}>Follow key</button>
         <button type="button" className={(values.midi ?? 0) >= 0.5 ? 'on' : ''} aria-pressed={(values.midi ?? 0) >= 0.5} title="Correct to the MIDI note you play. Open audio passes through." aria-label="MIDI control. Correct to the note you play." onClick={() => set('midi', (values.midi ?? 0) >= 0.5 ? 0 : 1)}>MIDI control</button>
+        <button type="button" className="side" title="Set the key from the note you are singing." aria-label="Listen. Set the key from the sung note." onClick={() => {
+          const pc = heardPitchClass(shownTrace, a4)
+          if (pc != null) set('root', pc)
+        }}>Listen</button>
+        <button type="button" className={`side ${(values.hq ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.hq ?? 0) >= 0.5} title={(values.hq ?? 0) >= 0.5 ? 'HQ correction, with more delay.' : 'Low latency while you play.'} aria-label={(values.hq ?? 0) >= 0.5 ? 'HQ. Cleaner correction, more delay.' : 'Low latency. Short delay while you play.'} onClick={() => set('hq', (values.hq ?? 0) >= 0.5 ? 0 : 1)}>{(values.hq ?? 0) >= 0.5 ? 'HQ' : 'Low latency'}</button>
+        <button type="button" className={`side ${(values.color ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.color ?? 0) >= 0.5} title={(values.color ?? 0) >= 0.5 ? 'Classic is a harder snap. Tracking and note transition shape it.' : 'Modern keeps the flex window.'} aria-label={(values.color ?? 0) >= 0.5 ? 'Classic. Harder snap.' : 'Modern. Softer snap.'} onClick={() => set('color', (values.color ?? 0) >= 0.5 ? 0 : 1)}>{(values.color ?? 0) >= 0.5 ? 'Classic' : 'Modern'}</button>
       </div>
 
       <div className="tune-notes" role="group" aria-label="Scale notes">
@@ -659,6 +659,7 @@ function RegionEditor({
   const selected = slot == null ? null : regions[slot]
   return (
     <div className="tune-regions" role="group" aria-label="Correction regions">
+      <div className="eq-grid" style={{ ['--eq-cols' as string]: '4' }}>
       {regions.map((region, index) => (
         <button
           key={index}
@@ -673,6 +674,7 @@ function RegionEditor({
           {regionActive(region) ? `${midiName(region.lo)} ${Math.round(region.ct)} ct` : `Region ${index + 1}`}
         </button>
       ))}
+      </div>
       {selected && slot != null ? (
         <div className="tune-region-edit">
           <Knob label="Correction" hint="How hard this region is tuned." value={selected.amt} fallback={1} min={0} max={1} text={pct(selected.amt)} color="#73c48f" onChange={(value) => onPatch({ [`r${slot}amt`]: value })} />

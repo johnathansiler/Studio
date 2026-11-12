@@ -11,11 +11,11 @@ import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AssetStatus } from '../remote/assets'
 import type { SessionClient } from '../remote/session'
-import { RecordBar } from './RecordBar'
 import { AutomationFollow } from './AutomationLane'
 import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
 import { ButtonTray } from './ButtonTray'
+import { DeleteTrackConfirm, applyTrackDelete, arrangeEditTarget, eqCols } from './equalGrid'
 import { TipButton } from './Hint'
 import { armFinePress, markIntegerLand } from './integerTick'
 import './loopRegion.css'
@@ -37,11 +37,28 @@ export function IdeasBulbIcon() {
   )
 }
 
-function ResetIcon() {
+export function ResetIcon() {
   return (
     <svg className="t-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
       <path d="M4.2 9a4.8 4.8 0 1 0 1.4-3.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M4 3.1v3.4h3.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function DeleteIcon() {
+  return (
+    <svg className="t-ico" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.2 4.2h9.6M6.2 4.1V3h3.6v1.1M4.4 4.2l.6 8.2h5.9l.6-8.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function DuplicateIcon() {
+  return (
+    <svg className="t-ico" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="5.2" y="5.2" width="7.2" height="7.2" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M10.6 5.2V3.6A1.4 1.4 0 0 0 9.2 2.2H3.6A1.4 1.4 0 0 0 2.2 3.6v5.6A1.4 1.4 0 0 0 3.6 10.6H5.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   )
 }
@@ -395,9 +412,11 @@ export function TransportBar({
   const running = status === 'playing' || status === 'recording' || status === 'counting-in'
   void simple
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
-  const guestRoom = roomRole === 'guest'
-  const resetCopy = transport('reset')
   const inSession = roomRole === 'host' || roomRole === 'guest'
+  void onReset
+  void onQuickPunch
+  void onMidi
+  void session
   function armExactTempo(result: { bpm: number | null; ignored: boolean } | null) {
     window.clearTimeout(editTimer.current)
     if (!shouldOpenExactTempo(result) || store.remoteFollow) return
@@ -494,17 +513,44 @@ export function TransportBar({
           <span className="t-word">1-2</span>
         </TipButton>
   )
-  const resetButton = (
+  const editTarget = arrangeEditTarget(store)
+  const [trackDelete, setTrackDelete] = useState<{ id: string; name: string } | null>(null)
+  const editDisabled = editTarget.kind === 'none' || store.remoteFollow
+  function runDelete() {
+    if (editTarget.kind === 'clip') {
+      store.deleteArrangeClips()
+      return
+    }
+    if (editTarget.kind === 'track') setTrackDelete({ id: editTarget.id, name: editTarget.name })
+  }
+  function runDuplicate() {
+    if (editTarget.kind === 'clip') store.duplicateArrangeClips()
+    else if (editTarget.kind === 'track') store.duplicateTrack(editTarget.id)
+  }
+  const deleteButton = (
         <TipButton
-          id="transport-reset"
-          className="t-btn reset"
-          label={guestRoom ? 'Host only' : resetCopy.label}
-          hint={guestRoom ? 'Host only' : resetCopy.hint}
-          disabled={guestRoom}
-          onClick={() => onReset?.()}
+          id="transport-delete"
+          className="t-btn delete"
+          label="Delete"
+          hint={editTarget.kind === 'clip' ? 'Remove the selected clip.' : editTarget.kind === 'track' ? `Delete track "${editTarget.name}".` : 'Select a clip or a track.'}
+          disabled={editDisabled}
+          onClick={runDelete}
         >
-          <ResetIcon />
-          <span className="t-word">Reset</span>
+          <DeleteIcon />
+          <span className="t-word">Delete</span>
+        </TipButton>
+  )
+  const duplicateButton = (
+        <TipButton
+          id="transport-duplicate"
+          className="t-btn duplicate"
+          label="Duplicate"
+          hint={editTarget.kind === 'clip' ? 'Copy the selected clip and place it just after.' : editTarget.kind === 'track' ? 'Copy this track onto the lane below.' : 'Select a clip or a track.'}
+          disabled={editDisabled}
+          onClick={runDuplicate}
+        >
+          <DuplicateIcon />
+          <span className="t-word">Duplicate</span>
         </TipButton>
   )
   const [extrasHost, setExtrasHost] = useState<HTMLElement | null>(null)
@@ -523,19 +569,12 @@ export function TransportBar({
     onSeek(shiftBars(project, at, bars))
   }
   const extras = (
-    <div className="transport-extras" role="group" aria-label="Punch, tempo, and reset">
-      <RecordBar
-        dock
-        store={store}
-        engine={engine}
-        session={session ?? ({ state: { participants: [], selfId: 'local' } } as unknown as SessionClient)}
-        onQuickPunch={onQuickPunch ?? (() => undefined)}
-        onMidi={onMidi}
-      />
+    <div className="transport-extras eq-grid" style={eqCols(phone ? 3 : 5)} role="group" aria-label="Delete, tempo, and duplicate">
+      {deleteButton}
       <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
       {phone ? null : clickButton}
       {phone ? null : countButton}
-      {resetButton}
+      {duplicateButton}
     </div>
   )
   return (
@@ -578,6 +617,16 @@ export function TransportBar({
         </button>
       </ButtonTray>
       {extrasHost ? createPortal(extras, extrasHost) : extras}
+      {trackDelete ? createPortal(
+        <DeleteTrackConfirm
+          name={trackDelete.name}
+          onChoose={(choice) => {
+            applyTrackDelete(store, trackDelete.id, choice)
+            setTrackDelete(null)
+          }}
+        />,
+        document.body,
+      ) : null}
       {takeProgress != null && (
         <div
           className="hq-take"

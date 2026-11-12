@@ -23,6 +23,7 @@ import './pluginPages.css'
 import { ChoiceCard } from './ChoiceCard'
 import { PresetControls } from './PresetControls'
 import { useScreenOverlay } from './screenOverlay'
+import { eqCols } from './equalGrid'
 import { PluginTransport } from './pluginTransport'
 import { LibraryPanel } from './LibraryPanel'
 import './scaler.css'
@@ -444,9 +445,11 @@ const scaleList = allScales()
         ))}
       </div>
       <div className="scaler-tools" role="group" aria-label="Output" data-output="" hidden={view !== 'pads' || tight}>
-        <button type="button" className="btn-secondary" title="Send the selected chord to this track at the playhead." onClick={() => playChord(pad, true)}>To track</button>
-        {!portrait && <div className="scaler-pills">{outputPills()}</div>}
-        <button type="button" className={`btn-quiet ${view === 'options' ? 'on' : ''}`} aria-expanded={view === 'options'} aria-controls="scaler-options" title="Chords, songs, performances, and the rest of Scaler." onClick={() => { setView('options'); setOptions(true) }}>Options</button>
+        <div className="eq-grid" style={eqCols(2)}>
+          <button type="button" className="btn-secondary" title="Send the selected chord to this track at the playhead." onClick={() => playChord(pad, true)}>To track</button>
+          <button type="button" className={`btn-quiet ${view === 'options' ? 'on' : ''}`} aria-expanded={view === 'options'} aria-controls="scaler-options" title="Chords, songs, performances, and the rest of Scaler." onClick={() => { setView('options'); setOptions(true) }}>Options</button>
+        </div>
+        {!portrait && <div className="scaler-pills eq-grid" style={eqCols(4)}>{outputPills()}</div>}
       </div>
       <div className="scaler-stage" data-plugin-page={view === 'chords' ? 'chords' : 'pads'} hidden={!((view === 'pads' && !tight) || view === 'chords')}>
         {roomy && view === 'chords' && <section className="scaler-section" aria-label="Chord Set">
@@ -982,7 +985,7 @@ const scaleList = allScales()
         </details>
       </div>
       <div className="scaler-padgrid" role="group" aria-label="Chord pads" data-pad-grid="" data-plugin-page="pads" hidden={view !== 'pads'}>
-        <div className="scaler-pad-source" role="group" aria-label="Pad source" hidden={tight}>
+        <div className="scaler-pad-source eq-grid" style={eqCols(5)} role="group" aria-label="Pad source" hidden={tight}>
           <button type="button" className={`btn-quiet${browser ? ' on' : ''}`} aria-expanded={browser} title="Open genres, styles, and moods." onClick={() => setBrowser((value) => !value)}>Browse</button>
           {(['set', 'scale', 'main'] as const).map((id) => (
             <button key={id} type="button" className={padSource === id ? 'on' : ''} aria-pressed={padSource === id} onClick={() => setPadSource(id)}>{id === 'set' ? 'Chord Set' : id === 'scale' ? 'Scale' : 'Main Track'}</button>
