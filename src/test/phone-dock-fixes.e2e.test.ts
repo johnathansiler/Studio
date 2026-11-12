@@ -188,7 +188,7 @@ describe('phone dock fixes', () => {
 
         await page.getByRole('button', { name: /^Menu/ }).click()
         await page.locator('#shell-menu').waitFor()
-        await page.locator('[data-phone-action="open"]').click()
+        await page.locator('#shell-menu [data-menu-action="open"]').click()
         const projects = page.locator('#project-sheet')
         await projects.waitFor()
         expect(await projects.getByRole('button', { name: 'Close', exact: true }).innerText()).not.toMatch(/Close/)
@@ -201,7 +201,7 @@ describe('phone dock fixes', () => {
         await projects.getByRole('button', { name: 'Close', exact: true }).click()
 
         await page.getByRole('button', { name: /^Menu/ }).click()
-        await page.locator('[data-phone-action="export"]').click()
+        await page.locator('#shell-menu [data-menu-action="export"]').click()
         const exported = page.locator('#export-sheet')
         await exported.waitFor()
         expect(await exported.getByRole('button', { name: 'Close', exact: true }).innerText()).not.toMatch(/Close/)
@@ -241,7 +241,7 @@ describe('phone dock fixes', () => {
       if (await foldPage.locator('[data-playlist-browser="open"]').count() === 0) {
         await foldPage.locator('.arrange-panels').getByRole('button', { name: /^Browser/ }).click()
       }
-      await foldPage.locator('.playlist-browser').getByRole('button', { name: 'Project', exact: true }).waitFor()
+      await foldPage.locator('.playlist-browser').getByRole('button', { name: 'My Library', exact: true }).waitFor()
       expect(await foldPage.locator('[data-browser-title]').count()).toBe(0)
       expect(await foldPage.locator('.tool-slot [data-phone-action="more"]').count()).toBe(0)
       await foldPage.screenshot({ path: '/opt/cursor/artifacts/phone-fix-fold-arrange.png' })

@@ -136,7 +136,8 @@ describe('beat machine arrange header', () => {
           }
           if (viewport.name === 'phone') {
             expect(closed.column, 'phone column').toBeLessThanOrEqual(190)
-            expect(closed.lane, 'phone lane').toBeGreaterThanOrEqual(200)
+            // The 40px overview gutter sits beside the scroller, so the waveform is the rest of a 390px row.
+            expect(closed.lane, 'phone lane').toBeGreaterThanOrEqual(160)
             await page.locator('[data-track-name="Beat Machine 1"] .track-meter-row').click()
             await page.locator('[data-pads="plugin"]').waitFor()
             await page.getByRole('button', { name: /Close Beat Machine/ }).click()

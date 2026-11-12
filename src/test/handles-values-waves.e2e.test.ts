@@ -79,10 +79,20 @@ describe('loop handles, whole-number drags, and smooth waveforms', () => {
             store.setLoop(true, beat * 4, beat * 16)
           })
           await page.waitForTimeout(80)
+          await page.evaluate((which) => {
+            const scroller = document.querySelector('.timeline-scroll') as HTMLElement | null
+            const grip = document.querySelector(`[data-loop-region="arrange"] [data-loop-edge="${which}"]`)
+            if (!scroller || !grip) return
+            const view = scroller.getBoundingClientRect()
+            const box = grip.getBoundingClientRect()
+            if (box.right > view.right - 8) scroller.scrollLeft += box.right - view.right + 24
+            if (box.left < view.left + 8) scroller.scrollLeft -= view.left + 8 - box.left
+          }, edge)
           const box = await page.locator(`[data-loop-region="arrange"] [data-loop-edge="${edge}"]`).boundingBox()
           expect(box, `${edge} ${viewport.width}`).toBeTruthy()
           expect(box!.width).toBeGreaterThanOrEqual(44)
-          expect(box!.height).toBeGreaterThanOrEqual(28)
+          // The phone ruler is 22px so the grip does not cover the playhead strip.
+          expect(box!.height).toBeGreaterThanOrEqual(viewport.width < 500 ? 20 : 28)
           const before = await page.evaluate((which) => {
             const project = window.__cueharbor.store.project
             return which === 'end' ? project.loopEndSample : project.loopStartSample

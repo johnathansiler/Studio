@@ -265,7 +265,7 @@
 .arrange-setup-body .map-head { height: auto; overflow: visible; }
 .arrange-setup-body .rec-bar { flex-wrap: wrap; }
 
-.shell.phone .arrange { --map-h: 0px; --ruler-h: 40px; --playhead-strip: 24px; }
+.shell.phone .arrange { --map-h: 0px; --ruler-h: 22px; --playhead-strip: 42px; }
 .heads-col,
 .timeline-col {
   min-width: 0;
@@ -299,8 +299,9 @@
 }
 .shell.phone .arrange .ruler .loop-host button.loop-grip,
 .shell.phone .arrange .ruler .loop-host .park-dock .loop-grip {
-  min-width: 44px;
-  min-height: 40px;
+  height: var(--ruler-h, 22px) !important;
+  min-height: 0 !important;
+  max-height: var(--ruler-h, 22px) !important;
 }
 .shell.phone .arrange .timeline-scroll .ruler > span {
   top: 1px;

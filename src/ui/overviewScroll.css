@@ -38,15 +38,6 @@
   height: 100%;
   min-height: 0;
   max-height: 100%;
-  /* The 40px vertical hit sits on the timeline instead of stealing its width. */
-  grid-template-columns: minmax(0, 1fr) 0px;
-  overflow: visible;
-}
-.shell.phone:not(.land) .overview-scroll[data-axis="y"] {
-  width: 40px;
-  min-width: 40px;
-  margin-left: -40px;
-  z-index: 4;
 }
 
 .shell.phone:not(.land) .arrange .timeline-stage > .timeline-scroll {
@@ -103,8 +94,8 @@
 .shell.phone.land .arrange[data-phone-arrange] .timeline-scroll .lane,
 .shell.phone:not(.land) .arrange[data-phone-arrange] .head,
 .shell.phone:not(.land) .arrange[data-phone-arrange] .lane {
-  height: max(40px, calc(var(--lane-h, 72px) * var(--lane-zoom, 1)));
-  min-height: max(40px, calc(var(--lane-h, 72px) * var(--lane-zoom, 1)));
+  height: calc(var(--lane-h, 72px) * var(--lane-zoom, 1));
+  min-height: calc(var(--lane-h, 72px) * var(--lane-zoom, 1));
 }
 
 .overview-scroll {
@@ -498,10 +489,13 @@
   padding-bottom: 12px;
 }
 
-/* Fully zoomed-out lanes are 40px. Hide the renamed title so the 40px menu fills the lane. */
+/* Fully zoomed-out lanes keep the 40px menu inside the row. The title stays in the DOM and out of the hit path. */
+.shell .arrange[data-lane-scale="min"] .track-title-slot,
+.shell.phone:not(.land) .arrange[data-lane-scale="min"] .track-title-slot,
 .arrange[data-lane-scale="min"] .track-title-slot,
+.shell .arrange[data-lane-scale="min"] .track-meter-row,
 .arrange[data-lane-scale="min"] .track-meter-row {
-  display: none;
+  display: none !important;
 }
 .arrange[data-lane-scale="min"] .pl-head {
   justify-content: flex-end;

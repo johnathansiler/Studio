@@ -72,7 +72,7 @@
 .shell.fold .arrange,
 .shell:not(.phone) .arrange,
 .shell.phone .arrange[data-phone-arrange] {
-  --lane-h: 76px; /* 6px meter, 2px gap, 24px name, 2px gap, 40px buttons */
+  --lane-h: 72px; /* meter, name, and a 40px control row */
 }
 
 .shell .arrange .head,

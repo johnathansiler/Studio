@@ -51,7 +51,7 @@ async function expectCollabFills(page: Page) {
     }
   })
   expect(box.transport).toBe(0)
-  expect(box.paneTop).toBeLessThanOrEqual(box.headerBottom + 2)
+  expect(box.paneTop, `pane ${box.paneTop} header ${box.headerBottom} shell ${box.shellBottom}`).toBeLessThanOrEqual(box.headerBottom + 2)
   expect(box.shellBottom - box.paneBottom).toBeLessThan(8)
   expect(Math.abs(box.shellWidth - box.paneWidth)).toBeLessThan(8)
   expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth + 1)
