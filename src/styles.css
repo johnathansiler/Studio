@@ -1422,6 +1422,7 @@ code { font-family: var(--mono); font-size: 12px; }
   gap: 0;
 }
 .transport .t-btn svg { display: none; }
+.shell.phone .transport .t-btn .t-icon { display: block; width: 18px; height: 18px; flex: none; }
 .t-btn.wide { width: auto; min-width: 64px; padding: 0 12px; }
 .media-banner {
   display: block;

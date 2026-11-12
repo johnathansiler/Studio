@@ -77,7 +77,8 @@ describe('phone fit at 412x915', () => {
         expect(row).toBeTruthy()
         expect(row!.x + row!.width).toBeLessThanOrEqual(412 + 1)
         expect(timeline.names.map((item) => item.value)).toEqual(['Vocal', 'Music', 'Keys'])
-        expect(await page.locator('[data-view-name]').innerText()).toBe('Vocal')
+        expect(await page.locator('[data-viewfinder]').count()).toBe(0)
+        expect(await page.locator('[data-track-name="Vocal"] .track-title').innerText()).toBe('Vocal')
         const buttonsFit = await page.evaluate(() => {
           return [...document.querySelectorAll<HTMLElement>('.pl-head .mini, .pl-head .piano-open')].every((button) => {
             const head = button.closest('.head')!.getBoundingClientRect()

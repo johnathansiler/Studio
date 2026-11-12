@@ -175,7 +175,7 @@ describe('scoped arrange changes', () => {
           await page.getByRole('button', { name: 'Tools', exact: true }).click()
           const again = page.locator('#tool-choices').getByRole('button', { name: /^Scroll/ })
           expect(await again.getAttribute('aria-pressed')).toBe('true')
-          await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
           await page.locator('#tool-choices').waitFor({ state: 'detached' })
         } else if (size.width === 1440) {
           await menu.locator('[data-menu-action="latency"] select').selectOption('playback')
@@ -450,7 +450,7 @@ describe('scoped arrange changes', () => {
       await page.getByRole('button', { name: 'Tools', exact: true }).click()
       await page.locator('#tool-choices').waitFor()
       expect(await page.locator('#arrange-setup').count()).toBe(0)
-      await page.locator('.phone-context [data-phone-action="pencil"]').click()
+      await page.locator('#tool-choices').getByRole('button', { name: /^Draw/ }).click()
       await page.locator('.snap-inline').click()
       await page.locator('#snap-choices').waitFor()
       await page.getByRole('button', { name: '1/8', exact: true }).click()

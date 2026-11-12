@@ -74,10 +74,9 @@ export interface MenuSpec extends Copy {
  * Play, Stop, Record, Loop, Click, Count-in, and Reset stay on the transport.
  * Select, Draw, Split, Trim, Zoom, Box, and Erase stay on the Tools row. Scroll stays in the Tools sheet.
  * Snap stays on the strip. Quantize stays in the piano roll and the beat pad.
- * Time signature stays in Setup. New, Open, Save, and Export stay in the phone dock row.
+ * Time signature stays in Setup. New, Open, Save, and Export live in the menu.
  * While FEATURES.session is off, visibleMenu hides Launch, Timeline, and Capture.
  */
-const PHONE_ROW_MENU = new Set(['new', 'open', 'save', 'export'])
 
 export const MENU_COPY: MenuSpec[] = [
   { id: 'new', action: 'new', group: 'project', place: 'all', label: 'New', hint: 'Start a fresh session. The timeline starts empty.' },
@@ -100,7 +99,6 @@ export function visibleMenu(input: {
 }): MenuSpec[] {
   const place = input.phone ? 'phone' : 'desk'
   return MENU_COPY.filter((item) => {
-    if (input.phone && PHONE_ROW_MENU.has(item.action)) return false
     if (!FEATURES.session && (item.action === 'session-mode' || item.action === 'capture')) return false
     if (item.place !== 'all' && item.place !== place) return false
     if (item.action === 'session-mode') return input.session ? item.id === 'arrangement' : item.id === 'session-view'
