@@ -302,6 +302,11 @@ describe('editors, close, and header meters in the app', () => {
         await page.waitForTimeout(350)
         const keysHead = page.locator('.head[data-track-name="Keys"]')
         await keysHead.locator('button[aria-label="Mute track"]').click()
+        await page.waitForFunction(() => {
+          const bar = document.querySelector('.head[data-track-name="Keys"] .mini-meter i') as HTMLElement | null
+          const match = /scaleX\(([^)]+)\)/.exec(bar?.style.transform || '')
+          return !match || Number(match[1]) < 0.02
+        })
         const muted = await peaksWhile(page, async () => {
           await page.evaluate(() => {
             const hook = (window as unknown as {
