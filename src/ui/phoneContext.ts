@@ -1,4 +1,4 @@
-/** Which small-button row the phone dock shows. Sheets win, then the screen, then the selection. */
+/** Which small-button row the phone dock shows. Sheets open above the dock and never replace it. */
 
 export type PhoneSheet = 'menu' | 'browse' | 'tools' | null
 export type PhonePlace = 'arrange' | 'mix' | 'collab' | 'plugin' | 'other'
@@ -22,16 +22,14 @@ export function phoneContextKind(input: {
   /** The track header was tapped. A current track with no tap stays on the arrange row. */
   track: boolean
 }): PhoneContextKind {
-  if (input.sheet === 'menu') return 'menu'
-  if (input.sheet === 'browse') return 'browse'
-  if (input.sheet === 'tools') return 'tools'
+  /* Menu, Browse, and Tools pop above the dock. The edit row stays put. */
   if (input.place === 'mix') return 'mix'
   if (input.place === 'collab') return 'collab'
-  if (input.notes) return 'notes'
-  if (input.place === 'plugin') return 'plugin'
-  /* Arrange keeps Undo, Redo, Snap, Setup, and the transport extras.
-     Mute and Solo stay on the track header, so a track tap does not replace this row. */
+  if (input.place === 'plugin') return input.notes ? 'notes' : 'plugin'
+  /* Arrange keeps Undo, Redo, Snap, Setup, metronome, and Punch, Tempo, Reset.
+     A sheet or a track tap does not replace this row. */
   if (input.place === 'arrange') return 'arrange'
+  if (input.notes) return 'notes'
   if (input.clip) return 'clip'
   return 'arrange'
 }

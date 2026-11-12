@@ -46,6 +46,25 @@ function ResetIcon() {
   )
 }
 
+/** Phone transport marks. One 18px drawing, no word. */
+function TransportGlyph({ id }: { id: 'start' | 'rewind' | 'forward' | 'play' | 'stop' | 'record' }) {
+  return (
+    <svg className="t-icon" data-transport-icon={id} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      {id === 'start' && (
+        <g>
+          <path d="M3.15 3.1v11.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M14.9 3.4 6 9l8.9 5.6V3.4z" fill="currentColor" />
+        </g>
+      )}
+      {id === 'rewind' && <path d="M8.5 3.5 2.2 9l6.3 5.5V3.5zm7.3 0L9.5 9l6.3 5.5V3.5z" fill="currentColor" />}
+      {id === 'forward' && <path d="M2.2 3.5 8.5 9 2.2 14.5V3.5zm7.3 0L15.8 9l-6.3 5.5V3.5z" fill="currentColor" />}
+      {id === 'play' && <path d="M4.3 3.1v11.8L14.6 9 4.3 3.1z" fill="currentColor" />}
+      {id === 'stop' && <rect x="4" y="4" width="10" height="10" rx="1.3" fill="currentColor" />}
+      {id === 'record' && <circle cx="9" cy="9" r="5.1" fill="currentColor" />}
+    </svg>
+  )
+}
+
 export function TransportBar({
   store,
   engine,
@@ -525,13 +544,13 @@ export function TransportBar({
       {inSession && syncLabel ? <span className="sync-pill">{syncLabel}</span> : null}
       <ButtonTray className="t-main">
         <TipButton className="t-btn" label="Go to Start" hint={transport('to-start').hint} onClick={() => onSeek(0)}>
-          <span className="t-word">Start</span>
+          {phone ? <TransportGlyph id="start" /> : <span className="t-word">Start</span>}
         </TipButton>
         <TipButton className="t-btn" label="Rewind" hint="Jump the playhead back one bar." onClick={() => nudge(-1)}>
-          <span className="t-word">Rewind</span>
+          {phone ? <TransportGlyph id="rewind" /> : <span className="t-word">Rewind</span>}
         </TipButton>
         <TipButton className="t-btn" label="Fast Forward" hint="Jump the playhead forward one bar." onClick={() => nudge(1)}>
-          <span className="t-word">Forward</span>
+          {phone ? <TransportGlyph id="forward" /> : <span className="t-word">Forward</span>}
         </TipButton>
         <TipButton
           className={`t-btn play${running ? ' on' : ''}`}
@@ -541,10 +560,10 @@ export function TransportBar({
           onPress={() => engine.unlock()}
           onClick={running ? onStop : onPlay}
         >
-          <span className="t-word">{running ? 'Stop' : 'Play'}</span>
+          {phone ? <TransportGlyph id={running ? 'stop' : 'play'} /> : <span className="t-word">{running ? 'Stop' : 'Play'}</span>}
         </TipButton>
         <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
-          <span className="t-word">Record</span>
+          {phone ? <TransportGlyph id="record" /> : <span className="t-word">Record</span>}
         </TipButton>
         <button
           type="button"

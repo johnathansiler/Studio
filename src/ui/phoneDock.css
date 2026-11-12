@@ -356,12 +356,274 @@ body:has(.shell.phone) .select-hint-host {
   bottom: calc(var(--phone-chrome-bottom, 108px) + 40px + 10px);
 }
 
+/* The empty header band beside the loop bar and the playhead gap.
+   It stays the same dark header surface and scrolls the arrange. */
+.shell.phone .ruler-gap.arrange-touchpad {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex: none;
+  touch-action: none;
+  cursor: grab;
+  background: #141c18;
+}
+
+.shell.phone .tempo-kicker,
+.shell.phone .tempo-figure,
+.shell.phone .bpm-readout,
+.shell.phone .bpm-readout.tempo-tap,
+.shell.phone .bpm-readout.tempo-edit {
+  font-family: var(--font);
+  font-variant-numeric: normal;
+}
+
+/* Phone project menu: one recessed tray, dock-style buttons, and a scroll. */
+body:has(.shell.phone) [data-screen-overlay].phone-sheet:has(#shell-menu) {
+  height: min(var(--phone-sheet-h, 70dvh), calc(100dvh - var(--phone-chrome-bottom, 120px) - 8px)) !important;
+  max-height: min(var(--phone-sheet-h, 70dvh), calc(100dvh - var(--phone-chrome-bottom, 120px) - 8px)) !important;
+  background-color: var(--tray-bg, #090d0b) !important;
+  background-image: none !important;
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset);
+}
+
+body:has(.shell.phone) [data-screen-overlay].phone-sheet:has(#shell-menu) > .phone-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+body:has(.shell.phone) .anchored-menu #shell-menu,
+body:has(.shell.phone) #shell-menu {
+  overflow: visible !important;
+  height: auto !important;
+  max-height: none !important;
+  flex: none !important;
+  padding: 8px 8px 12px;
+  background: transparent;
+}
+
+body:has(.shell.phone) #shell-menu .menu-group {
+  margin: 0 0 8px;
+  padding: 3px;
+  border-radius: 10px;
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset);
+}
+
+body:has(.shell.phone) #shell-menu .menu-rows {
+  gap: 4px;
+}
+
+body:has(.shell.phone) .anchored-menu #shell-menu button.menu-row,
+body:has(.shell.phone) .anchored-menu #shell-menu label.menu-row,
+body:has(.shell.phone) #shell-menu button.menu-row,
+body:has(.shell.phone) #shell-menu label.menu-row {
+  min-height: 44px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px !important;
+  border-top: 0 !important;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+}
+
+body:has(.shell.phone) #shell-menu .menu-rows > .menu-row + .menu-row {
+  border-top: 0;
+}
+
+body:has(.shell.phone) #shell-menu button.menu-row:hover,
+body:has(.shell.phone) #shell-menu label.menu-row:hover,
+body:has(.shell.phone) #shell-menu button.menu-row:active:not(:disabled),
+body:has(.shell.phone) #shell-menu label.menu-row:active,
+body:has(.shell.phone) #shell-menu button.menu-row[aria-pressed='true'],
+body:has(.shell.phone) #shell-menu label.menu-row:focus-within {
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  border-color: transparent;
+}
+
+body:has(.shell.phone) #shell-menu button.menu-row[aria-pressed='true'] {
+  background-color: var(--accent);
+  background-image: var(--face);
+  color: var(--accent-ink);
+}
+
+body:has(.shell.phone) #shell-menu .menu-session {
+  margin: 0 0 8px;
+  padding: 8px;
+  border-radius: 10px;
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset);
+}
+
+/* Portrait phone top matches the bottom dock: one stack, edit-row metrics on
+   the transport, and the Menu/Browse/Tools metrics on Collab/Arrange/Mix. */
+.chrome-stack { display: contents; }
+
+.shell.phone:not(.land) .phone-top {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 4px;
+  background: transparent;
+}
+
+.shell.phone:not(.land) .phone-top .topbar {
+  order: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.shell.phone:not(.land) .phone-top .transport.simple {
+  order: 1;
+  display: flex;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.shell.phone:not(.land) .phone-top .views {
+  order: 0;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  gap: 4px;
+  padding: 3px;
+  margin: 0;
+  border-radius: 10px;
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset);
+}
+
+.shell.phone:not(.land) .phone-top .views > button,
+.shell.phone:not(.land) .phone-top .views > button.collab-tab {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 640;
+  letter-spacing: 0.01em;
+}
+
+.shell.phone:not(.land) .phone-top .transport.simple .t-main.btn-tray {
+  gap: 2px;
+  padding: 5px;
+  border-radius: 18px;
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset);
+  container-type: normal;
+}
+
+.shell.phone:not(.land) .phone-top .transport.simple .t-main .t-btn,
+.shell.phone:not(.land) .phone-top .transport.simple .t-main .ideas-bulb {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 1px;
+  border-radius: 8px !important;
+  font-family: var(--font);
+}
+
+.shell.phone:not(.land) .phone-top .transport.simple .t-main .t-word {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.shell.phone .transport.simple .t-main .t-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shell.phone .transport .t-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+/* Phone Browse categories: one even grid, the same hit as the dock. */
+.shell.phone .playlist-browser .browser-tabs.btn-tray {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+.shell.phone .playlist-browser .browser-chip-scroll {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+.shell.phone .playlist-browser .browser-chip-scroll > button {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell.phone:not(.land) .phone-top .transport.simple .t-main .ideas-bulb {
+  border-radius: 8px;
+}
+
 .shell.phone .playhead-strip {
   position: sticky;
   top: var(--ruler-h, 22px);
   z-index: 3;
-  height: var(--playhead-strip, 28px);
-  min-height: 28px;
+  height: var(--playhead-strip, 42px);
+  min-height: var(--playhead-strip, 42px);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.18)),
     #121a16;
