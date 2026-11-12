@@ -48,7 +48,8 @@ import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, patternHoldOpensMenu, patternMenuPoint, patternPointerIntent, trimZone } from './touchEdit'
-import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
+import { CLIP_DOUBLE_MS, clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
+import { arrangeOutline } from '../audio/wave/render'
 import { LoopRegion } from './LoopRegion'
 import { TimelineOverview } from './OverviewScrollbar'
 import { laneScaleAttr, clampTimelinePx } from './overviewScroll'
@@ -607,11 +608,14 @@ export function ArrangeView({
   }
 
   function openClipEditor(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
+    if (kind === 'audio') {
+      store.openWaveEditor(trackId, clipId)
+      return
+    }
     const track = project.tracks.find((item) => item.id === trackId)
     const surface = editorForGesture('edit-notes', track?.type ?? '', track)
     if (surface === 'steps') onOpenSteps?.(trackId)
     else if (kind === 'midi') onOpenPiano(trackId, clipId)
-    else if (kind === 'audio') store.selectClip(trackId, clipId, false, true)
   }
 
   function noteClipTap(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
@@ -746,7 +750,13 @@ export function ArrangeView({
         const host = kind === 'pattern' ? patternHostId(project.tracks, laneAt(ev.clientX, ev.clientY)) : null
         const moved = [...deltas.values()].some((value) => Math.abs(value) >= (kind === 'audio' ? 1 : 0.01))
         const retargeted = !!host && [...origins.values()].some((item) => item.trackId !== host)
-        if (!moved && !retargeted) {
+        const slop = event.pointerType === 'touch' ? 18 : 4
+        if (document.querySelector('[data-opening-editor]')) {
+          setNudge(null)
+          setDragView(null)
+          return
+        }
+        if ((travel < slop && !retargeted) || (!moved && !retargeted)) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
           noteClipTap(kind, trackId, clipId)
           return
@@ -1493,6 +1503,7 @@ function ClipView({
   const [snapZero, setSnapZero] = useState(true)
   const clipRef = useRef<HTMLDivElement>(null)
   const spanRef = useRef<WaveSpan | null>(null)
+  const lastBodyTap = useRef({ at: 0, x: 0, y: 0 })
   const pinchLock = useRef(false)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip
   const shown = preview ?? ghost ?? clip
@@ -1628,6 +1639,7 @@ function ClipView({
 
   const fadeIn = (shown.fadeInSamples / project.sampleRate) * px
   const fadeOut = (shown.fadeOutSamples / project.sampleRate) * px
+  const editedOutline = arrangeOutline(asset?.channels, shown)
   const remote = remoteClipMark(remotes, clip.id)
   return (
     <div style={{ display: 'contents' }}>
@@ -1648,6 +1660,20 @@ function ClipView({
       style={{ left, width, background: store.project.tracks.find((t) => t.id === trackId)?.color, pointerEvents: passive ? 'none' : undefined, ['--remote' as string]: remote?.color }}
       onPointerDown={(event) => {
         if ((event.target as HTMLElement).closest('.take-lane, .edge, .wave-zoom')) return
+        if (event.button === 2) return
+        const now = performance.now()
+        const prev = lastBodyTap.current
+        const quick = now - prev.at < CLIP_DOUBLE_MS && Math.hypot(event.clientX - prev.x, event.clientY - prev.y) < 28
+        lastBodyTap.current = { at: now, x: event.clientX, y: event.clientY }
+        if (quick) {
+          event.preventDefault()
+          event.stopPropagation()
+          const node = event.currentTarget
+          node.setAttribute('data-opening-editor', '1')
+          store.openWaveEditor(trackId, clip.id)
+          window.setTimeout(() => node.removeAttribute('data-opening-editor'), 400)
+          return
+        }
         if (tool === 'erase') {
           onErase(event)
           return
@@ -1682,9 +1708,10 @@ function ClipView({
         onMove(event)
       }}
       onDoubleClick={(event) => {
+        if ((event.target as HTMLElement).closest('.take-lane, .edge, .wave-zoom')) return
         event.preventDefault()
         event.stopPropagation()
-        store.selectClip(trackId, clip.id, false, true)
+        store.openWaveEditor(trackId, clip.id)
       }}
       onContextMenu={(event) => {
         event.preventDefault()
@@ -1693,9 +1720,9 @@ function ClipView({
       }}
     >
       <WaveformView
-        channel={asset?.channels[0]}
-        outline={asset ? null : outline}
-        bounds={asset ? { start: shown.offsetSamples, end: shown.offsetSamples + sourceLen } : { start: 0, end: outline?.length || 1 }}
+        channel={editedOutline ? undefined : asset?.channels[0]}
+        outline={editedOutline ?? (asset ? null : outline)}
+        bounds={editedOutline ? { start: 0, end: editedOutline.length } : asset ? { start: shown.offsetSamples, end: shown.offsetSamples + sourceLen } : { start: 0, end: outline?.length || 1 }}
         ariaLabel="Clip waveform"
         className="clip-wave"
         color="rgba(255,255,255,0.9)"
@@ -1769,6 +1796,8 @@ function ClipView({
         anchor={menu ? { left: menu.x, top: menu.y, width: 28, height: 28 } : null}
         prefer="down"
       >
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openWaveEditor(trackId, clip.id); setMenu(null) }}>Edit</button>
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.selectClip(trackId, clip.id, false, true); setMenu(null) }}>Timing</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(snapZero); setMenu(null) }}>Split</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
         <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>

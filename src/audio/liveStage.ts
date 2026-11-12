@@ -1,3 +1,4 @@
+import { fadeCurve, type FadeShape } from './wave/edit'
 import { additiveSaw, partialsFor } from './quality/blep'
 
 /**
@@ -109,12 +110,16 @@ export function clipSliceEnvelope(input: {
   fadeOutSec: number
   clipDurSec: number
   join: boolean
+  inShape?: FadeShape
+  outShape?: FadeShape
 }): SliceGainPoint[] {
   const { at, dur, relFrom, relTo, clipGain, fadeInSec, fadeOutSec, clipDurSec, join } = input
+  const inShape = input.inShape ?? 'linear'
+  const outShape = input.outShape ?? 'linear'
   const env = (t: number) => {
     let gain = clipGain
-    if (fadeInSec > 0 && t < fadeInSec) gain *= Math.max(0, t / fadeInSec)
-    if (fadeOutSec > 0 && t > clipDurSec - fadeOutSec) gain *= Math.max(0, (clipDurSec - t) / fadeOutSec)
+    if (fadeInSec > 0 && t < fadeInSec) gain *= fadeCurve(t / fadeInSec, inShape)
+    if (fadeOutSec > 0 && t > clipDurSec - fadeOutSec) gain *= fadeCurve((clipDurSec - t) / fadeOutSec, outShape)
     return Math.max(0.0001, gain)
   }
   const points: SliceGainPoint[] = [{ at, value: join ? 0.0001 : env(relFrom) }]

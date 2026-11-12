@@ -1,4 +1,6 @@
 import { resampleSinc } from '../quality/resample'
+import { clipHasWaveBody } from '../wave/edit'
+import { cachedWaveBody } from '../wave/render'
 import { beatAtSample, samplesAtBeat, tempoMapOf } from '../../model/tempoMap'
 import { phaseStretch } from './phase'
 import { Psola } from './voice'
@@ -206,6 +208,23 @@ export function renderClipChannels(
   project: Project,
   quality: StretchQuality = 'hq',
 ): Float32Array[] {
+  if (clip.wave && clipHasWaveBody(clip)) {
+    const body = cachedWaveBody(channels, clip)
+    if (body?.[0]?.length) {
+      const length = body[0].length
+      return renderClipChannels(
+        body.map((channel) => Float32Array.from(channel)),
+        {
+          ...clip,
+          offsetSamples: 0,
+          wave: undefined,
+          stretch: clip.stretch ? { ...clip.stretch, sourceSamples: length } : clip.stretch,
+        },
+        project,
+        quality,
+      )
+    }
+  }
   const stretch = clip.stretch
   const source = sourceSamplesOf(clip)
   const sliced = channels.map((channel) => Float32Array.from(channel.subarray(clip.offsetSamples, Math.min(channel.length, clip.offsetSamples + source))))

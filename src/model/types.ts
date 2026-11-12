@@ -209,6 +209,47 @@ export interface Insert {
   params: Record<string, number>
 }
 
+/** Fade law for a clip edge or an edit join. Linear matches older projects. */
+export type FadeShape = 'linear' | 'equal' | 's' | 'log'
+
+/** One piece of a clip's audible audio. It points at the source buffer. */
+export interface WaveRegion {
+  id: string
+  /** First sample in the source buffer. Ignored for silence. */
+  source: number
+  length: number
+  reverse?: boolean
+  /** Linear gain for this piece. 1 is unity. */
+  gain?: number
+  silence?: boolean
+}
+
+/**
+ * Non-destructive audio edits stored on the clip.
+ * A plain window into the file can omit this and keep using offset and duration.
+ * Cuts, silence, reverse, and paste append pieces here. The source asset stays put.
+ */
+export interface WaveEdit {
+  /** Source index where the dimmed head begins. */
+  origin: number
+  /** Source samples before the audible clip, drawn dimmed. */
+  head: number
+  /** Source index where the dimmed tail begins. */
+  tailAt: number
+  /** Source samples after the audible clip, drawn dimmed. */
+  tail: number
+  regions: WaveRegion[]
+  /** Fade lengths in source samples of the audible clip. */
+  fadeIn: number
+  fadeOut: number
+  fadeInShape: FadeShape
+  fadeOutShape: FadeShape
+  /** Clip gain in decibels. 0 is unity. */
+  gainDb: number
+  /** Extra crossfade at a cut, in source samples. A short declick fade always runs. */
+  crossfade: number
+}
+
 export interface AudioClip {
   id: string
   name: string
@@ -219,6 +260,8 @@ export interface AudioClip {
   fadeInSamples: number
   fadeOutSamples: number
   gain: number
+  /** Sample-editor edits. Missing means the clip is a plain window into the buffer. */
+  wave?: WaveEdit
   source: ClipSource
   peerId?: string
   takeId?: string
