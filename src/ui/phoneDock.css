@@ -480,12 +480,12 @@ body:has(.shell.phone) #shell-menu .menu-session {
   width: 100%;
   box-sizing: border-box;
   margin: 0;
-  padding: 2px 4px 2px;
+  padding: 0 4px;
   background: transparent;
 }
 
 .shell.phone:not(.land) .phone-top .topbar {
-  order: 1;
+  order: 0;
   display: flex;
   flex-wrap: nowrap;
   align-items: stretch;
@@ -500,7 +500,7 @@ body:has(.shell.phone) #shell-menu .menu-session {
 }
 
 .shell.phone:not(.land) .phone-top .transport.simple {
-  order: 0;
+  order: 1;
   display: flex;
   flex: 0 0 auto;
   width: 100%;
@@ -566,6 +566,52 @@ body:has(.shell.phone) #shell-menu .menu-session {
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0;
+}
+
+.shell.phone .transport.simple .t-main .t-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shell.phone .transport .t-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+/* Phone Browse categories: one even grid, the same hit as the dock. */
+.shell.phone .playlist-browser .browser-tabs.btn-tray {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+.shell.phone .playlist-browser .browser-chip-scroll {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+.shell.phone .playlist-browser .browser-chip-scroll > button {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .shell.phone:not(.land) .phone-top .transport.simple .t-main .ideas-bulb {

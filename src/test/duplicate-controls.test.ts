@@ -80,17 +80,15 @@ describe('removed duplicate controls', () => {
     expect(sheet).toContain('data-menu-action="shortcuts"')
   })
 
-  it('keeps every arrange tool, including Snap, in the phone tools sheet', () => {
+  it('keeps the eight arrange tools in the sheet and Snap on the dock', () => {
     const store = new ProjectStore()
     const full = renderToStaticMarkup(createElement(ToolChoices, { store, onClose() {} }))
-    for (const label of ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll']) {
-      expect(full).toContain(`>${label}<`)
-    }
+    const faces = [...full.matchAll(/choice-chip-face">([^<]+)</g)].map((match) => match[1])
+    expect(faces).toEqual(['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll'])
     expect(full).toContain('not the mixer pan')
-    const phone = renderToStaticMarkup(createElement(ToolChoices, { store, onClose() {}, showSnap: true }))
-    const faces = [...phone.matchAll(/choice-chip-face">([^<]+)</g)].map((match) => match[1])
-    expect(faces).toEqual(['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Snap 1/4', 'Scroll'])
-    expect(phone).toContain('not the mixer pan')
+    expect(full).not.toContain('Snap 1/4')
+    const row = dock(store, true)
+    expect(actions(row)).toContain('snap')
     const menu = visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: false }).map((item) => item.action)
     for (const action of ['box', 'erase', 'pan']) expect(menu).not.toContain(action)
   })

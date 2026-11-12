@@ -1061,9 +1061,11 @@ export function ArrangeView({
       )}
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneScaleAttr(laneZoom)} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
       <div className="heads-col">
-      <div className="track-viewfinder-slot" ref={finderRef}>
-        <TrackViewfinder store={store} playheadSample={position} />
-      </div>
+      {!phone && (
+        <div className="track-viewfinder-slot" ref={finderRef}>
+          <TrackViewfinder store={store} playheadSample={position} />
+        </div>
+      )}
       <div
         className="heads"
         ref={headsRef}

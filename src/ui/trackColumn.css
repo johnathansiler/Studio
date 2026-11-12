@@ -72,7 +72,7 @@
 .shell.fold .arrange,
 .shell:not(.phone) .arrange,
 .shell.phone .arrange[data-phone-arrange] {
-  --lane-h: 68px; /* 4px meter, 2px gap, 20px name, 2px gap, 40px buttons */
+  --lane-h: 72px; /* 4px meter, 2px gap, 24px name, 2px gap, 40px buttons */
 }
 
 .shell .arrange .head,
@@ -109,40 +109,134 @@
 .arrange .head .track-title-slot {
   width: 0;
   min-width: 100%;
-  height: 20px;
-  min-height: 20px;
-  max-height: 20px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
 }
 
-.arrange .head .track-title {
+.shell .arrange .head button.track-title,
+.shell .arrange .head input.track-title,
+.shell.phone:not(.land) .arrange .head button.track-title,
+.shell.phone:not(.land) .arrange .head input.track-title {
+  appearance: none;
+  -webkit-appearance: none;
   display: block;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  height: 20px;
-  min-height: 20px;
-  max-height: 20px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
   margin: 0;
-  padding: 0 4px;
+  padding: 0 6px;
   border: 0;
   border-radius: 4px;
   background: transparent;
+  background-image: none;
+  box-shadow: none;
   color: var(--text);
   font-family: var(--font);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 680;
-  line-height: 20px;
+  line-height: 24px;
   letter-spacing: 0;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  outline: none;
+  outline-offset: 0;
+  caret-color: var(--text);
 }
 
-.arrange .head .track-title:focus {
-  outline: 1px solid var(--accent);
-  background: #101814;
+.shell .arrange .head button.track-title:hover,
+.shell .arrange .head input.track-title:hover,
+.shell .arrange .head button.track-title:focus,
+.shell .arrange .head input.track-title:focus,
+.shell .arrange .head button.track-title:focus-visible,
+.shell .arrange .head input.track-title:focus-visible,
+.shell.phone:not(.land) .arrange .head input.track-title,
+.shell.phone:not(.land) .arrange .head input.track-title:hover,
+.shell.phone:not(.land) .arrange .head input.track-title:focus,
+.shell.phone:not(.land) .arrange .head input.track-title:focus-visible {
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+  outline-offset: 0;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 24px;
+}
+
+.shell.phone .phone-tool-row.btn-tray {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: stretch;
+  justify-content: stretch;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  gap: 2px;
+  box-sizing: border-box;
+}
+
+.shell.phone .phone-tool-row.btn-tray .phone-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0 1px;
+  border-radius: 8px;
+  border: 1px solid var(--btn-quiet-border);
+  background-color: var(--btn-quiet-bg);
+  background-image: var(--btn-quiet-face);
+  box-shadow: var(--btn-bevel);
+  color: var(--btn-quiet-ink);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.shell.phone .phone-tool-row.btn-tray .phone-hit .phone-face {
+  height: auto;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.shell.phone .phone-tool-row.btn-tray .phone-hit.on,
+.shell.phone .phone-tool-row.btn-tray .phone-hit[aria-pressed='true'] {
+  background-color: var(--btn-toggle-bg);
+  background-image: var(--btn-quiet-face);
+  color: var(--btn-toggle-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
 }
 
 .shell .arrange .head .track-meter-row {

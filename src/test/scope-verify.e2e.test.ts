@@ -175,7 +175,7 @@ describe('scoped arrange changes', () => {
           await page.getByRole('button', { name: 'Tools', exact: true }).click()
           const again = page.locator('#tool-choices').getByRole('button', { name: /^Scroll/ })
           expect(await again.getAttribute('aria-pressed')).toBe('true')
-          await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
           await page.locator('#tool-choices').waitFor({ state: 'detached' })
         } else if (size.width === 1440) {
           await menu.locator('[data-menu-action="latency"] select').selectOption('playback')

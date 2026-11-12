@@ -4,6 +4,7 @@ import { chromium, type Browser, type Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
 
 const VIEWPORTS = [
+  { name: '360x740', width: 360, height: 740, phoneSheet: true, shot: true },
   { name: '390x844', width: 390, height: 844, phoneSheet: true, shot: true },
   { name: '476x752', width: 476, height: 752, phoneSheet: true, shot: false },
   { name: '844x390', width: 844, height: 390, phoneSheet: true, shot: true },
@@ -12,7 +13,7 @@ const VIEWPORTS = [
 ] as const
 
 const SELECT_LABELS = ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll']
-const PHONE_TOOL_LABELS = ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Snap 1/4', 'Scroll']
+const PHONE_TOOL_LABELS = ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll']
 const SNAP_LABELS = ['On', 'Bar', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4T', '1/8T', '1/16T']
 
 async function waitForServer(url: string, child: ChildProcess) {
@@ -227,20 +228,52 @@ describe('select and snap choice tray', () => {
           await browserSheet.waitFor({ state: 'detached' })
         }
 
-        if (viewport.phoneSheet) await page.getByRole('button', { name: 'Tools', exact: true }).click()
-        else await page.getByRole('button', { name: /^Tool:/ }).click()
-        await page.locator('#tool-choices[data-choice-tray="open"]').waitFor()
-        const selectTray = await readTray(page, '#tool-choices', '.tool-current')
-        const selectLabels = viewport.phoneSheet ? PHONE_TOOL_LABELS : SELECT_LABELS
-        assertTray(`${viewport.name} select`, selectTray, selectLabels, browserHeight)
         if (viewport.phoneSheet) {
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
+          await page.locator('#tool-choices[data-tool-row="open"]').waitFor()
+          const faces = await page.locator('#tool-choices .phone-face').allTextContents()
+          expect(faces.map((chip) => chip.trim()), viewport.name).toEqual(PHONE_TOOL_LABELS)
+          const align = await page.evaluate(() => {
+            const items = (root: Element | null): HTMLElement[] => {
+              if (!root) return []
+              const out: HTMLElement[] = []
+              for (const child of [...root.children]) {
+                if (!(child instanceof HTMLElement)) continue
+                if (getComputedStyle(child).display === 'contents') out.push(...items(child))
+                else out.push(child)
+              }
+              return out
+            }
+            const box = (node: HTMLElement) => {
+              const rect = node.getBoundingClientRect()
+              return { left: rect.left, width: rect.width, height: rect.height }
+            }
+            return {
+              tools: items(document.querySelector('#tool-choices')).map(box),
+              dock: items(document.querySelector('.phone-context.btn-tray')).map(box),
+            }
+          })
+          expect(align.tools, viewport.name).toHaveLength(8)
+          expect(align.dock, viewport.name).toHaveLength(8)
+          for (let index = 0; index < 8; index += 1) {
+            expect(Math.abs(align.tools[index]!.left - align.dock[index]!.left), `${viewport.name} col ${index}`).toBeLessThanOrEqual(1)
+            expect(Math.abs(align.tools[index]!.width - align.dock[index]!.width), `${viewport.name} width ${index}`).toBeLessThanOrEqual(1)
+            expect(align.tools[index]!.height, `${viewport.name} height ${index}`).toBeGreaterThanOrEqual(40)
+          }
           const row = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
           expect(row, viewport.name).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
+          if (viewport.shot) await page.screenshot({ path: `/opt/cursor/artifacts/phone_tools_${viewport.width}.png` })
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
+          await page.locator('#tool-choices').waitFor({ state: 'detached' })
+        } else {
+          await page.getByRole('button', { name: /^Tool:/ }).click()
+          await page.locator('#tool-choices[data-choice-tray="open"]').waitFor()
+          const selectTray = await readTray(page, '#tool-choices', '.tool-current')
+          assertTray(`${viewport.name} select`, selectTray, SELECT_LABELS, browserHeight)
+          await assertChipsReachable(page, '#tool-choices', `${viewport.name} select chips`)
+          await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
+          await page.locator('#tool-choices').waitFor({ state: 'detached' })
         }
-        await assertChipsReachable(page, '#tool-choices', `${viewport.name} select chips`)
-        if (viewport.shot) await page.screenshot({ path: `/opt/cursor/artifacts/select_tray_${viewport.name}.png` })
-        await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
-        await page.locator('#tool-choices').waitFor({ state: 'detached' })
 
         await page.locator('.snap-inline').click()
         await page.locator('#snap-choices[data-choice-tray="open"]').waitFor()

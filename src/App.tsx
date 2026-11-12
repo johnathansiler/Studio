@@ -1962,7 +1962,7 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
   const phoneArrange = phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
-  const transportShown = (surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown
+  const transportShown = (surface === 'studio' || surface === 'artist' || session.state.status === 'live') && (!collabShown || (phone && !land))
   const phonePlace: PhonePlace = collabShown
     ? 'collab'
     : panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack'
@@ -2130,7 +2130,7 @@ async function importDropped(files: FileList) {
           />
         </AnchoredMenu>
       </header>
-      {(surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown && (
+      {transportShown && (
         <TransportBar
           store={store}
           engine={engine}

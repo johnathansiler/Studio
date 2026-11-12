@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
+import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
-import { SnapChoices, ToolChoices } from './UtilitySheets'
+import { SnapChoices } from './UtilitySheets'
 import { useScreenOverlay } from './screenOverlay'
 import {
   phoneContextKind,
@@ -20,6 +21,38 @@ function MetronomeIcon() {
       <path d="M4.2 14.2h7.6L8.4 2.4 4.2 14.2z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
       <path d="M8 12.6V6.2L11.2 8.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
+  )
+}
+
+const PHONE_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'pan']
+
+function toolFace(id: ArrangeTool) {
+  if (id === 'pan') return { label: 'Scroll', hint: 'Scroll the timeline or the piano roll. This is not the mixer pan.' }
+  const info = TOOL_INFO[id]
+  return { label: info.label, hint: info.hint }
+}
+
+/** Eight tools in the same tray metrics as the edit row, so each one sits on a dock button. */
+function PhoneToolRow({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
+  const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  return (
+    <div id="tool-choices" className="phone-tool-row btn-tray" role="toolbar" aria-label="Tools" data-tool-row="open">
+      {PHONE_TOOLS.map((id) => {
+        const face = toolFace(id)
+        return (
+          <Hit
+            key={id}
+            action={id}
+            label={`${face.label}. ${face.hint}`}
+            title={face.hint}
+            pressed={value === id}
+            onClick={() => { store.setTool(id); onClose() }}
+          >
+            {face.label}
+          </Hit>
+        )
+      })}
+    </div>
   )
 }
 
@@ -197,18 +230,32 @@ export function PhoneDock({
     store.splitAt(clip.trackId, clip.clipId, playheadSample())
   }
 
-  const sheet = offstage === 'tools'
-    ? <ToolChoices store={store} onClose={() => setOffstage(null)} showSnap onSnap={() => setOffstage('snap')} />
-    : offstage === 'snap'
-      ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
-      : transportMore && place === 'mix'
-        ? <TransportMoreSheet store={store} onClose={() => setTransportMore(false)} />
-        : null
+  function closeTools() {
+    if (arrangeLive) {
+      if (utility === 'tools') toggleArrangeSheet('tools')
+    } else setOffstage(null)
+  }
+
+  useEffect(() => {
+    if (!toolsOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeTools()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toolsOpen, arrangeLive, utility])
+
+  const sheet = offstage === 'snap'
+    ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
+    : transportMore && place === 'mix'
+      ? <TransportMoreSheet store={store} onClose={() => setTransportMore(false)} />
+      : null
 
   return (
     <>
       {host && sheet ? createPortal(sheet, host) : null}
       {kind !== 'arrange' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
+      {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
       <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}`} role="toolbar" aria-label="Actions" data-phone-context={kind}>
         {kind === 'clip' && clip && (
           <>
