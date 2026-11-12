@@ -577,6 +577,33 @@ describe('transport and graph stress', () => {
     expect(continued).toBe(true)
     engine.stop()
     expect(engine.stability().playing).toBe(false)
+
+    const loopSamples = new Float32Array(project.loopEndSample)
+    for (let i = 0; i < loopSamples.length; i++) loopSamples[i] = Math.sin((2 * Math.PI * 12 * i) / loopSamples.length) * 0.5
+    vocal.clips.splice(0, vocal.clips.length, {
+      id: 'fill',
+      name: 'Fill',
+      bufferId: 'fill',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: loopSamples.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+    })
+    engine.sync(project, (id) => (id === 'fill' ? { id, name: 'fill', sampleRate: 48000, channels: [loopSamples] } : undefined))
+    await engine.play(0)
+    const looping = (engine.ctx as unknown as FakeContext).starts.filter((start) => start.kind === 'buffer-source' && start.duration == null)
+    expect(looping.length).toBe(1)
+    for (let step = 0; step < 40; step++) {
+      ;(engine.ctx as unknown as FakeContext).currentTime += 0.05
+      engine.wakeTransport()
+    }
+    const still = (engine.ctx as unknown as FakeContext).starts.filter((start) => start.kind === 'buffer-source' && start.duration == null)
+    expect(still.length).toBe(1)
+    engine.stop()
+
     await engine.play(0)
     expect(engine.positionSamples).toBe(0)
     expect(engine.stability().playing).toBe(true)

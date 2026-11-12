@@ -1,6 +1,6 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
 import { assembleTimedChunks } from './capture'
-import { crossfadeLoopRegion } from './clipEdge'
+import { bakeLoopSeam } from './loopSeam'
 import { clickVoice } from './metroClick'
 import { onSpectralCommit } from './spectral/job'
 import { followClockToken, onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
@@ -249,6 +249,10 @@ export class AudioEngine {
   private scheduling = false
   private nextLoopCtx: number | null = null
   private nextLoopSample = 0
+  /** A clip that already has one looping source. Later scheduler windows must not start another. */
+  private heldAudio = new Map<string, { sig: string; stop: (at?: number) => void }>()
+  /** MIDI session loops keep this much audio-clock time queued, instead of a timer at the wrap. */
+  private midiLoopFill = new Map<string, (until: number) => void>()
   private nextMetroSample = 0
   private sessionStarted = new Set<string>()
   private sessionClip = new Map<string, string>()
@@ -2962,7 +2966,11 @@ export class AudioEngine {
     const sr = this.sampleRate
     for (const [trackId, clipId] of this.launches) {
       const gen = this.launchGen.get(trackId) ?? 0
-      if (this.sessionStarted.has(trackId) && this.sessionClip.get(trackId) === clipId && (this.sessionGen.get(trackId) ?? 0) === gen) continue
+      if (this.sessionStarted.has(trackId) && this.sessionClip.get(trackId) === clipId && (this.sessionGen.get(trackId) ?? 0) === gen) {
+        const fill = this.midiLoopFill.get(trackId)
+        if (fill && this.ctx) fill(this.ctx.currentTime + Math.max(1, SCHEDULER_HORIZON_SEC))
+        continue
+      }
       const track = project.tracks.find((t) => t.id === trackId)
       const strip = this.strips.get(trackId)
       if (!track || !strip || !this.ctx) continue
@@ -3009,14 +3017,17 @@ export class AudioEngine {
           playRate = 1
         }
         const looping = clipLoops(audio)
-        if (looping && playRate === 1 && playBuffer.length > 32) {
+        if (looping && playRate === 1 && dur > 0.01 && playBuffer.length > 32) {
           const startFrame = Math.max(0, Math.round(offset * playBuffer.sampleRate))
-          const endFrame = Math.min(playBuffer.length, Math.round((offset + dur) * playBuffer.sampleRate))
-          const faded = this.ctx.createBuffer(playBuffer.numberOfChannels, playBuffer.length, playBuffer.sampleRate)
+          const frames = Math.max(2, Math.min(playBuffer.length - startFrame, Math.round(dur * playBuffer.sampleRate)))
+          const baked = this.ctx.createBuffer(playBuffer.numberOfChannels, frames, playBuffer.sampleRate)
           for (let channel = 0; channel < playBuffer.numberOfChannels; channel++) {
-            faded.copyToChannel(crossfadeLoopRegion(playBuffer.getChannelData(channel), startFrame, endFrame, 128), channel)
+            const region = playBuffer.getChannelData(channel).subarray(startFrame, startFrame + frames)
+            baked.copyToChannel(bakeLoopSeam(region, playBuffer.sampleRate) as unknown as Float32Array<ArrayBuffer>, channel)
           }
-          playBuffer = faded
+          playBuffer = baked
+          offset = 0
+          dur = frames / playBuffer.sampleRate
         }
         src.buffer = playBuffer
         src.playbackRate.value = playRate
@@ -3105,33 +3116,26 @@ export class AudioEngine {
         const dur = limit != null ? Math.min(noteDur, Math.max(0.02, limit - start)) : noteDur
         this.scheduleVoice(ctx, out, note, start, dur, voice, bucket)
       }
-      if (!looping) return
-      const nextWhen = when + durSec
-      if (limit != null && nextWhen >= limit - 0.001) return
-      const timer = window.setTimeout(() => schedulePass(nextWhen), Math.max(20, durSec * 1000 - 200))
-      const node: Stoppable = {
-        loopTimer: true,
-        endAt: nextWhen + 0.05,
-        stop: (at?: number) => {
-          const kill = () => window.clearTimeout(timer)
-          const now = this.ctx?.currentTime ?? 0
-          if (at != null && at > now + 0.005) window.setTimeout(kill, (at - now) * 1000)
-          else kill()
-        },
-        disconnect: () => undefined,
-      }
-      if (retiredHere && retired) retired.nodes.push(node)
-      else {
-        const previous = this.sessionNodes.get(track.id) || []
-        const stale = new Set(previous.filter((item) => item.loopTimer))
-        const list = previous.filter((item) => !item.loopTimer)
-        list.push(node)
-        this.sessionNodes.set(track.id, list)
-        if (stale.size) this.sources = this.sources.filter((item) => !stale.has(item))
-        this.sources.push(node)
+    }
+    const ahead = Math.max(1, SCHEDULER_HORIZON_SEC)
+    let queued = firstWhen
+    const fill = (until: number) => {
+      let guard = 0
+      while (queued < until && guard++ < 32) {
+        const ctx = this.ctx
+        if (!this.playing || !ctx || this.mode !== 'session') return
+        if (this.activeLoop.get(track.id) !== token && this.retiring.get(track.id)?.token !== token) return
+        schedulePass(queued)
+        if (!looping) {
+          queued = until
+          return
+        }
+        queued += durSec
+        if (!(durSec > 0.01)) return
       }
     }
-    schedulePass(firstWhen)
+    this.midiLoopFill.set(track.id, fill)
+    fill((this.ctx?.currentTime ?? firstWhen) + ahead)
   }
 
   private trackNodes(trackId: string, node: Stoppable) {
@@ -3161,6 +3165,7 @@ export class AudioEngine {
       }, Math.max(0, (when - now) * 1000 + 40))
     } else this.retiring.delete(trackId)
     this.activeLoop.delete(trackId)
+    this.midiLoopFill.delete(trackId)
     this.sessionNodes.delete(trackId)
     this.sessionStarted.delete(trackId)
     this.sessionClip.delete(trackId)
@@ -3477,6 +3482,101 @@ export class AudioEngine {
     return { buffer: audio, clip: { ...clip, offsetSamples: 0, warp: undefined } }
   }
 
+  /** The arrange cycle, when playback should wrap inside it. Pattern mode keeps its own loop. */
+  private transportLoopSpan(): { start: number; end: number } | null {
+    const project = this.project
+    if (!project?.loopEnabled || this.mode !== 'arrangement') return null
+    if (this.status === 'recording' && !project.record?.loop) return null
+    if (this.status !== 'recording' && emptyPatternLoopSamples(project) > 16) return null
+    const start = project.loopStartSample
+    const end = project.loopEndSample
+    if (!(end > start + 16)) return null
+    return { start, end }
+  }
+
+  /**
+   * One looping source for a clip that fills the cycle.
+   * The wrap stays on the audio thread, so a late timer cannot open a gap.
+   * Returns true when this clip is already covered and the slice scheduler should skip it.
+   */
+  private startFillingLoop(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    buffer: AudioBuffer,
+    clip: AudioClip,
+    when: number,
+    from: number,
+  ): boolean {
+    const project = this.project
+    const loop = this.transportLoopSpan()
+    if (!project || !loop || ctx !== this.ctx || buffer.sampleRate !== ctx.sampleRate) return false
+    if (clip.fadeOutSamples > 8) return false
+    if (clip.startSample > loop.start + 8) return false
+    if (clip.startSample + clip.durationSamples < loop.end - 8) return false
+    const regionStart = clip.offsetSamples + (loop.start - clip.startSample)
+    const frames = loop.end - loop.start
+    if (regionStart < -2 || regionStart + frames > buffer.length + 8) return false
+    const safeStart = Math.max(0, regionStart)
+    const safeFrames = Math.min(frames, buffer.length - safeStart)
+    if (safeFrames < 32 || Math.abs(safeFrames - frames) > 8) return false
+    const sig = [
+      clip.startSample, clip.durationSamples, clip.offsetSamples, clip.bufferId, clip.gain, clip.fadeInSamples,
+      loop.start, loop.end, project.tempo, project.sampleRate,
+    ].join(':')
+    const held = this.heldAudio.get(clip.id)
+    if (held?.sig === sig) return true
+    if (held) {
+      try { held.stop(ctx.currentTime + 0.01) } catch { /* already stopped */ }
+      this.heldAudio.delete(clip.id)
+    }
+    const audio = ctx.createBuffer(buffer.numberOfChannels, safeFrames, buffer.sampleRate)
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+      const region = buffer.getChannelData(channel).subarray(safeStart, safeStart + safeFrames)
+      audio.copyToChannel(bakeLoopSeam(region, buffer.sampleRate) as unknown as Float32Array<ArrayBuffer>, channel)
+    }
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = audio
+    src.loop = true
+    src.loopStart = 0
+    src.loopEnd = safeFrames / audio.sampleRate
+    const slip = Math.max(0, ctx.currentTime - when)
+    const at = Math.max(ctx.currentTime, when)
+    const into = Math.max(0, Math.min(safeFrames - 2, Math.round(from - loop.start + slip * ctx.sampleRate)))
+    const peak = Math.max(0.0001, clip.gain)
+    if (this.joining) {
+      gain.gain.setValueAtTime(0.0001, at)
+      gain.gain.linearRampToValueAtTime(peak, at + 0.002)
+    } else if (clip.fadeInSamples > 8 && from <= clip.startSample + clip.fadeInSamples) {
+      gain.gain.setValueAtTime(0.0001, at)
+      gain.gain.linearRampToValueAtTime(peak, at + clip.fadeInSamples / ctx.sampleRate)
+    } else gain.gain.setValueAtTime(peak, at)
+    src.connect(gain)
+    gain.connect(strip.input)
+    try { src.start(at, into / audio.sampleRate) } catch { return false }
+    const stop = (whenStop?: number) => {
+      try { src.stop(whenStop) } catch { /* already stopped */ }
+    }
+    this.heldAudio.set(clip.id, { sig, stop })
+    this.sources.push({
+      stop,
+      disconnect: () => {
+        try { src.disconnect() } catch { /* already disconnected */ }
+        try { gain.disconnect() } catch { /* already disconnected */ }
+      },
+      release: (releaseAt: number) => {
+        const start = Math.max(ctx.currentTime, releaseAt - 0.002)
+        try {
+          gain.gain.cancelScheduledValues(start)
+          gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), start)
+          gain.gain.linearRampToValueAtTime(0.0001, releaseAt)
+          src.stop(releaseAt + 0.004)
+        } catch { /* already stopped */ }
+      },
+    })
+    return true
+  }
+
   private scheduleAudioClip(
     ctx: BaseAudioContext,
     strip: StripNodes,
@@ -3506,6 +3606,7 @@ export class AudioEngine {
     if (to - from < 8) return
     const when = ctxTime + (from - timelineStart) / sr
     const live = ctx === this.ctx
+    if (live && this.startFillingLoop(ctx, strip, buffer, clip, when, from)) return
     if (live && when < ctx.currentTime - LATE_SLIP_SEC) return
     const slip = live ? Math.max(0, ctx.currentTime - when) : 0
     const at = Math.max(0, when + slip)
@@ -4977,6 +5078,8 @@ export class AudioEngine {
     this.libraryHost.allOff()
     this.patchHost.allOff()
     this.sessionNodes.clear()
+    this.heldAudio.clear()
+    this.midiLoopFill.clear()
     this.sessionStarted.clear()
     this.sessionClip.clear()
     this.sessionGen.clear()
