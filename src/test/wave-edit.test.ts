@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderArrangement } from '../audio/bounce'
 import { renderClipChannels } from '../audio/stretch/engine'
+import { loopBoundaryStats, renderLoopedCycles } from '../audio/loopSeam'
 import { fadeCurve } from '../audio/wave/edit'
 import {
   applyEditToClip,
@@ -197,5 +198,63 @@ describe('wave edit model', () => {
     store.undo()
     expect(store.project.tracks[0].clips).toHaveLength(1)
     expect(store.project.tracks[0].clips[0].wave?.regions[0].reverse).toBe(true)
+  })
+
+  it('loops a reversed, faded, and silenced clip on the cycle and exports the edit', async () => {
+    const rate = 48000
+    const length = rate
+    const mark = 4000
+    const data = new Float32Array(length)
+    for (let index = 0; index < length; index++) data[index] = Math.cos((2 * Math.PI * 12 * index) / length) * 0.45
+    data[mark] = 0.9
+    const reversed = reverseRange(documentFromClip(clip(length), length), 0, length)
+    const faded = setFades(reversed, { fadeIn: 64, fadeOut: 64, fadeInShape: 'equal', fadeOutShape: 'equal' })
+    const heard = renderWaveRange([data], faded, 0, length, { fades: true })[0]
+    expect(heard[0]).toBeCloseTo(0, 4)
+    expect(Math.abs(heard[length - 1])).toBeLessThan(0.02)
+    expect(heard[length - 1 - mark]).toBeGreaterThan(0.7)
+    const stats = loopBoundaryStats(heard, rate)
+    expect(stats.hole).toBeLessThan(rate * 0.01)
+    expect(stats.seamRms).toBeGreaterThan(stats.bodyRms * 0.2)
+    const played = renderLoopedCycles(heard, rate, 2)
+    expect(played[length + (length - 1 - mark)]).toBeGreaterThan(0.7)
+    expect(Math.abs((played[length] || 0) - (played[length - 1] || 0))).toBeLessThan(0.05)
+
+    const quiet = silenceRange(documentFromClip(clip(length), length), 2000, 2200)
+    const silenced = renderWaveRange([data], quiet, 0, length)[0]
+    expect(silenced[2100]).toBe(0)
+    expect(Math.abs(silenced[100])).toBeGreaterThan(0.2)
+    expect(loopBoundaryStats(silenced, rate).hole).toBeLessThan(rate * 0.01)
+
+    const project = createEmptyProject(rate)
+    project.snap = false
+    project.masterVolume = 1
+    project.masterPlugins = []
+    project.loopEnabled = true
+    project.loopStartSample = 0
+    project.loopEndSample = length
+    project.tracks = [makeTrack({
+      id: 'vocal',
+      name: 'Vocal',
+      type: 'audio',
+      volume: 1,
+      pan: 0,
+      input: 'none',
+      clips: [clip(length)],
+    })]
+    const store = new ProjectStore(project, new Map([['buf', { id: 'buf', name: 'take', sampleRate: rate, channels: [data] }]]))
+    store.project.masterPlugins = []
+    store.project.masterVolume = 1
+    store.applyWave('vocal', 'take', reversed, 'Reverse')
+    const printed = await renderArrangement(store.project, store.buffers, 0, length, false)
+    let peakAt = 0
+    let peak = 0
+    for (let index = 0; index < printed[0].length; index++) {
+      if (Math.abs(printed[0][index]) > peak) {
+        peak = Math.abs(printed[0][index])
+        peakAt = index
+      }
+    }
+    expect(peakAt).toBe(length - 1 - mark)
   })
 })

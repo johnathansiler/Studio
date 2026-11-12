@@ -5,6 +5,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { AwsClient } from 'aws4fetch'
+import { layersForNotes, type InstrumentQuery, type LibraryInstrument } from '../src/library/group.ts'
 
 export const LIBRARY_EXPIRES_SEC = 15 * 60
 export const LIBRARY_CATALOG_KEY = 'catalog/catalog.json.gz'
@@ -85,6 +86,8 @@ export async function presignR2Get(env: LibraryEnv, key: string, expires = LIBRA
 export interface LibraryCall {
   method: string
   pathname: string
+  /** Raw query string, including the leading `?` when present. */
+  search?: string
   ip: string
   accessKey: string
   body: unknown
@@ -120,10 +123,16 @@ export function libraryClientIp(headers: { [key: string]: string | string[] | un
   return headerValue(headers['cf-connecting-ip']) || headerValue(headers['true-client-ip']) || remoteAddress?.trim() || 'local'
 }
 
+export interface InstrumentCatalog {
+  search(query: InstrumentQuery): Promise<{ total: number; offset: number; limit: number; instruments: unknown[] }>
+  get(id: string): Promise<LibraryInstrument | null>
+}
+
 export function createLibraryApi(deps: {
   env: () => LibraryEnv
   sign?: (key: string, env: LibraryEnv) => Promise<string>
   now?: () => number
+  instruments?: InstrumentCatalog
 }): LibraryApi {
   const failures = new Map<string, number[]>()
   const successes = new Map<string, number[]>()
@@ -134,12 +143,13 @@ export function createLibraryApi(deps: {
       const env = deps.env()
       const ready = readLibraryEnv(env)
       const path = call.pathname
-      if (path !== '/api/library' && path !== '/api/library/sign') {
+      const instrumentPath = instrumentRoute(path)
+      if (!instrumentPath && path !== '/api/library' && path !== '/api/library/sign') {
         return { status: 404, body: { error: 'Not found.' } }
       }
       if (!ready) return { status: call.method === 'GET' && path === '/api/library' ? 200 : 503, body: { ready: false, message: LIBRARY_NOT_READY } }
       if (call.method === 'GET' && path === '/api/library') return { status: 200, body: { ready: true } }
-      if (call.method !== 'POST' || path !== '/api/library/sign') return { status: 405, body: { error: 'Use POST.' } }
+      if (!instrumentPath && (call.method !== 'POST' || path !== '/api/library/sign')) return { status: 405, body: { error: 'Use POST.' } }
 
       const now = call.now
       const ip = call.ip || 'local'
@@ -161,6 +171,11 @@ export function createLibraryApi(deps: {
         successes.set(ip, recent)
         return { status: 429, body: { error: 'Too many library requests. Wait a minute and try again.' } }
       }
+      if (instrumentPath) {
+        recent.push(now)
+        successes.set(ip, recent)
+        return serveInstruments(deps.instruments, instrumentPath, call, (key) => sign(key, env))
+      }
       const keys = keysFromBody(call.body)
       if (!keys) return { status: 400, body: { error: 'Those library paths cannot be signed.' } }
       recent.push(now)
@@ -172,6 +187,72 @@ export function createLibraryApi(deps: {
       return { status: 200, body: { ready: true, expiresIn: LIBRARY_EXPIRES_SEC, urls } }
     },
   }
+}
+
+function instrumentRoute(path: string): { id: string; notes: boolean } | null {
+  if (path === '/api/library/instruments') return { id: '', notes: false }
+  const match = path.match(/^\/api\/library\/instruments\/(lib_[a-z0-9]+)(\/notes)?$/)
+  if (!match) return null
+  return { id: match[1], notes: Boolean(match[2]) }
+}
+
+function queryNumber(params: URLSearchParams, name: string, fallback: number) {
+  const value = Number(params.get(name))
+  return Number.isFinite(value) ? value : fallback
+}
+
+async function serveInstruments(
+  catalog: InstrumentCatalog | undefined,
+  route: { id: string; notes: boolean },
+  call: LibraryCall,
+  sign: (key: string) => Promise<string>,
+): Promise<LibraryResult> {
+  if (!catalog) return { status: 503, body: { ready: false, message: LIBRARY_NOT_READY } }
+  try {
+    if (!route.id) {
+      if (call.method !== 'GET') return { status: 405, body: { error: 'Use GET.' } }
+      const params = new URLSearchParams(call.search ?? '')
+      const page = await catalog.search({
+        text: params.get('q') ?? '',
+        category: params.get('category') ?? '',
+        pack: params.get('pack') ?? '',
+        offset: queryNumber(params, 'offset', 0),
+        limit: queryNumber(params, 'limit', 40),
+      })
+      return { status: 200, body: { ...page } }
+    }
+    const instrument = await catalog.get(route.id)
+    if (!instrument) return { status: 404, body: { error: 'That instrument is not in the library.' } }
+    if (!route.notes) {
+      if (call.method !== 'GET') return { status: 405, body: { error: 'Use GET.' } }
+      return { status: 200, body: { ...instrument } }
+    }
+    if (call.method !== 'POST') return { status: 405, body: { error: 'Use POST.' } }
+    const request = noteRequest(call.body)
+    if (!request) return { status: 400, body: { error: 'Those library paths cannot be signed.' } }
+    const known = new Set(instrument.layers.map((layer) => layer.key))
+    const layers = request.keys
+      ? request.keys.every((key) => known.has(key)) ? layersForNotes(instrument, { keys: request.keys }) : null
+      : layersForNotes(instrument, { notes: request.notes, velocity: request.velocity })
+    if (!layers?.length) return { status: 400, body: { error: 'Those library paths cannot be signed.' } }
+    const urls: { key: string; url: string }[] = []
+    for (const layer of layers) urls.push({ key: layer.key, url: await sign(layer.key) })
+    return { status: 200, body: { ready: true, expiresIn: LIBRARY_EXPIRES_SEC, urls } }
+  } catch {
+    return { status: 503, body: { error: 'Could not read the library catalog.' } }
+  }
+}
+
+function noteRequest(body: unknown): { keys?: string[]; notes?: number[]; velocity?: number } | null {
+  if (!body || typeof body !== 'object') return null
+  const raw = body as { keys?: unknown; notes?: unknown; velocity?: unknown }
+  const keys = Array.isArray(raw.keys) ? raw.keys.filter((item): item is string => typeof item === 'string' && item.length > 0 && item.length <= 512) : undefined
+  const notes = Array.isArray(raw.notes) ? raw.notes.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)) : undefined
+  if ((!keys || !keys.length) && (!notes || !notes.length)) return null
+  if (keys && keys.length > MAX_KEYS) return null
+  if (notes && notes.length > 8) return null
+  const velocity = typeof raw.velocity === 'number' && Number.isFinite(raw.velocity) ? raw.velocity : undefined
+  return { keys, notes, velocity }
 }
 
 function keysFromBody(body: unknown): string[] | null {

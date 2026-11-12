@@ -1,10 +1,14 @@
 import { parseNote } from '../audio/multisample/sfz'
-import { decodeSlotFile, focusedSlot } from '../audio/sample/slot'
+import { decodeSlotBytes, decodeSlotFile, focusedSlot } from '../audio/sample/slot'
 import type { AudioAsset } from '../model/types'
 import { placeSound } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
 import { fetchLibraryBytes } from './audio'
+import { midiName, type LibraryInstrument } from './group'
+import { fetchLibraryInstrument } from './instrumentsApi'
+import { programFromLibraryInstrument } from './instrumentProgram'
+import { librarySampleUrl, loadLibrarySampleBytes } from './samples'
 import type { LibraryEntry } from './types'
 
 const registry = new Map<string, LibraryEntry>()
@@ -130,6 +134,41 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
   const pad = emptyPad(store, trackId)
   store.assignTrackPad(trackId, pad.bank, pad.index, { name: entry.name, bufferId: asset.id })
   return `${entry.name} is on a pad.`
+}
+
+async function decodeLibraryBytes(bytes: ArrayBuffer, decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>) {
+  if (decode) return decode(bytes)
+  const lossless = decodeSlotBytes(bytes)
+  if (lossless?.channels[0]?.length) return { sampleRate: lossless.sampleRate, channels: lossless.channels }
+  return decodeSlotFile(bytes)
+}
+
+/** One note around C4, for the row preview. The rest of the instrument stays unloaded. */
+export async function previewLibraryInstrument(instrument: { id: string; previewKey: string }, decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>) {
+  const bytes = await loadLibrarySampleBytes(librarySampleUrl(instrument.id, instrument.previewKey))
+  const decoded = await decodeLibraryBytes(bytes, decode)
+  if (!decoded.channels[0]?.length) throw new Error('That note had no audio.')
+  return decoded
+}
+
+/**
+ * Put every sampled note on the keyboard.
+ * Keys that were not sampled play the nearest root, pitched.
+ */
+export async function loadGroupedLibraryInstrument(store: ProjectStore, id: string) {
+  const instrument = await fetchLibraryInstrument(id)
+  return placeLibraryInstrument(store, instrument)
+}
+
+export function placeLibraryInstrument(store: ProjectStore, instrument: LibraryInstrument) {
+  const program = programFromLibraryInstrument(instrument)
+  const selected = store.selectedTrackId ? store.track(store.selectedTrackId) : null
+  const host = selected?.type === 'midi' && selected.instrument !== 'pads' ? selected.id : null
+  const trackId = host ?? store.addTracks({ kind: 'midi', count: 1, instrument: 'sampler', input: 'mic', channels: 1, armed: false })[0]
+  if (!trackId) throw new Error('Could not add an instrument track.')
+  store.setLibrary(trackId, program)
+  const span = instrument.notes <= 1 ? `Root ${midiName(instrument.previewMidi)}` : `${midiName(instrument.lo)}–${midiName(instrument.hi)}`
+  return `${instrument.name} plays across the keyboard. ${span}.`
 }
 
 export async function loadLibraryEntry(store: ProjectStore, entry: LibraryEntry, startSample: number, decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>) {
