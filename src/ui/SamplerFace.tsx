@@ -46,18 +46,16 @@ export function SamplerFace({ store, engine, trackId }: { store: ProjectStore; e
   return (
     <section className="sampler-face" data-sampler="face" aria-label="Sampler">
       <p className="sampler-title">{title}</p>
-      {program?.id.startsWith('harbor:') && (
-        <>
-          <HarborPresetBar store={store} trackId={track.id} />
-          <HarborProgress />
-        </>
+      {program?.id.startsWith('harbor:') && <HarborPresetBar store={store} trackId={track.id} />}
+      {program && (program.id.startsWith('harbor:') || program.id.startsWith('lib_')) && (
+        <HarborProgress label={program.id.startsWith('lib_') ? 'Loading notes' : 'Loading zones'} />
       )}
       {program ? (
         <ZoneMap program={program} />
       ) : (
         <SampleWave store={store} trackId={track.id} pluginId={sampler?.id} channel={channel} points={sampler?.sampler ? readSlotPoints(sampler.sampler) : null} />
       )}
-      <p className="sampler-zones-label">{program ? zoneSummary(program) : (sampleName || 'No sample yet')}</p>
+      <p className="sampler-zones-label">{program ? (program.id.startsWith('lib_') ? `${program.name} · ${zoneSummary(program)}` : zoneSummary(program)) : (sampleName || 'No sample yet')}</p>
       <div className="inst-knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         {track.instrument === 'sampler' && sampler?.sampler ? (
           <>

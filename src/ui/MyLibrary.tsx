@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent 
 import { SOUND_MIME } from '../audio/sample/slot'
 import { LibraryAuthError, clearLibraryAccessKey, libraryStatus, readLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { loadLibraryCatalog } from '../library/audio'
-import { libraryDragId, loadLibraryDrag, loadLibraryEntry, publishLibrary, readLibraryAsset } from '../library/place'
-import { hitAt, libraryRowWindow, searchLibrary, type LibraryHits, type LibraryIndex } from '../library/search'
+import { browseLibraryRows, type BrowseRow } from '../library/browse'
+import { midiName, type LibraryInstrumentSummary } from '../library/group'
+import { fetchAllLibraryInstruments } from '../library/instrumentsApi'
+import { libraryDragId, loadGroupedLibraryInstrument, loadLibraryDrag, loadLibraryEntry, previewLibraryInstrument, publishLibrary, readLibraryAsset } from '../library/place'
+import { libraryRowWindow, searchLibrary, type LibraryIndex } from '../library/search'
 import { EMPTY_LIBRARY_QUERY, type LibraryDocument, type LibraryEntry, type LibraryQuery } from '../library/types'
 import type { ProjectStore } from '../state/store'
 
@@ -30,9 +33,9 @@ const BPM_PRESETS: { id: string; label: string; min: number | null; max: number 
 ]
 
 const TYPE_LABEL: Record<string, string> = {
+  instrument: 'Instruments',
   'one-shot': 'One-shot',
   loop: 'Loop',
-  'multisample note': 'Multisample',
   sfx: 'SFX',
 }
 
@@ -71,6 +74,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const [message, setMessage] = useState('Checking the library…')
   const [passphrase, setPassphrase] = useState('')
   const [index, setIndex] = useState<LibraryIndex | null>(null)
+  const [instruments, setInstruments] = useState<LibraryInstrumentSummary[]>([])
   const [pending, setPending] = useState('')
   const [text, setText] = useState('')
   const [group, setGroup] = useState<Group>('type')
@@ -82,10 +86,11 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const previewGen = useRef(0)
 
   function apply(loaded: { document: LibraryDocument; index: LibraryIndex }) {
-    publishLibrary(loaded.index.entries)
+    publishLibrary(loaded.index.entries.filter((entry) => entry.type !== 'multisample note'))
     setIndex(loaded.index)
     setPending(loaded.document.pending)
     setPhase('ready')
+    void fetchAllLibraryInstruments().then(setInstruments).catch(() => setInstruments([]))
   }
 
   async function openCatalog() {
@@ -157,10 +162,11 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     }
   }, [engine, store])
 
-  const hits = useMemo<LibraryHits>(() => {
-    if (!index) return { total: 0, ids: null }
-    return searchLibrary(index, { ...query, text })
-  }, [index, query, text])
+  const rows = useMemo<BrowseRow[]>(() => {
+    if (!index) return []
+    const next = { ...query, text }
+    return browseLibraryRows(index, searchLibrary(index, next), instruments, next)
+  }, [index, instruments, query, text])
 
   useEffect(() => {
     const node = listRef.current
@@ -172,7 +178,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
         ? scroller.scrollTop
         : Math.max(0, scroller.getBoundingClientRect().top - node.getBoundingClientRect().top)
       const viewHeight = Math.min(scroller.clientHeight || window.innerHeight, window.innerHeight || scroller.clientHeight)
-      const next = libraryRowWindow(hits.total, scrolled, viewHeight, ROW)
+      const next = libraryRowWindow(rows.length, scrolled, viewHeight, ROW)
       setRange((prev) => prev.start === next.start && prev.end === next.end ? prev : next)
     }
     node.scrollTop = 0
@@ -187,7 +193,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
       node.removeEventListener('scroll', update)
       observer?.disconnect()
     }
-  }, [hits.total, phase, text, query])
+  }, [rows.length, phase, text, query])
 
   async function unlock(event: React.FormEvent) {
     event.preventDefault()
@@ -203,6 +209,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     engine.stopPreview()
     clearLibraryAccessKey()
     setIndex(null)
+    setInstruments([])
     publishLibrary([])
     setPhase('lock')
     setMessage('Enter the library passphrase. It stays on this phone.')
@@ -259,6 +266,53 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     }
   }
 
+  async function previewInstrument(item: LibraryInstrumentSummary) {
+    if (playing === item.id) {
+      previewGen.current += 1
+      engine.stopPreview()
+      setPlaying('')
+      return
+    }
+    const gen = ++previewGen.current
+    setBusy(item.id)
+    try {
+      engine.unlock()
+      const decoded = await previewLibraryInstrument(item, decodeOf(engine))
+      if (gen !== previewGen.current) return
+      engine.stopPreview()
+      engine.previewPcm(decoded.channels, decoded.sampleRate, false)
+      setPlaying(item.id)
+    } catch (error) {
+      if (gen !== previewGen.current) return
+      if (error instanceof LibraryAuthError) {
+        setPhase('lock')
+        setMessage(error.message)
+        return
+      }
+      store.toast(error instanceof Error ? error.message : 'Could not play that instrument.', 'warn')
+    } finally {
+      if (gen === previewGen.current) setBusy('')
+    }
+  }
+
+  async function loadInstrument(item: LibraryInstrumentSummary) {
+    setBusy(item.id)
+    try {
+      engine.unlock()
+      const note = await loadGroupedLibraryInstrument(store, item.id)
+      store.toast(note, 'good')
+    } catch (error) {
+      if (error instanceof LibraryAuthError) {
+        setPhase('lock')
+        setMessage(error.message)
+        return
+      }
+      store.toast(error instanceof Error ? error.message : 'Could not load that instrument.', 'warn')
+    } finally {
+      setBusy('')
+    }
+  }
+
   function beginDrag(entry: LibraryEntry, event: ReactDragEvent) {
     dragId = libraryDragId(entry)
     event.dataTransfer.setData(SOUND_MIME, dragId)
@@ -267,9 +321,18 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   }
 
   const facets = index?.facets
-  const values = facets ? valuesFor(group, facets) : []
+  const values = facetValues(group, facets, instruments.length > 0)
   const active = activeFilters(query)
-  const shown = index ? Array.from({ length: Math.max(0, range.end - range.start) }, (_, offset) => hitAt(index, hits, range.start + offset)).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) : []
+  const shown = rows.slice(range.start, range.end)
+  const instrumentCount = rows.filter((row) => row.kind === 'instrument').length
+  const soundCount = rows.length - instrumentCount
+  const countLabel = rows.length === 0
+    ? '0 sounds'
+    : instrumentCount && soundCount
+      ? `${instrumentCount === 1 ? '1 instrument' : `${instrumentCount} instruments`} · ${soundCount === 1 ? '1 sound' : `${soundCount} sounds`}`
+      : instrumentCount
+        ? (instrumentCount === 1 ? '1 instrument' : `${instrumentCount} instruments`)
+        : (soundCount === 1 ? '1 sound' : `${soundCount} sounds`)
 
   return (
     <div className="sound-panel my-library" data-library-panel="open" aria-label="My Library. Private sounds from your library.">
@@ -335,40 +398,32 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
               ))}
             </div>
           )}
-          <p className="sound-count" data-library-count={hits.total}>{hits.total === 1 ? '1 sound' : `${hits.total} sounds`}</p>
+          <p className="sound-count" data-library-count={rows.length}>{countLabel}</p>
           <div className="sound-list" ref={listRef} aria-label="Library sounds">
-            {hits.total === 0 && <p className="sound-status">Nothing matches.</p>}
-            {hits.total > 0 && (
-              <div style={{ height: hits.total * ROW, position: 'relative', width: '100%', maxWidth: '100%' }}>
+            {rows.length === 0 && <p className="sound-status">Nothing matches.</p>}
+            {rows.length > 0 && (
+              <div style={{ height: rows.length * ROW, position: 'relative', width: '100%', maxWidth: '100%' }}>
                 <div style={{ position: 'absolute', top: range.start * ROW, left: 0, right: 0, maxWidth: '100%' }}>
-                  {shown.map((entry) => {
-                    const on = playing === entry.key
-                    const meta = [on ? 'Playing' : '', entry.type ? chipLabel(entry.type) : '', entry.category, entry.pack, entry.bpm ? `${entry.bpm} bpm` : '', entry.musicalKey || entry.root].filter(Boolean).join(' · ')
-                    return (
-                      <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.key} data-library-key={entry.key}>
-                        <button
-                          type="button"
-                          className="sound-copy"
-                          draggable
-                          aria-label={on ? `Stop ${entry.name}` : `Play ${entry.name}`}
-                          onDragStart={(event) => beginDrag(entry, event)}
-                          onClick={() => void preview(entry.key)}
-                        >
-                          <strong>{entry.name}</strong>
-                          <span className="sound-meta">{busy === entry.key ? 'Loading' : meta}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="sound-add"
-                          aria-label={`Load ${entry.name}`}
-                          disabled={busy === entry.key}
-                          onClick={() => { engine.unlock(); void load(entry.key) }}
-                        >
-                          Load
-                        </button>
-                      </div>
-                    )
-                  })}
+                  {shown.map((row) => row.kind === 'instrument' ? (
+                    <InstrumentRow
+                      key={row.instrument.id}
+                      item={row.instrument}
+                      playing={playing === row.instrument.id}
+                      busy={busy === row.instrument.id}
+                      onPlay={() => void previewInstrument(row.instrument)}
+                      onLoad={() => { engine.unlock(); void loadInstrument(row.instrument) }}
+                    />
+                  ) : (
+                    <SoundRow
+                      key={row.entry.key}
+                      entry={row.entry}
+                      playing={playing === row.entry.key}
+                      busy={busy === row.entry.key}
+                      onPlay={() => void preview(row.entry.key)}
+                      onLoad={() => { engine.unlock(); void load(row.entry.key) }}
+                      onDrag={(event) => beginDrag(row.entry, event)}
+                    />
+                  ))}
                 </div>
               </div>
             )}
@@ -379,10 +434,69 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   )
 }
 
+function InstrumentRow({
+  item,
+  playing,
+  busy,
+  onPlay,
+  onLoad,
+}: {
+  item: LibraryInstrumentSummary
+  playing: boolean
+  busy: boolean
+  onPlay: () => void
+  onLoad: () => void
+}) {
+  const span = item.notes <= 1 ? `Root ${midiName(item.previewMidi)}` : `${midiName(item.lo)}–${midiName(item.hi)}`
+  const meta = [playing ? 'Playing' : '', 'Instrument', item.category, item.pack, span, item.notes === 1 ? '' : `${item.notes} notes`].filter(Boolean).join(' · ')
+  return (
+    <div className={`sound-row${playing ? ' is-playing' : ''}`} data-library-instrument={item.id}>
+      <button type="button" className="sound-copy" aria-label={playing ? `Stop ${item.name}` : `Play ${item.name}`} onClick={onPlay}>
+        <strong>{item.name}</strong>
+        <span className="sound-meta">{busy ? 'Loading' : meta}</span>
+      </button>
+      <button type="button" className="sound-add" aria-label={`Load ${item.name}`} disabled={busy} onClick={onLoad}>Load</button>
+    </div>
+  )
+}
+
+function SoundRow({
+  entry,
+  playing,
+  busy,
+  onPlay,
+  onLoad,
+  onDrag,
+}: {
+  entry: LibraryEntry
+  playing: boolean
+  busy: boolean
+  onPlay: () => void
+  onLoad: () => void
+  onDrag: (event: ReactDragEvent) => void
+}) {
+  const meta = [playing ? 'Playing' : '', entry.type ? chipLabel(entry.type) : '', entry.category, entry.pack, entry.bpm ? `${entry.bpm} bpm` : '', entry.musicalKey || entry.root].filter(Boolean).join(' · ')
+  return (
+    <div className={`sound-row${playing ? ' is-playing' : ''}`} data-library-key={entry.key}>
+      <button type="button" className="sound-copy" draggable aria-label={playing ? `Stop ${entry.name}` : `Play ${entry.name}`} onDragStart={onDrag} onClick={onPlay}>
+        <strong>{entry.name}</strong>
+        <span className="sound-meta">{busy ? 'Loading' : meta}</span>
+      </button>
+      <button type="button" className="sound-add" aria-label={`Load ${entry.name}`} disabled={busy} onClick={onLoad}>Load</button>
+    </div>
+  )
+}
+
 function readBpm(value: string) {
   if (!value.trim()) return null
   const number = Number(value)
   return Number.isFinite(number) && number > 0 ? number : null
+}
+
+function facetValues(group: Group, facets: LibraryIndex['facets'] | undefined, hasInstruments: boolean) {
+  const values = facets ? valuesFor(group, facets).filter((value) => value !== 'multisample note') : []
+  if (group === 'type' && hasInstruments && !values.includes('instrument')) return ['instrument', ...values]
+  return values
 }
 
 function valuesFor(group: Group, facets: LibraryIndex['facets']) {

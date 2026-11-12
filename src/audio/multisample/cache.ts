@@ -2,6 +2,8 @@ import { measurePeak } from '../level'
 import { sampleLoadBegin, sampleLoadFinish } from '../sampleLoadBus'
 import { decodeWavPCM } from '../../model/wav'
 import type { DecodedSample, SampleFormat, SamplePack, SampleRef } from './types'
+import { decodeSlotBytes, decodeSlotFile } from '../sample/slot'
+import { loadLibrarySampleBytes, parseLibrarySampleUrl } from '../../library/samples'
 import { assertHuggingFaceUrl } from './source'
 import { packStream, STREAM_FRAMES, viewStream, type SampleStream } from './stream'
 
@@ -116,6 +118,7 @@ export class SampleCache implements SampleBank {
   }
 
   private async fetchAndStore(sample: SampleRef): Promise<DecodedSample | null> {
+    if (parseLibrarySampleUrl(sample.url)) return this.fetchPrivate(sample)
     assertHuggingFaceUrl(sample.url)
     sampleLoadBegin(sample.id)
     if (this.active >= this.maxActive) await new Promise<void>((resolve) => this.waiters.push(resolve))
@@ -133,6 +136,27 @@ export class SampleCache implements SampleBank {
       const decoded = decodeSampleBytes(bytes, sample)
       this.remember(sample.id, decoded)
       return decoded
+    } finally {
+      sampleLoadFinish(sample.id)
+      this.active -= 1
+      this.waiters.shift()?.()
+    }
+  }
+
+  /** One private-library note. The URL is an object key, signed only when this note is played. */
+  private async fetchPrivate(sample: SampleRef): Promise<DecodedSample | null> {
+    sampleLoadBegin(sample.id)
+    if (this.active >= this.maxActive) await new Promise<void>((resolve) => this.waiters.push(resolve))
+    this.active += 1
+    try {
+      const bytes = await loadLibrarySampleBytes(sample.url)
+      const lossless = decodeSlotBytes(bytes)
+      const decoded = lossless?.channels[0]?.length
+        ? { sampleRate: lossless.sampleRate, channels: lossless.channels }
+        : await decodeSlotFile(bytes)
+      const stored = { sampleRate: decoded.sampleRate, channels: decoded.channels }
+      this.remember(sample.id, stored)
+      return stored
     } finally {
       sampleLoadFinish(sample.id)
       this.active -= 1
