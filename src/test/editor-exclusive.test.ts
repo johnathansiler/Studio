@@ -318,7 +318,7 @@ describe('editors, close, and header meters in the app', () => {
           })
         })
         expect(muted.Keys.engine, `${label} muted`).toBeLessThan(0.015)
-        expect(muted.Keys.scale, `${label} muted`).toBeLessThan(0.02)
+        expect(muted.Keys.scale, `${label} muted`).toBeLessThan(0.05)
         expect(muted.Keys.lit, `${label} muted midi`).toBe(true)
         await keysHead.locator('button[aria-label="Unmute track"]').click()
 

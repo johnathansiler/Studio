@@ -69,7 +69,20 @@ describe('production loop tempo follow', () => {
       await waitForServer(url, child)
       const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
       await page.goto(url, { waitUntil: 'domcontentloaded' })
-      await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+      await page.getByRole('button', { name: /^Arrange/ }).first().click()
+      await page.locator('.arrange [data-track-name="Vocal"]').waitFor()
+      await page.waitForFunction(() => {
+        const hook = (window as unknown as { __cueharbor?: { store: { project: { id: string; tracks: unknown[] } } }; __projectSeen?: { id: string; at: number } }).__cueharbor
+        const store = hook?.store
+        if (!store?.project.tracks.length) return false
+        const seen = (window as unknown as { __projectSeen?: { id: string; at: number } }).__projectSeen
+        const id = `${store.project.id}:${store.project.tracks.length}`
+        if (!seen || seen.id !== id) {
+          ;(window as unknown as { __projectSeen?: { id: string; at: number } }).__projectSeen = { id, at: performance.now() }
+          return false
+        }
+        return performance.now() - seen.at > 400
+      })
       await page.evaluate(() => {
         const hook = (window as unknown as { __cueharbor: { engine: { seek: (sample: number) => void }; store: { setTempo: (bpm: number) => void } } }).__cueharbor
         hook.engine.seek(0)
@@ -93,7 +106,8 @@ describe('production loop tempo follow', () => {
         const channel = new Float32Array(sourceSamples)
         for (let i = 0; i < channel.length; i++) channel[i] = Math.sin((2 * Math.PI * 110 * i) / rate) * 0.35
         store.addAsset({ id: 'loopbuf', name: '2-AND-4 (100)', sampleRate: rate, channels: [channel] })
-        const track = store.project.tracks.find((item) => item.type === 'audio') ?? store.project.tracks[0]
+        const track = store.project.tracks.find((item) => item.type === 'audio')
+        if (!track) throw new Error('no audio track')
         store.addAudioClip(track.id, {
           id: 'loopclip',
           name: '2-AND-4 (100)',
@@ -108,7 +122,21 @@ describe('production loop tempo follow', () => {
           stretch: { sourceSamples, semitones: 0, cents: 0, mode: 'pro', followTempo: true, sourceBpm, markers: [] },
         })
       })
-      await page.locator('[data-clip]').first().waitFor({ timeout: 20000 })
+      const clip = page.locator('[data-clip="loopclip"]')
+      try {
+        await clip.waitFor({ timeout: 20000 })
+      } catch (error) {
+        const detail = await page.evaluate(() => {
+          const store = (window as unknown as { __cueharbor?: { store: { project: { tracks: { name: string; type: string; clips: { id: string }[] }[] } } } }).__cueharbor?.store
+          const node = document.querySelector('[data-clip="loopclip"]') as HTMLElement | null
+          const box = node?.getBoundingClientRect()
+          return {
+            tracks: store?.project.tracks.map((track) => `${track.name}:${track.type}:${track.clips.map((item) => item.id).join(',')}`) ?? [],
+            box: box ? { w: box.width, h: box.height } : null,
+          }
+        })
+        throw new Error(`${error instanceof Error ? error.message : 'clip missing'} ${JSON.stringify(detail)}`)
+      }
       const loaded = await readClip(page)
       expect(loaded.follow).toBe(true)
       expect(loaded.bpm).toBe(100)
