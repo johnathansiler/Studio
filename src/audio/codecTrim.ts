@@ -7,6 +7,8 @@ export function readLameDelay(bytes: Uint8Array): { delay: number; padding: numb
   const end = Math.min(bytes.length - 24, 8192)
   for (let i = 0; i < end; i++) {
     if (bytes[i] !== 0x4c || bytes[i + 1] !== 0x41 || bytes[i + 2] !== 0x4d || bytes[i + 3] !== 0x45) continue
+    const version = bytes[i + 4]
+    if (version !== 0x20 && (version < 0x30 || version > 0x39)) continue
     const at = i + 21
     if (at + 2 >= bytes.length) return null
     const delay = (bytes[at] << 4) | (bytes[at + 1] >> 4)

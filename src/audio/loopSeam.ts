@@ -66,6 +66,22 @@ export function fitLoopBeats(input: {
   return { beats, sourceBpm }
 }
 
+/**
+ * Loop points for one AudioBufferSourceNode.
+ * Safari loops the whole buffer in whole frames when both ends stay 0.
+ * Any other end is multiplied by the sample rate and played with interpolation,
+ * so the wrap can click and walk away from the metronome. A partial region still
+ * uses seconds, rounded by the browser onto a frame.
+ */
+export function nativeLoopRange(startFrame: number, endFrame: number, bufferFrames: number, sampleRate: number): { loopStart: number; loopEnd: number } {
+  const frames = Math.max(1, Math.round(bufferFrames))
+  const rate = sampleRate > 0 ? sampleRate : 48000
+  const start = Math.max(0, Math.min(frames - 1, Math.round(startFrame)))
+  const end = Math.max(start + 1, Math.min(frames, Math.round(endFrame)))
+  if (start <= 0 && end >= frames) return { loopStart: 0, loopEnd: 0 }
+  return { loopStart: start / rate, loopEnd: end / rate }
+}
+
 /** The restart would click if it jumps farther than the waveform is already moving. */
 export function seamWouldClick(channel: Float32Array, start = 0, end = channel.length): boolean {
   const from = Math.max(0, Math.min(channel.length - 1, Math.floor(start)))

@@ -1,7 +1,7 @@
 import { chromium } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import { readLameDelay, trimAacPriming, trimCodecPadding } from '../audio/codecTrim'
-import { bakeLoopSeam, barsFromName, bpmFromName, fitLoopBeats, loopBoundaryStats, renderLoopedCycles, seamWouldClick } from '../audio/loopSeam'
+import { bakeLoopSeam, barsFromName, bpmFromName, fitLoopBeats, loopBoundaryStats, nativeLoopRange, renderLoopedCycles, seamWouldClick } from '../audio/loopSeam'
 import { createEmptyProject } from '../model/types'
 import { placeSound } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
@@ -58,47 +58,84 @@ describe('seamless loop playback', () => {
     expect(Math.abs((baked[baked.length - 1] || 0) - (baked[0] || 0))).toBeLessThan(1e-5)
   })
 
-  it('renders two cycles in OfflineAudioContext with no hole at the wrap', async () => {
-    const channel = tone(48, rate)
-    const baked = Array.from(bakeLoopSeam(channel, rate))
-    let quiet = 0
-    let err = 1
+  it('leaves a whole-buffer loop on integer frames', () => {
+    expect(nativeLoopRange(0, rate, rate, rate)).toEqual({ loopStart: 0, loopEnd: 0 })
+    const partial = nativeLoopRange(100, 4000, rate, rate)
+    expect(partial.loopStart).toBeCloseTo(100 / rate, 8)
+    expect(partial.loopEnd).toBeCloseTo(4000 / rate, 8)
+  })
+
+  it('renders many cycles in OfflineAudioContext with no hole, dip, or drift', async () => {
+    const channel = tone(12, rate)
+    const hard = tone(12, rate)
+    hard.fill(-0.55, hard.length - 64)
+    const bakedHard = Array.from(bakeLoopSeam(hard, rate))
+    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-gpu'] }).catch(() => chromium.launch({
+      headless: true,
+      executablePath: '/usr/bin/google-chrome',
+      args: ['--no-sandbox', '--disable-gpu'],
+    }))
     try {
-      const browser = await chromium.launch()
       const page = await browser.newPage()
-      const measured = await page.evaluate(async ({ samples, rate: sampleRate }) => {
-        const audio = new Float32Array(samples)
-        const ctx = new OfflineAudioContext(1, audio.length * 2, sampleRate)
+      const measure = async (samples: number[], cycles: number) => page.evaluate(async ({ samples: list, rate: sampleRate, cycles: turns }) => {
+        const audio = new Float32Array(list)
+        const ctx = new OfflineAudioContext(1, audio.length * turns, sampleRate)
         const buffer = ctx.createBuffer(1, audio.length, sampleRate)
         buffer.copyToChannel(audio, 0)
         const src = ctx.createBufferSource()
         src.buffer = buffer
         src.loop = true
         src.loopStart = 0
-        src.loopEnd = audio.length / sampleRate
+        src.loopEnd = 0
         src.connect(ctx.destination)
         src.start(0)
-        const rendered = await ctx.startRendering()
-        const out = rendered.getChannelData(0)
-        let silent = 0
+        const out = (await ctx.startRendering()).getChannelData(0)
+        const period = audio.length
+        const seam = Math.round(sampleRate * 0.003)
         let worst = 0
-        for (let i = 1; i < out.length; i++) {
-          worst = Math.max(worst, Math.abs(out[i] - audio[i % audio.length]))
-          if (i > audio.length - 64 && i < audio.length + 64 && Math.abs(out[i]) < 0.05) silent += 1
+        let hole = 0
+        let run = 0
+        let seamEnergy = 0
+        let seamCount = 0
+        let bodyEnergy = 0
+        const bodyStart = Math.floor(period * 0.25)
+        const bodyEnd = Math.floor(period * 0.75)
+        for (let i = bodyStart; i < bodyEnd; i++) bodyEnergy += out[i] * out[i]
+        for (let i = 0; i < out.length; i++) worst = Math.max(worst, Math.abs(out[i] - audio[i % period]))
+        for (let c = 1; c < turns; c++) {
+          for (let k = -seam; k <= seam; k++) {
+            const sample = out[c * period + k] || 0
+            seamEnergy += sample * sample
+            seamCount += 1
+            if (Math.abs(sample) < 0.05) {
+              run += 1
+              if (run > hole) hole = run
+            } else run = 0
+          }
+          run = 0
         }
-        return { silent, worst }
-      }, { samples: baked, rate })
+        const driftAt = (turns - 1) * period
+        return {
+          worst,
+          hole,
+          seamRms: Math.sqrt(seamEnergy / Math.max(1, seamCount)),
+          bodyRms: Math.sqrt(bodyEnergy / Math.max(1, bodyEnd - bodyStart)),
+          drift: Math.abs((out[driftAt] || 0) - audio[0]),
+        }
+      }, { samples, rate, cycles })
+      const seamless = await measure(Array.from(channel), 40)
+      expect(seamless.worst).toBeLessThan(1e-4)
+      expect(seamless.hole).toBe(0)
+      expect(seamless.drift).toBeLessThan(1e-4)
+      expect(seamless.seamRms).toBeGreaterThan(seamless.bodyRms * 0.9)
+      const joined = await measure(bakedHard, 8)
+      expect(joined.worst).toBeLessThan(1e-4)
+      expect(joined.hole).toBeLessThan(8)
+      expect(joined.drift).toBeLessThan(1e-4)
+      expect(joined.seamRms).toBeGreaterThan(joined.bodyRms * 0.7)
+    } finally {
       await browser.close()
-      quiet = measured.silent
-      err = measured.worst
-    } catch {
-      const played = renderLoopedCycles(channel, rate, 2)
-      err = 0
-      for (let i = 1; i < played.length; i++) err = Math.max(err, Math.abs(played[i] - channel[i % channel.length]))
-      quiet = loopBoundaryStats(channel, rate).hole
     }
-    expect(err).toBeLessThan(1e-4)
-    expect(quiet).toBe(0)
   })
 })
 
@@ -144,7 +181,7 @@ describe('loop length on the bar grid', () => {
 describe('decoder padding', () => {
   it('reads a LAME delay tag and trims it off the decoded loop', () => {
     const bytes = new Uint8Array(64)
-    bytes.set([0x4c, 0x41, 0x4d, 0x45], 0)
+    bytes.set([0x4c, 0x41, 0x4d, 0x45, 0x33], 0)
     bytes[21] = 0x02
     bytes[22] = 0x40
     bytes[23] = 0x10
