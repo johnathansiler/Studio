@@ -35,6 +35,7 @@ import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multis
 import { insertIndex, nextTrackName, tracksFor, type AddTrackSpec, type TrackChoice } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
+import { applyEditToClip, bodyLength, gainToDb, sourceLen, type WaveEdit } from '../audio/wave/edit'
 import { writeKeyboardEnabled, writeKeyboardOctave } from '../model/keyboardPlay'
 import { applyChanges, HistoryJournal } from './history'
 import { diffProject, musicalClone, type ProjectOp, type StampWire } from './ops'
@@ -312,6 +313,9 @@ export class ProjectStore {
   smartTempo: { trackId: string; clipId: string; bpm: number } | null = null
   /** Spectral repair sheet. Not saved. */
   spectralTrackId: string | null = null
+  /** Open wave editor. Not saved. The edits themselves live on the clip. */
+  waveTrackId: string | null = null
+  waveClipId: string | null = null
   spectralClipId: string | null = null
   spectralStatus: string | null = null
   private bypassed: { id: string; enabled: boolean }[] | null = null
@@ -519,9 +523,9 @@ export class ProjectStore {
     this.emit()
   }
 
-  endDraft() {
+  endDraft(label?: string) {
     this.drafted = false
-    this.journal.seal(this.project)
+    this.journal.seal(this.project, label)
   }
 
   undo() {
@@ -719,7 +723,116 @@ export class ProjectStore {
     this.emit()
   }
 
+  openWaveEditor(trackId: string, clipId: string) {
+    const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+    if (!clip) return
+    this.waveTrackId = trackId
+    this.waveClipId = clipId
+    this.clipSheet = false
+    this.spectralTrackId = null
+    this.spectralClipId = null
+    this.stemTrackId = null
+    this.stemClipId = null
+    this.selectedTrackId = trackId
+    this.selectedClipId = clipId
+    this.selectedClipIds = [clipId]
+    this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
+    this.emit()
+  }
+
+  closeWaveEditor() {
+    if (!this.waveClipId && !this.waveTrackId) return
+    this.waveTrackId = null
+    this.waveClipId = null
+    this.emit()
+  }
+
+  /** One undo step for a wave-editor edit. An empty document removes the clip. */
+  applyWave(trackId: string, clipId: string, edit: WaveEdit, label: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const clip = track?.clips.find((item) => item.id === clipId)
+      if (!track || !clip) return
+      if (bodyLength(edit) < 1) {
+        track.clips = track.clips.filter((item) => item.id !== clipId)
+        if (this.waveClipId === clipId) {
+          this.waveClipId = null
+          this.waveTrackId = null
+        }
+        if (this.selectedClipId === clipId) {
+          this.selectedClipId = null
+          this.selectedClipIds = []
+        }
+        return
+      }
+      const asset = this.buffers.get(clip.bufferId)
+      const file = asset?.channels[0]?.length ?? clip.offsetSamples + sourceLen(clip)
+      const next = applyEditToClip(clip, edit, file)
+      Object.assign(clip, next)
+      this.commitClip(clip)
+    }, label)
+  }
+
+  /** Split at a timeline sample and leave a short fade on each new edge so the join does not click. */
+  splitWaveClip(trackId: string, clipId: string, atSample: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const rightId = splitLinkedAudio(this.project, trackId, clipId, atSample)
+      if (!rightId) return
+      const rightIndex = track.clips.findIndex((item) => item.id === rightId)
+      const left = rightIndex > 0 ? track.clips[rightIndex - 1] : null
+      const right = track.clips[rightIndex] ?? null
+      this.declickSplitEdge(left, 'out')
+      this.declickSplitEdge(right, 'in')
+      if (left) {
+        this.waveTrackId = trackId
+        this.waveClipId = left.id
+        this.selectedClipId = left.id
+        this.selectedClipIds = [left.id]
+      }
+    }, 'Split clip')
+  }
+
+  private declickSplitEdge(clip: AudioClip | null | undefined, edge: 'in' | 'out') {
+    if (!clip) return
+    const room = Math.floor(clip.durationSamples / 4)
+    const samples = Math.min(128, room)
+    if (samples < 8) return
+    if (edge === 'out') clip.fadeOutSamples = Math.max(clip.fadeOutSamples, samples)
+    else clip.fadeInSamples = Math.max(clip.fadeInSamples, samples)
+    const audible = sourceLen(clip)
+    const ratio = clip.durationSamples / Math.max(1, audible)
+    const wave = clip.wave
+    if (!wave) {
+      clip.wave = {
+        origin: 0,
+        head: clip.offsetSamples,
+        tailAt: clip.offsetSamples + audible,
+        tail: 0,
+        regions: [{ id: 'body', source: clip.offsetSamples, length: audible, reverse: false, gain: 1, silence: false }],
+        fadeIn: Math.round(clip.fadeInSamples / ratio),
+        fadeOut: Math.round(clip.fadeOutSamples / ratio),
+        fadeInShape: edge === 'in' ? 'equal' : 'linear',
+        fadeOutShape: edge === 'out' ? 'equal' : 'linear',
+        gainDb: gainToDb(clip.gain),
+        crossfade: 0,
+      }
+      return
+    }
+    clip.wave = {
+      ...wave,
+      fadeIn: edge === 'in' ? Math.round(clip.fadeInSamples / ratio) : wave.fadeIn,
+      fadeOut: edge === 'out' ? Math.round(clip.fadeOutSamples / ratio) : wave.fadeOut,
+      fadeInShape: edge === 'in' ? 'equal' : wave.fadeInShape,
+      fadeOutShape: edge === 'out' ? 'equal' : wave.fadeOutShape,
+    }
+  }
+
   openSpectral(trackId: string, clipId: string) {
+    this.waveTrackId = null
+    this.waveClipId = null
     this.spectralTrackId = trackId
     this.spectralClipId = clipId
     this.selectedTrackId = trackId

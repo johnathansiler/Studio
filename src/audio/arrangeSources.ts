@@ -28,6 +28,8 @@ import { renderNotes, type SampleBuffer } from './rack/dsp'
 import { isDrumsPlugin } from './plugins/ids'
 import { renderSamplerSpan } from './plugins/sampler'
 import { clipNeedsStretch, renderClipChannels } from './stretch/engine'
+import { bodyLength, clipHasWaveBody, fadeCurve } from './wave/edit'
+import { renderWaveRange } from './wave/render'
 import { SampleCache, type FetchLike } from './multisample/cache'
 import { SamplerInstrument, type SamplerNote } from './multisample/engine'
 import { isPackAsset, packFromAsset } from './multisample/persist'
@@ -216,7 +218,7 @@ function mixAudioClips(
   for (const clip of track.clips) {
     if (clip.slotOnly) continue
     const pieces = clip.folder
-      ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, gain: clip.gain }))
+      ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, wave: undefined, gain: clip.gain }))
       : [clip]
     for (const piece of pieces) mixOneClip(out, project, assets, piece, origin, length)
   }
@@ -235,11 +237,15 @@ function mixOneClip(
   const rate = project.sampleRate
   let channels = asset.sampleRate === rate ? asset.channels : asset.channels.map((channel) => linearResample(channel, asset.sampleRate, rate))
   let placed = clip
+  const inShape = clip.wave?.fadeInShape ?? 'linear'
+  const outShape = clip.wave?.fadeOutShape ?? 'linear'
+  let baked = false
   if (clipNeedsStretch(clip, project)) {
     const pcm = renderClipChannels(channels, placed, project, 'hq')
     const frames = Math.max(1, pcm[0]?.length ?? 1)
     channels = pcm
-    placed = { ...placed, offsetSamples: 0, durationSamples: frames }
+    placed = { ...placed, offsetSamples: 0, durationSamples: frames, wave: undefined }
+    baked = true
   }
   if (placed.warpPoints && placed.warpPoints.length >= 2) {
     const pcm = renderQuantizedClip(channels, placed, rate, project.tempo)
@@ -253,11 +259,28 @@ function mixOneClip(
   const clipDur = placed.durationSamples / rate
   const fadeIn = placed.fadeInSamples / rate
   const fadeOut = placed.fadeOutSamples / rate
+  if (!baked && placed.wave && clipHasWaveBody(placed)) {
+    const localFrom = from - placed.startSample
+    const localTo = to - placed.startSample
+    const body = bodyLength(placed.wave)
+    const pcm = renderWaveRange(channels, placed.wave, Math.max(0, localFrom), Math.min(body, localTo))
+    for (let n = 0; n < pcm[0]?.length; n++) {
+      const rel = (localFrom + n) / rate
+      let gain = placed.gain
+      if (fadeIn > 0 && rel < fadeIn) gain *= fadeCurve(rel / fadeIn, inShape)
+      if (fadeOut > 0 && rel > clipDur - fadeOut) gain *= fadeCurve(Math.max(0, (clipDur - rel) / fadeOut), outShape)
+      gain = Math.max(FLOOR, gain)
+      const dst = from + n - origin
+      if (dst < 0 || dst >= length) continue
+      for (let c = 0; c < 2; c++) out[c][dst] += (pcm[Math.min(c, pcm.length - 1)]?.[n] ?? 0) * gain
+    }
+    return
+  }
   for (let i = from; i < to; i++) {
     const rel = (i - placed.startSample) / rate
     let gain = placed.gain
-    if (fadeIn > 0 && rel < fadeIn) gain *= rel / fadeIn
-    if (fadeOut > 0 && rel > clipDur - fadeOut) gain *= Math.max(0, (clipDur - rel) / fadeOut)
+    if (fadeIn > 0 && rel < fadeIn) gain *= fadeCurve(rel / fadeIn, inShape)
+    if (fadeOut > 0 && rel > clipDur - fadeOut) gain *= fadeCurve(Math.max(0, (clipDur - rel) / fadeOut), outShape)
     gain = Math.max(FLOOR, gain)
     const src = placed.offsetSamples + (i - placed.startSample)
     const dst = i - origin

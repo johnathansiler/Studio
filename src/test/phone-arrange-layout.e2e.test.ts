@@ -531,11 +531,7 @@ describe('phone arrange layout', () => {
           expect(mix.topMenu, shot.name).toBe(false)
           expect(mix.topName, shot.name).toBe(false)
           expect(mix.topUndo, shot.name).toBe(false)
-          if (shot.name === '844x390') expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(8)
-          else {
-            expect(mix.tabsTop, shot.name).toBeGreaterThanOrEqual(40)
-            expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(70)
-          }
+          expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(8)
           expect(mix.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
           expect(mix.labels.some((label) => label === 'Browse'), shot.name).toBe(true)
           expect(mix.labels.some((label) => label === 'Tools'), shot.name).toBe(true)

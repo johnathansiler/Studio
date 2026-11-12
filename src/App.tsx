@@ -96,6 +96,7 @@ import { sheetHistoryPop } from './ui/arrangePanel'
 import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble } from './ui/Hint'
+import { WaveEditor } from './ui/WaveEditor'
 import { Toasts } from './ui/Toasts'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -884,6 +885,8 @@ export function App() {
       else if (meta && key === 's') {
         event.preventDefault()
         void persist()
+      } else if (store.waveClipId && (((meta && key === 'e') || key === 'b') || deletesSelection(event.key, event.target))) {
+        event.preventDefault()
       } else if ((meta && key === 'e') || key === 'b') store.splitSelected(engine.currentTimelineSample())
       else if (key === 'm' && !meta) {
         const track = store.project.tracks.find((item) => item.id === store.selectedTrackId)
@@ -2480,6 +2483,7 @@ async function importDropped(files: FileList) {
           <SpectralSheet store={store} />
         </LazySheet>
       )}
+      {store.waveClipId && <WaveEditor store={store} engine={engine} />}
       <KeyboardDock store={store} engine={engine} onEditNotes={editNotes} />
       <HintBubble />
       <Toasts store={store} />

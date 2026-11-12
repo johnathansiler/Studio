@@ -1,7 +1,12 @@
+import { isStructural, splitStructuralClip, trimStructuralClip } from '../audio/wave/edit'
 import type { AudioClip, MidiNote } from './types'
 import { uid } from './types'
 
 export function splitAudioClip(clip: AudioClip, atSample: number): [AudioClip, AudioClip] | null {
+  if (clip.wave && isStructural(clip.wave)) {
+    const edited = splitStructuralClip(clip, atSample)
+    if (edited) return edited
+  }
   const at = Math.round(atSample)
   const end = clip.startSample + clip.durationSamples
   if (at <= clip.startSample || at >= end) return null
@@ -33,6 +38,7 @@ export function trimAudioClip(
   newSample: number,
   bufferLength: number,
 ): AudioClip {
+  if (clip.wave && isStructural(clip.wave)) return trimStructuralClip(clip, edge, newSample, bufferLength)
   const stretch = clip.stretch
   if (stretch && stretch.sourceSamples > 0 && clip.durationSamples > 0) {
     const ratio = clip.durationSamples / stretch.sourceSamples

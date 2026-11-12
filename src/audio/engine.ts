@@ -1,4 +1,6 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { bodyLength, clipHasWaveBody, type WaveEdit } from './wave/edit'
+import { cachedWaveBody, renderWaveRange } from './wave/render'
 import { assembleTimedChunks } from './capture'
 import { bakeLoopSeam, nativeLoopRange } from './loopSeam'
 import { clickVoice } from './metroClick'
@@ -209,6 +211,8 @@ export class AudioEngine {
 
   private sources: Stoppable[] = []
   private previewStops: Stoppable[] = []
+  private previewEpoch = 0
+  private previewTimer: ReturnType<typeof setTimeout> | null = null
   /** Notes from the last Scaler preview, so the next chord can cut them. */
   private scalerVoices: Stoppable[] = []
   private scalerMidi: { pitch: number; onAt: number }[] = []
@@ -3016,7 +3020,8 @@ export class AudioEngine {
         const asset = this.assetOf(audio.bufferId)
         if (!asset) continue
         const buffer = this.bufferFromAsset(this.ctx, asset)
-        const prepared = this.stretchBuffer(this.ctx, buffer, audio)
+        const baked = this.bakeWave(this.ctx, buffer, audio)
+        const prepared = this.stretchBuffer(this.ctx, baked.buffer, baked.clip)
         const src = this.ctx.createBufferSource()
         const rate = audio.stretch ? 1 : warpRate(audio.durationSamples, audio.durationBeats, sr, project.tempo, audio.warp !== false)
         let playBuffer = prepared.buffer
@@ -3024,7 +3029,7 @@ export class AudioEngine {
         let dur = Math.max(0.01, prepared.clip.durationSamples / sr)
         let playRate = rate
         if (!audio.stretch && audio.durationBeats && Math.abs(rate - 1) > 1e-3) {
-          const pcm = this.sessionWarp(buffer, audio, sr, project.tempo)
+          const pcm = this.sessionWarp(baked.buffer, baked.clip, sr, project.tempo)
           playBuffer = this.ctx.createBuffer(Math.max(1, pcm.length), Math.max(1, pcm[0]?.length ?? 1), sr)
           pcm.forEach((channel, index) => playBuffer.copyToChannel(Float32Array.from(channel), index))
           offset = 0
@@ -3216,7 +3221,7 @@ export class AudioEngine {
       for (const clip of track.clips) {
         if (clip.slotOnly) continue
         const pieces = clip.folder
-          ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, gain: clip.gain }))
+          ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, wave: undefined, gain: clip.gain }))
           : [clip]
         for (const piece of pieces) {
           const asset = this.assetOf(piece.bufferId)
@@ -3503,6 +3508,115 @@ export class AudioEngine {
     return { buffer: audio, clip: { ...clip, offsetSamples: 0, warp: undefined } }
   }
 
+  /** Edited audio as one buffer. The returned clip reads it from the start and is no longer structural. */
+  private bakeWave(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip): { buffer: AudioBuffer; clip: AudioClip } {
+    if (!clip.wave || !clipHasWaveBody(clip)) return { buffer, clip }
+    const channels: Float32Array[] = []
+    for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+    const pcm = cachedWaveBody(channels, clip)
+    if (!pcm?.[0]?.length) return { buffer, clip }
+    const audio = ctx.createBuffer(pcm.length, pcm[0].length, buffer.sampleRate || ctx.sampleRate)
+    pcm.forEach((channel, index) => audio.copyToChannel(Float32Array.from(channel), index))
+    const length = pcm[0].length
+    return {
+      buffer: audio,
+      clip: {
+        ...clip,
+        offsetSamples: 0,
+        wave: clip.wave
+          ? { ...clip.wave, regions: [{ id: 'heard', source: 0, length, reverse: false, gain: 1, silence: false }], head: 0, tail: 0, tailAt: length, origin: 0 }
+          : undefined,
+        stretch: clip.stretch ? { ...clip.stretch, sourceSamples: length } : clip.stretch,
+      },
+    }
+  }
+
+  /** Play one scheduler window of an edited clip without rendering the whole file. */
+  private scheduleWaveWindow(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    buffer: AudioBuffer,
+    clip: AudioClip,
+    ctxTime: number,
+    timelineStart: number,
+    timelineEnd: number,
+  ) {
+    const wave = clip.wave
+    if (!wave) return
+    const sr = ctx.sampleRate
+    const body = Math.max(1, bodyLength(wave))
+    const ratio = clip.durationSamples / body
+    const clipEnd = clip.startSample + clip.durationSamples
+    const from = Math.max(clip.startSample, timelineStart)
+    const to = Math.min(clipEnd, timelineEnd)
+    if (to - from < 8) return
+    const when = ctxTime + (from - timelineStart) / sr
+    const live = ctx === this.ctx
+    if (live && when < ctx.currentTime - LATE_SLIP_SEC) return
+    const slip = live ? Math.max(0, ctx.currentTime - when) : 0
+    const at = Math.max(0, when + slip)
+    const playFrom = from + Math.round(slip * sr)
+    const playDur = (to - playFrom) / sr
+    if (playDur * sr < 8) return
+    const localFrom = Math.max(0, (playFrom - clip.startSample) / Math.max(1e-6, ratio))
+    const localTo = Math.min(body, (to - clip.startSample) / Math.max(1e-6, ratio))
+    if (localTo - localFrom < 1) return
+    const channels: Float32Array[] = []
+    for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+    const pcm = renderWaveRange(channels, wave, localFrom, localTo)
+    const frames = Math.max(1, pcm[0]?.length ?? 1)
+    const audio = ctx.createBuffer(Math.max(1, pcm.length), frames, sr)
+    pcm.forEach((channel, index) => {
+      const data = new Float32Array(frames)
+      data.set(channel.subarray(0, frames))
+      audio.copyToChannel(data, index)
+    })
+    const src = ctx.createBufferSource()
+    src.buffer = audio
+    const gain = ctx.createGain()
+    const relFrom = (playFrom - clip.startSample) / sr
+    const relTo = (to - clip.startSample) / sr
+    const points = clipSliceEnvelope({
+      at,
+      dur: playDur,
+      relFrom,
+      relTo,
+      clipGain: clip.gain,
+      fadeInSec: clip.fadeInSamples / sr,
+      fadeOutSec: clip.fadeOutSamples / sr,
+      clipDurSec: clip.durationSamples / sr,
+      join: this.joining && from <= timelineStart + 8,
+      inShape: wave.fadeInShape,
+      outShape: wave.fadeOutShape,
+    })
+    const [first, ...rest] = points
+    if (first) gain.gain.setValueAtTime(first.value, first.at)
+    for (const point of rest) gain.gain.linearRampToValueAtTime(point.value, point.at)
+    src.connect(gain)
+    gain.connect(strip.input)
+    src.start(at, 0, playDur)
+    if (!live) return
+    this.sources.push({
+      endAt: at + playDur + 0.05,
+      stop: (whenStop?: number) => {
+        try { src.stop(whenStop) } catch { /* already stopped */ }
+      },
+      disconnect: () => {
+        try { src.disconnect() } catch { /* already disconnected */ }
+        try { gain.disconnect() } catch { /* already disconnected */ }
+      },
+      release: (whenRelease: number) => {
+        const start = Math.max(ctx.currentTime, whenRelease - 0.008)
+        try {
+          gain.gain.cancelScheduledValues(start)
+          gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), start)
+          gain.gain.linearRampToValueAtTime(0.0001, whenRelease + 0.008)
+          src.stop(whenRelease + 0.012)
+        } catch { /* already stopped */ }
+      },
+    })
+  }
+
   /** The arrange cycle, when playback should wrap inside it. Pattern mode keeps its own loop. */
   private transportLoopSpan(): { start: number; end: number } | null {
     const project = this.project
@@ -3513,6 +3627,46 @@ export class AudioEngine {
     const end = project.loopEndSample
     if (!(end > start + 16)) return null
     return { start, end }
+  }
+
+  /**
+   * Edited audio for a clip that fills the cycle, as one buffer the looper can repeat.
+   * Fades are in the samples. Gain stays on the clip so the looping source applies it once.
+   */
+  private waveLoopStandIn(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip): { buffer: AudioBuffer; clip: AudioClip } | null {
+    const loop = this.transportLoopSpan()
+    const wave = clip.wave
+    if (!loop || !wave || !clipHasWaveBody(clip) || ctx !== this.ctx) return null
+    if (clip.startSample > loop.start + 8) return null
+    if (clip.startSample + clip.durationSamples < loop.end - 8) return null
+    const body = Math.max(1, bodyLength(wave))
+    const ratio = clip.durationSamples / Math.max(1e-6, body)
+    const localFrom = Math.max(0, (loop.start - clip.startSample) / ratio)
+    const localTo = Math.min(body, (loop.end - clip.startSample) / ratio)
+    const frames = loop.end - loop.start
+    if (localTo - localFrom < 32 || frames < 32) return null
+    const channels: Float32Array[] = []
+    for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+    const pcm = renderWaveRange(channels, wave, localFrom, localTo, { fades: true })
+    const count = pcm[0]?.length ?? 0
+    if (Math.abs(count - frames) > 2) return null
+    const audio = ctx.createBuffer(Math.max(1, pcm.length), frames, ctx.sampleRate)
+    pcm.forEach((channel, index) => {
+      const data = new Float32Array(frames)
+      data.set(channel.subarray(0, Math.min(channel.length, frames)))
+      audio.copyToChannel(data, index)
+    })
+    return {
+      buffer: audio,
+      clip: {
+        ...clip,
+        offsetSamples: 0,
+        startSample: loop.start,
+        durationSamples: frames,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+      },
+    }
   }
 
   /**
@@ -3555,9 +3709,12 @@ export class AudioEngine {
       if (held) this.dropHeld(clip.id, at)
       return false
     }
+    const waveMark = clip.wave
+      ? JSON.stringify([clip.wave.regions, clip.wave.crossfade, clip.wave.fadeIn, clip.wave.fadeOut, clip.wave.fadeInShape, clip.wave.fadeOutShape, clip.wave.gainDb])
+      : ''
     const sig = [
       clip.startSample, clip.durationSamples, clip.offsetSamples, clip.bufferId, clip.fadeInSamples,
-      loop.start, loop.end, safeStart, safeFrames, buffer.length,
+      loop.start, loop.end, safeStart, safeFrames, buffer.length, waveMark,
     ].join(':')
     const peak = Math.max(0.0001, clip.gain)
     if (held?.sig === sig) {
@@ -3644,6 +3801,7 @@ export class AudioEngine {
     }
   }
 
+
   private scheduleAudioClip(
     ctx: BaseAudioContext,
     strip: StripNodes,
@@ -3653,6 +3811,26 @@ export class AudioEngine {
     timelineStart: number,
     timelineEnd: number,
   ) {
+    if (clip.wave && clipHasWaveBody(clip)) {
+      const project = this.project
+      if (project && clipNeedsStretch(clip, project)) {
+        const baked = this.bakeWave(ctx, buffer, clip)
+        buffer = baked.buffer
+        clip = baked.clip
+      } else {
+        const stand = this.waveLoopStandIn(ctx, buffer, clip)
+        if (stand) {
+          const sr = ctx.sampleRate
+          const from = Math.max(clip.startSample, timelineStart)
+          const when = ctxTime + (from - timelineStart) / sr
+          const slip = Math.max(0, ctx.currentTime - when)
+          const at = Math.max(0, when + slip)
+          if (this.startFillingLoop(ctx, strip, stand.buffer, stand.clip, at, from, slip)) return
+        }
+        this.scheduleWaveWindow(ctx, strip, buffer, clip, ctxTime, timelineStart, timelineEnd)
+        return
+      }
+    }
     const project = this.project
     if (project && clipNeedsStretch(clip, project) && this.shouldStretchLive(clip) && ctx === this.ctx) {
       try {
@@ -3700,6 +3878,8 @@ export class AudioEngine {
       fadeOutSec: fadeOut,
       clipDurSec: clipDur,
       join,
+      inShape: clip.wave?.fadeInShape,
+      outShape: clip.wave?.fadeOutShape,
     })
     const [first, ...rest] = points
     if (first) gain.gain.setValueAtTime(first.value, first.at)
@@ -4664,6 +4844,8 @@ export class AudioEngine {
       fadeOutSec: fadeOut,
       clipDurSec: clipDur,
       join: false,
+      inShape: clip.wave?.fadeInShape,
+      outShape: clip.wave?.fadeOutShape,
     })
     const [first, ...rest] = points
     if (first) gain.gain.setValueAtTime(first.value, first.at)
@@ -4724,6 +4906,11 @@ export class AudioEngine {
   private previewClock: { start: number; duration: number; loop: boolean } | null = null
 
   stopPreview() {
+    this.previewEpoch += 1
+    if (this.previewTimer != null) {
+      clearTimeout(this.previewTimer)
+      this.previewTimer = null
+    }
     for (const src of this.previewStops) {
       try { src.stop() } catch { /* already stopped */ }
       try { src.disconnect() } catch { /* already disconnected */ }
@@ -4760,14 +4947,94 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Audition an edited range in short slices. A long selection is not rendered
+   * up front, and slices leave the graph when they finish.
+   */
+  previewWave(channels: ArrayLike<number>[], edit: WaveEdit, start: number, end: number, sampleRate?: number, loop = false) {
+    this.stopPreview()
+    const ctx = this.unlock()
+    const out = this.speakerSide()
+    const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
+    const from = Math.max(0, Math.floor(Math.min(start, end)))
+    const to = Math.max(from, Math.ceil(Math.max(start, end)))
+    if (!out || !channels.length || to - from < 1) return
+    const epoch = this.previewEpoch
+    const chunk = Math.max(2048, Math.round(rate * 0.25))
+    let origin = 0
+    let cursor = from
+    const arm = () => {
+      if (epoch !== this.previewEpoch || !this.ctx) return
+      origin = this.ctx.currentTime + 0.03
+      this.previewClock = { start: origin, duration: (to - from) / rate, loop }
+      const pump = () => {
+        const live = this.ctx
+        if (epoch !== this.previewEpoch || !live) return
+        const horizon = live.currentTime + 1.25
+        let steps = 0
+        while (steps < 24) {
+          if (cursor >= to) {
+            if (!loop) return
+            origin += (to - from) / rate
+            cursor = from
+          }
+          const when = origin + (cursor - from) / rate
+          if (when > horizon) break
+          const count = Math.min(chunk, to - cursor)
+          const pcm = renderWaveRange(channels, edit, cursor, cursor + count, { fades: true, clipGain: true })
+          this.startPreviewSlice(pcm, rate, when, out, epoch)
+          cursor += count
+          steps += 1
+        }
+        if (epoch !== this.previewEpoch || (!loop && cursor >= to)) return
+        const nextWhen = origin + (cursor - from) / rate
+        const wait = Math.max(40, Math.min(300, (nextWhen - live.currentTime - 0.45) * 1000))
+        this.previewTimer = setTimeout(pump, wait)
+      }
+      pump()
+    }
+    if (ctx.state === 'running') arm()
+    else void ctx.resume().then(() => { if (epoch === this.previewEpoch) arm() })
+  }
+
+  private startPreviewSlice(channels: Float32Array[], rate: number, when: number, out: AudioNode, epoch: number) {
+    const ctx = this.ctx
+    const lead = channels[0]
+    if (!ctx || !lead?.length || epoch !== this.previewEpoch) return
+    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, rate)
+    channels.forEach((channel, index) => {
+      const data = new Float32Array(lead.length)
+      data.set(channel.subarray(0, Math.min(channel.length, lead.length)))
+      buffer.copyToChannel(data, index)
+    })
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.value = 1
+    src.connect(gain)
+    gain.connect(out)
+    const stop = () => { try { src.stop() } catch { /* already stopped */ } }
+    const disconnect = () => {
+      try { src.disconnect() } catch { /* already disconnected */ }
+      try { gain.disconnect() } catch { /* already disconnected */ }
+      src.buffer = null
+    }
+    src.onended = () => {
+      disconnect()
+      this.previewStops = this.previewStops.filter((item) => item.stop !== stop)
+    }
+    this.previewStops.push({ stop, disconnect, endAt: when + buffer.duration })
+    try { src.start(when) } catch { disconnect() }
+  }
+
   /** Speaker-only audition. The cue and the arrangement are left alone. */
-  previewPcm(channels: Float32Array[], sampleRate?: number, loop = false) {
+  previewPcm(channels: Float32Array[], sampleRate?: number, loop = false, raw = false) {
     this.stopPreview()
     const ctx = this.unlock()
     const out = this.speakerSide()
     const lead = channels[0]
     if (!out || !lead?.length) return
-    const shaped = normalizePeak(channels)
+    const shaped = raw ? channels : normalizePeak(channels)
     const shapedLead = shaped[0]
     if (!shapedLead?.length) return
     const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
@@ -4781,7 +5048,7 @@ export class AudioEngine {
     const gain = ctx.createGain()
     src.buffer = buffer
     src.loop = loop
-    gain.gain.value = 0.8
+    gain.gain.value = raw ? 1 : 0.8
     src.connect(gain)
     gain.connect(out)
     const stop = () => {
