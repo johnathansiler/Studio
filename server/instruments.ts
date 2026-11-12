@@ -4,7 +4,6 @@
  */
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { parseLibraryCatalog } from '../src/library/catalog.ts'
 import {
   groupLibraryInstruments,
   searchInstruments,
@@ -26,9 +25,26 @@ async function entriesFromR2(env: LibraryEnv) {
   if (!response.ok) throw new Error('Could not read the library catalog.')
   const gzip = Buffer.from(await response.arrayBuffer())
   const hash = createHash('sha256').update(gzip).digest('hex')
-  const parsed = parseLibraryCatalog(JSON.parse(gunzipSync(gzip).toString('utf8')) as unknown)
-  if (!parsed) throw new Error('Could not read the library catalog.')
-  return { hash, entries: parsed.document.entries }
+  const parsed = JSON.parse(gunzipSync(gzip).toString('utf8')) as { entries?: unknown }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.entries)) throw new Error('Could not read the library catalog.')
+  // Keep only the fields grouping needs. The search-word lists are for the browser.
+  const entries = []
+  for (const item of parsed.entries) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const key = typeof row.key === 'string' ? row.key : ''
+    if (!key) continue
+    entries.push({
+      key,
+      size: typeof row.size === 'number' ? row.size : 0,
+      pack: typeof row.pack === 'string' ? row.pack : '',
+      type: typeof row.type === 'string' ? row.type : '',
+      category: typeof row.category === 'string' ? row.category : '',
+      note: typeof row.note === 'string' ? row.note : '',
+      root: typeof row.root === 'string' ? row.root : '',
+    })
+  }
+  return { hash, entries }
 }
 
 export function createInstrumentSource(deps: {

@@ -21,7 +21,7 @@ export function parseLibrarySampleUrl(url: string): { id: string; key: string } 
   }
 }
 
-type Loader = (instrumentId: string, objectKey: string) => Promise<ArrayBuffer>
+type Loader = (instrumentId: string, objectKey: string, prefetch: boolean) => Promise<ArrayBuffer>
 
 let loader: Loader | null = null
 
@@ -29,8 +29,9 @@ export function setLibrarySampleLoader(next: Loader | null) {
   loader = next
 }
 
-export function loadLibrarySampleBytes(url: string) {
+/** `prefetch` asks for nearby roots in the same signed batch. A row preview stays on one note. */
+export function loadLibrarySampleBytes(url: string, prefetch = false) {
   const parsed = parseLibrarySampleUrl(url)
   if (!parsed || !loader) return Promise.reject(new Error('Unlock My Library on this device first.'))
-  return loader(parsed.id, parsed.key)
+  return loader(parsed.id, parsed.key, prefetch)
 }

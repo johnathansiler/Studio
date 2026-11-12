@@ -233,18 +233,40 @@ export function tokenizeStem(stem: string): Token[] {
       i += num[0].length
       continue
     }
+    // harmLD#3 → harmL + D#3. The note letter is the last capital. VRC6 stays a word.
+    const embedded = rest.match(/^(.*[a-z])([A-G]+)([#b])?(-1|\d+)(?!\d)/)
+    if (embedded) {
+      const noteLetter = embedded[2].slice(-1)
+      const midi = noteMidi(`${noteLetter}${embedded[3] || ''}${embedded[4]}`)
+      const prefix = embedded[1] + embedded[2].slice(0, -1)
+      if (midi != null && prefix) {
+        pushPrefix(tokens, prefix)
+        tokens.push({ kind: 'note', midi })
+        i += embedded[0].length
+        continue
+      }
+    }
+    // 039-D# and 5_F. A sharp in a name with no number stays a word, and a bare f stays forte.
+    const pitch = rest.match(/^([A-Ga-g](?:#|b)?)(?![A-Za-z0-9])/)
+    if (pitch) {
+      const raw = pitch[1]
+      const prev = tokens[tokens.length - 1]
+      const afterNumber = prev?.kind === 'num'
+      const afterOctave = afterNumber && prev.n >= 0 && prev.n <= 8 && prev.raw.length <= 2
+      if ((raw.length > 1 && afterNumber) || afterOctave) {
+        tokens.push({ kind: 'word', raw })
+        i += raw.length
+        continue
+      }
+    }
     const word = rest.match(/^[A-Za-z]+(?:-(?![A-Ga-g](?:#|b|s)?(?:-1|\d))[A-Za-z]+)*/)
     if (word) {
       const after = stem.slice(i + word[0].length)
-      const peeled = word[0].match(/^(.*[A-Za-z])([A-Ga-g])$/)
-      const octave = after.match(/^(?:-1|\d+)/)
-      const peeledMidi = peeled && octave && /[A-G]/.test(peeled[2]) ? noteMidi(`${peeled[2]}${octave[0]}`) : null
+      const peeled = word[0].match(/^(.*[a-z].*)([A-G])$/)
+      const octave = after.match(/^([#b])?(-1|\d+)(?!\d)/)
+      const peeledMidi = peeled && octave ? noteMidi(`${peeled[2]}${octave[1] || ''}${octave[2]}`) : null
       if (peeled && peeled[1] && peeledMidi != null && octave) {
-        const split = peeled[1].match(/^(.*[a-z])([A-Z])$/)
-        if (split) {
-          tokens.push(classifyWord(split[1]))
-          tokens.push(classifyWord(split[2]))
-        } else tokens.push(classifyWord(peeled[1]))
+        pushPrefix(tokens, peeled[1])
         tokens.push({ kind: 'note', midi: peeledMidi })
         i += word[0].length + octave[0].length
         continue
@@ -256,6 +278,11 @@ export function tokenizeStem(stem: string): Token[] {
     i += 1
   }
   return foldOctaveNotes(tokens)
+}
+
+function pushPrefix(tokens: Token[], prefix: string) {
+  const parts = prefix.split(/(?<=[a-z])(?=[A-Z])/).filter(Boolean)
+  for (const part of parts) tokens.push(classifyWord(part))
 }
 
 function classifyWord(raw: string): Token {
@@ -291,6 +318,7 @@ function parseRaw(row: CatalogRow): RawSample | null {
   const stem = file.replace(/\.[a-z0-9]+$/i, '')
   const tokens = tokenizeStem(stem)
   let midi: number | null = null
+  let fromNote = false
   let velocityId = ''
   let velocityRank = 0
   let rr: number | null = null
@@ -301,7 +329,10 @@ function parseRaw(row: CatalogRow): RawSample | null {
   const longDynamics: string[] = []
   for (const token of tokens) {
     if (token.kind === 'note') {
-      if (midi == null) midi = token.midi
+      if (midi == null) {
+        midi = token.midi
+        fromNote = true
+      }
       continue
     }
     if (token.kind === 'vel') {
@@ -363,7 +394,9 @@ function parseRaw(row: CatalogRow): RawSample | null {
     }
     if (token.n >= 0 && token.n <= 24) looseNumbers.push(token.n)
   }
-  if (midi != null) {
+  // 039-D# keeps the sharp letter only so it can be removed. A_045__A2 keeps the
+  // leading A, because the filename already has a real note token.
+  if (midi != null && !fromNote) {
     const pc = pitchClass(midi)
     for (let i = words.length - 1; i >= 0; i--) {
       const word = words[i]
@@ -440,7 +473,7 @@ function meaningfulFolders(pack: string, folder: string) {
 
 const VAGUE_NAME = /^(acoustic|electric|close|decca|notes|sustain|release|ordinary|soft|hard|ord|stac|rel)$/i
 
-function displayName(pack: string, folder: string, tokens: string[]) {
+function displayName(pack: string, folder: string, tokens: string[], sampleCount = 0) {
   const segs = meaningfulFolders(pack, folder)
   const folderName = segs.length ? humanize(segs[segs.length - 1]) : ''
   const parentName = segs.length > 1 ? humanize(segs[segs.length - 2]) : ''
@@ -468,6 +501,7 @@ function displayName(pack: string, folder: string, tokens: string[]) {
     else if (folderName && !joinedNorm.includes(folderNorm) && !folderNorm.includes(joinedNorm) && folderName.length > 2) base = `${folderName} - ${joined}`
   }
   base = base.replace(/\s+/g, ' ').trim()
+  if (sampleCount >= 8 && tokens.length === 1 && tokens[0].length === 1 && folderName.length > 2) base = folderName
   if (base.length > 0 && base.length <= 4 && parentName && !base.toLowerCase().includes(parentName.toLowerCase())) base = `${parentName} ${base}`
   if (VAGUE_NAME.test(base)) base = `${cleanPack(pack)} ${base}`.trim()
   const name = art ? `${base} - ${art}` : (base || cleanPack(pack))
@@ -607,7 +641,7 @@ function buildOne(pack: string, folder: string, tokens: string[], samples: RawSa
   let id = hashId(key)
   while (ids.has(id)) id += 'x'
   ids.add(id)
-  const named = displayName(pack, folder, tokens)
+  const named = displayName(pack, folder, tokens, source.length)
   const velocities = new Set(shown.map((layer) => `${layer.velLo}-${layer.velHi}`))
   let roundRobins = 1
   const bySlot = new Map<string, number>()
@@ -661,17 +695,57 @@ function disambiguate(items: { instrument: LibraryInstrument; code: string }[]) 
   }
 }
 
+/**
+ * `A (1).wav` … `E (44).wav` is one chromatic instrument.
+ * The letter is a round-robin. The number is the bar, low to high, starting at C4.
+ * A matching series has to fill the folder, so a single `C (4)` stays a normal name.
+ */
+function applyIndexSeries(items: { raw: RawSample; stem: string }[]) {
+  if (items.length < 8) return
+  const parsed = items.map((item) => item.stem.match(/^([A-G]) \((\d+)\)$/i))
+  if (parsed.some((match) => !match)) return
+  const letters = [...new Set(parsed.map((match) => match![1].toUpperCase()))].sort()
+  const numbers = parsed.map((match) => Number(match![2]))
+  const unique = [...new Set(numbers)]
+  if (letters.length < 2 || unique.length < 8) return
+  const min = Math.min(...numbers)
+  const max = Math.max(...numbers)
+  if (max - min > 87) return
+  items.forEach((item, index) => {
+    const match = parsed[index]!
+    const step = Number(match[2]) - min
+    item.raw.midi = 60 + step
+    item.raw.rr = letters.indexOf(match[1].toUpperCase()) + 1
+    item.raw.velocityId = ''
+    item.raw.velocityRank = 0
+    item.raw.looseNumbers = []
+    item.raw.nameTokens = item.raw.nameTokens.filter((token) => token.toLowerCase() !== match[1].toLowerCase())
+  })
+}
+
 export function groupLibraryInstruments(entries: CatalogRow[]): LibraryInstrument[] {
-  const groups = new Map<string, { pack: string; folder: string; tokens: string[]; samples: RawSample[] }>()
+  const pending: { pack: string; folder: string; raw: RawSample; stem: string }[] = []
   for (const entry of entries) {
     if ((entry.type || '').toLowerCase() !== 'multisample note') continue
     if (!entry.key || entry.key.includes('..')) continue
     const raw = parseRaw(entry)
     if (!raw) continue
     const folder = entry.key.split('/').slice(0, -1).join('/')
-    const key = groupKey(entry.pack || '', folder, raw.nameTokens)
-    const group = groups.get(key) ?? { pack: entry.pack || '', folder, tokens: raw.nameTokens, samples: [] }
-    group.samples.push(raw)
+    const file = entry.key.split('/').pop() || entry.key
+    pending.push({ pack: entry.pack || '', folder, raw, stem: file.replace(/\.[a-z0-9]+$/i, '') })
+  }
+  const byFolder = new Map<string, { raw: RawSample; stem: string }[]>()
+  for (const item of pending) {
+    const list = byFolder.get(`${item.pack}\n${item.folder}`) ?? []
+    list.push(item)
+    byFolder.set(`${item.pack}\n${item.folder}`, list)
+  }
+  for (const list of byFolder.values()) applyIndexSeries(list)
+  const groups = new Map<string, { pack: string; folder: string; tokens: string[]; samples: RawSample[] }>()
+  for (const item of pending) {
+    const key = groupKey(item.pack, item.folder, item.raw.nameTokens)
+    const group = groups.get(key) ?? { pack: item.pack, folder: item.folder, tokens: item.raw.nameTokens, samples: [] }
+    group.samples.push(item.raw)
     groups.set(key, group)
   }
   const ids = new Set<string>()
@@ -735,4 +809,43 @@ export function layersForNotes(instrument: LibraryInstrument, request: { notes?:
   const rest = layers.filter((layer) => layer.velLo !== band.velLo || layer.velHi !== band.velHi)
   rest.sort((a, b) => Math.abs((a.velLo + a.velHi) / 2 - velocity) - Math.abs((b.velLo + b.velHi) / 2 - velocity) || a.rr - b.rr)
   return [...same, ...rest].slice(0, capN)
+}
+
+/**
+ * Keys to sign with the note that was just played.
+ * Same velocity and round-robin, nearest roots first, never more than 24.
+ * The played key is first so a full batch still includes it.
+ */
+export function playbackKeys(layers: InstrumentLayer[], key: string, cap = 24): string[] {
+  const capN = Math.max(1, Math.min(24, cap))
+  const layer = layers.find((item) => item.key === key && !item.release) ?? layers.find((item) => item.key === key)
+  if (!layer) return [key].slice(0, capN)
+  const same = layers.filter((item) => !item.release && item.velLo === layer.velLo && item.velHi === layer.velHi && item.rr === layer.rr)
+  const pool = same.length ? same : layers.filter((item) => !item.release)
+  const ranked = pool.slice().sort((a, b) => Math.abs(a.midi - layer.midi) - Math.abs(b.midi - layer.midi) || a.key.localeCompare(b.key))
+  const keys = [layer.key]
+  for (const item of ranked) {
+    if (keys.length >= capN) break
+    if (!keys.includes(item.key)) keys.push(item.key)
+  }
+  return keys
+}
+
+/** One presign body. Requested notes stay, and a short batch can pull nearby roots. */
+export function planSignKeys(layers: InstrumentLayer[] | undefined, requested: string[], prefetch: boolean, cap = 24): string[] {
+  const capN = Math.max(1, Math.min(24, cap))
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (key: string) => {
+    if (!key || seen.has(key) || out.length >= capN) return
+    seen.add(key)
+    out.push(key)
+  }
+  for (const key of requested) push(key)
+  if (prefetch && layers) {
+    for (const key of requested) {
+      for (const extra of playbackKeys(layers, key, capN)) push(extra)
+    }
+  }
+  return out
 }

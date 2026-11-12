@@ -57,7 +57,7 @@ async function routeLibrary(route: Route, url: string) {
     const body = route.request().postDataJSON() as { keys?: string[]; notes?: number[] }
     const keys = body.keys?.length
       ? body.keys
-      : horn.layers.filter((layer) => (body.notes ?? []).includes(layer.midi)).map((layer) => layer.key)
+      : (horn?.layers ?? []).filter((layer) => (body.notes ?? []).includes(layer.midi)).map((layer) => layer.key)
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

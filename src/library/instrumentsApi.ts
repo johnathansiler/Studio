@@ -1,5 +1,5 @@
 import { LibraryAuthError, readLibraryAccessKey, signedUrlKeepsSecret } from './access'
-import type { InstrumentPage, InstrumentQuery, LibraryInstrument } from './group'
+import { planSignKeys, type InstrumentLayer, type InstrumentPage, type InstrumentQuery, type LibraryInstrument } from './group'
 import { libraryAudioCache } from './audio'
 import { setLibrarySampleLoader } from './samples'
 
@@ -60,7 +60,15 @@ export async function fetchLibraryInstrument(id: string): Promise<LibraryInstrum
   if (!accessKey) throw new Error('Unlock My Library on this device first.')
   const body = await libraryFetch(`/api/library/instruments/${encodeURIComponent(id)}`, accessKey) as Partial<LibraryInstrument> | null
   if (!body || body.id !== id || !Array.isArray(body.layers)) throw new Error('Could not read that instrument.')
+  rememberInstrumentLayers(id, body.layers)
   return body as LibraryInstrument
+}
+
+const layerMaps = new Map<string, InstrumentLayer[]>()
+
+/** Keep the map from the instrument that was just loaded, so playback can sign nearby notes. */
+export function rememberInstrumentLayers(id: string, layers: InstrumentLayer[]) {
+  layerMaps.set(id, layers)
 }
 
 export async function signInstrumentKeys(id: string, keys: string[]): Promise<InstrumentNoteUrl[]> {
@@ -75,9 +83,10 @@ export async function signInstrumentKeys(id: string, keys: string[]): Promise<In
 
 const waiting = new Map<string, Array<(bytes: ArrayBuffer) => void>>()
 const failing = new Map<string, Array<(error: Error) => void>>()
-let queued = false
+const prefetching = new Set<string>()
+let signTimer: ReturnType<typeof setTimeout> | null = null
 
-function remember(id: string, key: string, resolve: (bytes: ArrayBuffer) => void, reject: (error: Error) => void) {
+function remember(id: string, key: string, resolve: (bytes: ArrayBuffer) => void, reject: (error: Error) => void, prefetch: boolean) {
   const token = `${id}\n${key}`
   const ok = waiting.get(token) ?? []
   ok.push(resolve)
@@ -85,38 +94,41 @@ function remember(id: string, key: string, resolve: (bytes: ArrayBuffer) => void
   const bad = failing.get(token) ?? []
   bad.push(reject)
   failing.set(token, bad)
-  if (!queued) {
-    queued = true
-    queueMicrotask(() => {
-      queued = false
+  if (prefetch) prefetching.add(token)
+  if (!signTimer) {
+    signTimer = setTimeout(() => {
+      signTimer = null
       void flushSignedSamples()
-    })
+    }, 30)
   }
 }
 
 async function flushSignedSamples() {
   const tokens = [...waiting.keys()]
-  const groups = new Map<string, string[]>()
+  const groups = new Map<string, { keys: string[]; prefetch: boolean }>()
   for (const token of tokens) {
     const split = token.indexOf('\n')
     const id = token.slice(0, split)
     const key = token.slice(split + 1)
-    const list = groups.get(id) ?? []
-    list.push(key)
-    groups.set(id, list)
+    const group = groups.get(id) ?? { keys: [], prefetch: false }
+    group.keys.push(key)
+    if (prefetching.has(token)) group.prefetch = true
+    groups.set(id, group)
   }
-  for (const [id, keys] of groups) {
-    for (let index = 0; index < keys.length; index += 24) {
-      const slice = keys.slice(index, index + 24)
+  for (const [id, group] of groups) {
+    for (let index = 0; index < group.keys.length; index += 24) {
+      const slice = group.keys.slice(index, index + 24)
+      const planned = planSignKeys(layerMaps.get(id), slice, group.prefetch && index === 0)
       try {
-        const signed = await signInstrumentKeys(id, slice)
+        const signed = await signInstrumentKeys(id, planned)
         const cache = libraryAudioCache()
-        await Promise.all(slice.map(async (key) => {
+        await Promise.all(planned.map(async (key) => {
           const token = `${id}\n${key}`
           const ok = waiting.get(token) ?? []
           const bad = failing.get(token) ?? []
           waiting.delete(token)
           failing.delete(token)
+          prefetching.delete(token)
           const url = signed.find((item) => item.key === key)?.url
           if (!url) {
             bad.forEach((reject) => reject(new Error('Could not sign that note.')))
@@ -135,11 +147,12 @@ async function flushSignedSamples() {
         }))
       } catch (error) {
         const message = error instanceof Error ? error : new Error('Could not sign that note.')
-        for (const key of slice) {
+        for (const key of planned) {
           const token = `${id}\n${key}`
           const bad = failing.get(token) ?? []
           waiting.delete(token)
           failing.delete(token)
+          prefetching.delete(token)
           bad.forEach((reject) => reject(message))
         }
       }
@@ -147,10 +160,10 @@ async function flushSignedSamples() {
   }
 }
 
-async function loadSignedSample(id: string, key: string) {
+async function loadSignedSample(id: string, key: string, prefetch = false) {
   const cached = await libraryAudioCache().get(key).catch(() => null)
   if (cached) return cached
-  return new Promise<ArrayBuffer>((resolve, reject) => remember(id, key, resolve, reject))
+  return new Promise<ArrayBuffer>((resolve, reject) => remember(id, key, resolve, reject, prefetch))
 }
 
-setLibrarySampleLoader((id, key) => loadSignedSample(id, key))
+setLibrarySampleLoader((id, key, prefetch) => loadSignedSample(id, key, prefetch))

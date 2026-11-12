@@ -143,24 +143,30 @@ export class SampleCache implements SampleBank {
     }
   }
 
-  /** One private-library note. The URL is an object key, signed only when this note is played. */
+  /**
+   * One private-library note. Signing starts before the decode slot, so a chord
+   * shares one batch. The slot only limits how many notes decode at once.
+   */
   private async fetchPrivate(sample: SampleRef): Promise<DecodedSample | null> {
     sampleLoadBegin(sample.id)
-    if (this.active >= this.maxActive) await new Promise<void>((resolve) => this.waiters.push(resolve))
-    this.active += 1
     try {
-      const bytes = await loadLibrarySampleBytes(sample.url)
-      const lossless = decodeSlotBytes(bytes)
-      const decoded = lossless?.channels[0]?.length
-        ? { sampleRate: lossless.sampleRate, channels: lossless.channels }
-        : await decodeSlotFile(bytes)
-      const stored = { sampleRate: decoded.sampleRate, channels: decoded.channels }
-      this.remember(sample.id, stored)
-      return stored
+      const bytes = await loadLibrarySampleBytes(sample.url, true)
+      if (this.active >= this.maxActive) await new Promise<void>((resolve) => this.waiters.push(resolve))
+      this.active += 1
+      try {
+        const lossless = decodeSlotBytes(bytes)
+        const decoded = lossless?.channels[0]?.length
+          ? { sampleRate: lossless.sampleRate, channels: lossless.channels }
+          : await decodeSlotFile(bytes)
+        const stored = { sampleRate: decoded.sampleRate, channels: decoded.channels }
+        this.remember(sample.id, stored)
+        return stored
+      } finally {
+        this.active -= 1
+        this.waiters.shift()?.()
+      }
     } finally {
       sampleLoadFinish(sample.id)
-      this.active -= 1
-      this.waiters.shift()?.()
     }
   }
 

@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { selectLayers } from '../audio/multisample/map'
 import { midiVelocity } from '../audio/multisample/types'
 import { browseLibraryRows } from '../library/browse'
-import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, searchInstruments, tokenizeStem } from '../library/group'
+import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, planSignKeys, playbackKeys, searchInstruments, tokenizeStem } from '../library/group'
 import { programFromLibraryInstrument } from '../library/instrumentProgram'
 import { createLibraryApi, type LibraryEnv } from '../../server/library.ts'
+import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
+import { memoryAudioCache, setLibraryCaches } from '../library/audio'
+import { rememberInstrumentLayers } from '../library/instrumentsApi'
+import { librarySampleUrl, loadLibrarySampleBytes } from '../library/samples'
 import { buildLibraryIndex } from '../library/search'
 import type { LibraryEntry } from '../library/types'
 
@@ -48,6 +52,15 @@ describe('multisample grouping', () => {
     expect(tokenizeStem('db2_vl1_rr3_1').some((token) => token.kind === 'note' && token.midi === noteMidi('Db2'))).toBe(true)
     expect(tokenizeStem('twang_g6_mf_rr1').some((token) => token.kind === 'rr' && token.n === 1)).toBe(true)
     expect(midiName(60)).toBe('C4')
+    expect(noteMidi('D#3')).toBe(51)
+    const sharp = tokenizeStem('harmLD#3').filter((token) => token.kind === 'note' || token.kind === 'word')
+    expect(sharp.some((token) => token.kind === 'note' && token.midi === noteMidi('D#3'))).toBe(true)
+    expect(tokenizeStem('5_F').some((token) => token.kind === 'note' && token.midi === noteMidi('F5'))).toBe(true)
+    expect(tokenizeStem('5_A-PB').some((token) => token.kind === 'note' && token.midi === noteMidi('A5'))).toBe(true)
+    expect(tokenizeStem('039-D#').some((token) => token.kind === 'word' && token.raw === 'D#')).toBe(true)
+    expect(tokenizeStem('OneShot_07_VRC6_Saw_Lead_F4').some((token) => token.kind === 'note' && token.midi === noteMidi('C6'))).toBe(false)
+    expect(tokenizeStem('OneShot_07_VRC6_Saw_Lead_F4').some((token) => token.kind === 'note' && token.midi === noteMidi('F4'))).toBe(true)
+    expect(tokenizeStem('twang_c4_f_rr1').some((token) => token.kind === 'vel' && token.id === 'f')).toBe(true)
   })
 
   it('turns notes into one instrument per articulation and keeps dynamics as layers', () => {
@@ -108,6 +121,64 @@ describe('multisample grouping', () => {
     const signed = layersForNotes(horn, { notes: [60] })
     expect(signed.every((layer) => layer.midi === 60)).toBe(true)
     expect(layersForNotes(horn, { notes: [60] }).length).toBeLessThanOrEqual(24)
+
+    const organ = groupLibraryInstruments([
+      row('Organ/great-bourdon16ft/036-C.flac', { pack: 'Sonatina', note: '' }),
+      row('Organ/great-bourdon16ft/039-D#.flac', { pack: 'Sonatina', note: '' }),
+      row('Organ/great-bourdon16ft/042-F#.flac', { pack: 'Sonatina', note: '' }),
+      row('Organ/great-bourdon16ft/060-C.flac', { pack: 'Sonatina', note: '' }),
+    ])
+    expect(organ).toHaveLength(1)
+    expect(organ[0]?.name.toLowerCase()).not.toContain('organ d')
+    expect(new Set(organ[0]?.layers.map((layer) => layer.midi))).toEqual(new Set([36, 39, 42, 60]))
+
+    const vib = groupLibraryInstruments([
+      row('Violin/PizzicatoVib/5_A-PB.wav', { pack: 'VPO', note: '' }),
+      row('Violin/PizzicatoVib/5_F-PB.wav', { pack: 'VPO', note: '' }),
+      row('Violin/PizzicatoVib/5_Bb-PB.wav', { pack: 'VPO', note: '' }),
+      row('Violin/PizzicatoVib/4_C-PB.wav', { pack: 'VPO', note: '' }),
+    ])
+    expect(vib).toHaveLength(1)
+    expect(new Set(vib[0]?.layers.map((layer) => layer.midi))).toEqual(new Set([
+      noteMidi('A5'), noteMidi('F5'), noteMidi('Bb5'), noteMidi('C4'),
+    ]))
+
+    const harm = groupLibraryInstruments([
+      row('Piano/harmLA0.wav', { pack: 'Salamander', note: 'A0' }),
+      row('Piano/harmLC4.wav', { pack: 'Salamander', note: 'C4' }),
+      row('Piano/harmLD#3.wav', { pack: 'Salamander', note: '' }),
+      row('Piano/harmSA0.wav', { pack: 'Salamander', note: 'A0' }),
+    ])
+    const harmL = harm.find((item) => item.name.toLowerCase().includes('l') && !item.name.toLowerCase().includes('s'))
+    const harmMidis = [noteMidi('A0'), noteMidi('D#3'), noteMidi('C4')].flatMap((midi) => midi == null ? [] : [midi]).sort((a, b) => a - b)
+    expect(harmL?.layers.map((layer) => layer.midi).sort((a, b) => a - b)).toEqual(harmMidis)
+    expect(harm.find((item) => item.layers.some((layer) => layer.key.endsWith('harmSA0.wav')))?.layers).toHaveLength(1)
+
+    const rhodes = groupLibraryInstruments([
+      row('Rhodes/jRhodes3d-mono-wav/A_029__F1_1.wav', { pack: 'Rhodes', note: 'F1' }),
+      row('Rhodes/jRhodes3d-mono-wav/A_045__A2_1.wav', { pack: 'Rhodes', note: 'A2' }),
+      row('Rhodes/jRhodes3d-mono-wav/A_081__A5_1.wav', { pack: 'Rhodes', note: 'A5' }),
+    ])
+    expect(rhodes).toHaveLength(1)
+    expect(new Set(rhodes[0]?.layers.map((layer) => layer.midi))).toEqual(new Set([noteMidi('F1'), noteMidi('A2'), noteMidi('A5')]))
+
+    const xylo = groupLibraryInstruments([
+      ...[1, 2, 3, 4, 5, 6, 7, 44].flatMap((n) => ['A', 'B', 'C'].map((letter) => row(`Mallets/Xylophone/Xylophone Samples Pack/${letter} (${n}).wav`, { pack: 'Xylophone', note: '' }))),
+    ])
+    expect(xylo).toHaveLength(1)
+    expect(xylo[0]?.notes).toBe(8)
+    expect(xylo[0]?.roundRobins).toBe(3)
+    expect(xylo[0]?.layers.find((layer) => layer.key.includes('A (1)'))?.midi).toBe(60)
+    expect(xylo[0]?.layers.find((layer) => layer.key.includes('A (44)'))?.midi).toBe(103)
+    expect(xylo[0]?.layers.find((layer) => layer.key.includes('C (1)'))?.rr).toBe(3)
+
+    const near = playbackKeys(horn.layers, horn.layers.find((layer) => layer.midi === 60)!.key)
+    expect(near.length).toBeLessThanOrEqual(24)
+    expect(near[0]).toBe(horn.layers.find((layer) => layer.midi === 60)!.key)
+    const planned = planSignKeys(horn.layers, [near[0]!], true)
+    expect(planned.length).toBeLessThanOrEqual(24)
+    expect(planned[0]).toBe(near[0])
+    expect(planSignKeys(undefined, ['Only/one.wav', 'Only/two.wav'], false)).toEqual(['Only/one.wav', 'Only/two.wav'])
   })
 
   it('hides individual notes in browse and lists the instrument', () => {
@@ -121,6 +192,57 @@ describe('multisample grouping', () => {
     expect(rows.some((item) => item.kind === 'sound' && item.entry.key === 'Drums/kick.wav')).toBe(true)
     const only = browseLibraryRows(index, { total: 2, ids: null }, instruments, { text: '', type: 'instrument', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null })
     expect(only.every((item) => item.kind === 'instrument')).toBe(true)
+  })
+})
+
+describe('lazy note signing', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    clearLibraryAccessKey()
+    setLibraryCaches({ audio: null })
+  })
+
+  it('batches a fast chord into one request and keeps the cap at 24', async () => {
+    vi.useFakeTimers()
+    writeLibraryAccessKey('owner-pass')
+    setLibraryCaches({ audio: memoryAudioCache() })
+    const layers = Array.from({ length: 40 }, (_, index) => ({
+      key: `Piano/n${index}.wav`,
+      midi: 40 + index,
+      velLo: 1,
+      velHi: 127,
+      rr: 1,
+      release: false,
+      size: 10,
+    }))
+    rememberInstrumentLayers('lib_piano', layers)
+    const bodies: { keys?: string[] }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/notes')) {
+        const body = JSON.parse(String(init?.body || '{}')) as { keys?: string[] }
+        bodies.push(body)
+        return new Response(JSON.stringify({
+          urls: (body.keys ?? []).map((key) => ({ key, url: `https://signed.example/${encodeURIComponent(key)}` })),
+        }))
+      }
+      return new Response(Uint8Array.from([82, 73, 70, 70]).buffer)
+    }))
+    const first = loadLibrarySampleBytes(librarySampleUrl('lib_piano', layers[10]!.key), true)
+    const second = loadLibrarySampleBytes(librarySampleUrl('lib_piano', layers[12]!.key), true)
+    await vi.advanceTimersByTimeAsync(40)
+    const [a, b] = await Promise.all([first, second])
+    expect(a.byteLength).toBeGreaterThan(0)
+    expect(b.byteLength).toBeGreaterThan(0)
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]?.keys?.length).toBeGreaterThan(2)
+    expect(bodies[0]?.keys?.length).toBeLessThanOrEqual(24)
+    expect(bodies[0]?.keys).toContain(layers[10]!.key)
+    expect(bodies[0]?.keys).toContain(layers[12]!.key)
+    const again = await loadLibrarySampleBytes(librarySampleUrl('lib_piano', layers[10]!.key), true)
+    expect(again.byteLength).toBeGreaterThan(0)
+    expect(bodies).toHaveLength(1)
   })
 })
 
@@ -181,5 +303,18 @@ describe('instrument api', () => {
       now: 5,
     })
     expect(foreign.status).toBe(400)
+    const tooMany = await api.handle({
+      method: 'POST',
+      pathname: `/api/library/instruments/${horn.id}/notes`,
+      ip: '1.1.1.1',
+      accessKey: 'owner-pass',
+      body: { keys: Array.from({ length: 25 }, (_, index) => horn.layers[index % horn.layers.length]!.key) },
+      now: 6,
+    })
+    expect(tooMany.status).toBe(400)
+    const closed = createLibraryApi({ env: () => ({ ...env, R2_BUCKET: '' }), sign: async () => { signed.push('nope'); return 'https://signed.example/nope' }, instruments: { async search() { return searchInstruments(instruments, { text: '', category: '', pack: '', offset: 0, limit: 10 }) }, async get() { return horn } } })
+    const hidden = await closed.handle({ method: 'GET', pathname: '/api/library/instruments', ip: '1.1.1.1', accessKey: 'owner-pass', body: null, now: 7 })
+    expect(hidden.status).toBe(503)
+    expect(signed).not.toContain('nope')
   })
 })
