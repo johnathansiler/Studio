@@ -1278,6 +1278,11 @@ export class AudioEngine {
     this.mixFollow = true
   }
 
+  /** Drop a mix-only follow that never became a real edit. */
+  clearMixFollow() {
+    this.mixFollow = false
+  }
+
   /** How many times the mixer routing graph was torn down and wired again. */
   get graphRebuilds() {
     return this.rack.rebuilds

@@ -4,7 +4,7 @@ import { gainToDb } from '../model/time'
 import { DbRead } from './DbRead'
 import { controlDefault } from './paramDefaults'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
-import { previewChannel, useLiveMix } from './liveMix'
+import { previewChannel, settleMixFollow, useLiveMix } from './liveMix'
 import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
 import type { AutoSpec } from '../model/automation'
@@ -168,12 +168,17 @@ function mixLocked(store: ProjectStore, spec: AutoSpec, rolling: boolean) {
 }
 
 function commitMix(store: ProjectStore, engine: AudioEngine, spec: AutoSpec, rolling: boolean, value: number, trail: { value: number; sample: number }[]) {
-  if (mixLocked(store, spec, rolling)) return false
-  engine.armMixFollow()
-  if (!store.reviseMix(spec, value, rolling, engine.currentTimelineSample())) return false
-  for (const point of trail) store.reviseMix(spec, point.value, rolling, point.sample)
-  store.finishMixGesture()
-  return true
+  if (mixLocked(store, spec, rolling) || !store.reviseMix(spec, value, rolling, engine.currentTimelineSample())) {
+    engine.clearMixFollow()
+    return false
+  }
+  for (const point of trail) {
+    if (!store.reviseMix(spec, point.value, rolling, point.sample)) {
+      engine.clearMixFollow()
+      return false
+    }
+  }
+  return settleMixFollow(store, engine)
 }
 
 export function AutoFader({ store, engine, spec, value, label, className, vertical: verticalProp, readout = false }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string; vertical?: boolean; readout?: boolean }) {
@@ -187,12 +192,7 @@ export function AutoFader({ store, engine, spec, value, label, className, vertic
     project: (next) => {
       if (!mixLocked(store, spec, rolling)) store.reviseMix(spec, next, rolling, engine.currentTimelineSample())
     },
-    commit: () => {
-      if (mixLocked(store, spec, rolling)) return false
-      engine.armMixFollow()
-      store.finishMixGesture()
-      return true
-    },
+    commit: () => settleMixFollow(store, engine),
     sample: () => engine.currentTimelineSample(),
   })
   const span = spec.max - spec.min
@@ -246,12 +246,7 @@ export function PanKnob({ store, engine, spec, value, label }: { store: ProjectS
     project: (next) => {
       if (!mixLocked(store, spec, rolling)) store.reviseMix(spec, next, rolling, engine.currentTimelineSample())
     },
-    commit: () => {
-      if (mixLocked(store, spec, rolling)) return false
-      engine.armMixFollow()
-      store.finishMixGesture()
-      return true
-    },
+    commit: () => settleMixFollow(store, engine),
     sample: () => engine.currentTimelineSample(),
   })
   const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({

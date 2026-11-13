@@ -3,7 +3,8 @@ import { AudioEngine } from '../audio/engine'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { resetTicker, subscribeFrame } from '../audio/ticker'
-import { createMixDrag } from '../ui/liveMix'
+import { createMixDrag, settleMixFollow } from '../ui/liveMix'
+import { channelRoute } from '../model/sharedMix'
 import { placePlayhead, playheadPx, playheadTransform } from '../ui/playhead'
 
 interface Recorded {
@@ -292,8 +293,7 @@ describe('fader drag', () => {
         version = store.version
       },
       commit: () => {
-        engine.armMixFollow()
-        store.finishMixGesture()
+        settleMixFollow(store, engine)
       },
       sample: () => 0,
     })
@@ -326,5 +326,47 @@ describe('fader drag', () => {
     store.undo()
     expect(store.project.tracks.find((item) => item.id === track.id)!.volume).toBeCloseTo(origin)
     stop()
+  })
+
+  it('a rejected revise is followed by a new track that still rebuilds the graph', () => {
+    const ctx = installAudioMocks()
+    const store = new ProjectStore(createEmptyProject(48000))
+    const engine = new AudioEngine()
+    const live = arm(engine, ctx)
+    const stop = store.subscribe(() => engine.sync(store.project, () => undefined))
+    engine.sync(store.project, () => undefined)
+    const built = engine.graphRebuilds
+    const before = new Set(live.strips.keys())
+    const track = store.project.tracks[0]
+    store.remoteFollow = true
+    engine.armMixFollow()
+    expect(store.reviseMix({ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }, 0.2, false, 0)).toBe(false)
+    expect(settleMixFollow(store, engine)).toBe(false)
+    store.remoteFollow = false
+    store.addTrack('audio')
+    const added = [...live.strips.keys()].filter((id) => !before.has(id))
+    expect(added).toHaveLength(1)
+    expect(engine.graphRebuilds).toBeGreaterThan(built)
+    stop()
+  })
+
+  it('reviseMix mirrors onto the routed beat row the same way updateTrack does', () => {
+    function routed() {
+      const store = new ProjectStore(createEmptyProject(48000))
+      const midi = store.project.tracks.find((item) => item.type === 'midi')!
+      const channel = store.project.beats!.patterns[0].channels[0]
+      channel.output = midi.id
+      return { store, midi, channel }
+    }
+    const updated = routed()
+    updated.store.updateTrack(updated.midi.id, { volume: 0.37, pan: 0.15 })
+    const revised = routed()
+    expect(channelRoute(revised.store.project, revised.channel)).toBe(revised.midi.id)
+    revised.store.reviseMix({ trackId: revised.midi.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }, 0.37, false, 0)
+    revised.store.reviseMix({ trackId: revised.midi.id, target: 'pan', param: 'pan', min: -1, max: 1 }, 0.15, false, 0)
+    expect(revised.channel.volume).toBeCloseTo(updated.channel.volume)
+    expect(revised.channel.pan).toBeCloseTo(updated.channel.pan)
+    expect(revised.channel.mute).toBe(updated.channel.mute)
+    expect(revised.channel.solo).toBe(updated.channel.solo)
   })
 })

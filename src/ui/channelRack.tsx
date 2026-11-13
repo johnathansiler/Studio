@@ -3,7 +3,7 @@ import { FEATURES } from '../features'
 import { controlLaw, formatPan } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
 import { GestureReadout, useDragValue } from './kit/controls'
-import { createMixDrag, useLiveMix } from './liveMix'
+import { createMixDrag, settleMixFollow, useLiveMix } from './liveMix'
 import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
 import {
@@ -50,6 +50,7 @@ type RackEngine = {
   unlock?: () => void
   previewMix?: (target: 'volume' | 'pan', id: string, value: number) => void
   armMixFollow?: () => void
+  clearMixFollow?: () => void
   previewSequence?: (events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[]) => void
   previewPcm?: (channels: Float32Array[], sampleRate?: number) => void
 }
@@ -691,10 +692,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
                   engine.previewMix?.('pan', focus.id, next)
                   store.reviseChannel(focus.id, { pan: next })
                 }}
-                onCommit={() => {
-                  engine.armMixFollow?.()
-                  store.finishMixGesture()
-                }}
+                onCommit={() => settleMixFollow(store, engine)}
               />
             )}
             <label className="rack-field" title={rowCopy('steps').hint}>
@@ -861,10 +859,8 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
                       store.setChannel(channel.id, { pan: next }, drag)
                     }}
                     onDone={(next) => {
-                      if (engine.previewMix && Number.isFinite(next)) {
-                        engine.armMixFollow?.()
-                        store.finishMixGesture()
-                      } else store.endDraft()
+                      if (engine.previewMix && Number.isFinite(next)) settleMixFollow(store, engine)
+                      else store.endDraft()
                     }}
                   />
                 )}
@@ -881,10 +877,8 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
                     store.setChannel(channel.id, { volume: next }, drag)
                   }}
                   onDone={(next) => {
-                    if (engine.previewMix && Number.isFinite(next)) {
-                      engine.armMixFollow?.()
-                      store.finishMixGesture()
-                    } else store.endDraft()
+                    if (engine.previewMix && Number.isFinite(next)) settleMixFollow(store, engine)
+                    else store.endDraft()
                   }}
                 />
                 <button

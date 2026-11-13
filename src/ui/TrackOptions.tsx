@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { gainToDb } from '../model/time'
-import { useLiveMix } from './liveMix'
+import { settleMixFollow, useLiveMix } from './liveMix'
 import { DbRead } from './DbRead'
 import type { ProjectStore } from '../state/store'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
@@ -22,9 +22,8 @@ function VolumeRange({ store, engine, trackId, volume, label, title }: { store: 
       if (engine) store.reviseMix({ trackId, target: 'volume', param: 'volume', min: 0, max: 1.25 }, next, false, 0)
     },
     commit: () => {
-      if (!engine) return
-      engine.armMixFollow()
-      store.finishMixGesture()
+      if (!engine) return false
+      return settleMixFollow(store, engine)
     },
   })
   return (
@@ -210,7 +209,15 @@ export function TrackOptions({
               onFocus={() => store.beginAutomationTouch()}
               onBlur={() => store.endAutomationTouch()}
               onChange={(next) => {
-                engine?.armMixFollow()
+                if (!engine) {
+                  store.updateTrack(track.id, { volume: next })
+                  return
+                }
+                if (store.remoteFollow) {
+                  engine.clearMixFollow()
+                  return
+                }
+                engine.armMixFollow()
                 store.updateTrack(track.id, { volume: next })
               }}
             />

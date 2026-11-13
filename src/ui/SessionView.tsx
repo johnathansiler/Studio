@@ -32,7 +32,7 @@ import { SessionDetail } from './sessionDetail'
 import { sessionTargetAt } from './sessionPointer'
 import { gainToDb } from '../model/time'
 import { TouchSlider } from './kit/controls'
-import { previewChannel, useLiveMix } from './liveMix'
+import { previewChannel, settleMixFollow, useLiveMix } from './liveMix'
 import './sessionGrid.css'
 import './sessionLive.css'
 
@@ -565,10 +565,7 @@ function MasterFader({ store, engine, value }: { store: ProjectStore; engine: Au
   const live = useLiveMix(value, {
     audio: (next) => engine.previewMix('volume', 'master', next),
     project: (next) => store.reviseMaster(next),
-    commit: () => {
-      engine.armMixFollow()
-      store.finishMixGesture()
-    },
+    commit: () => settleMixFollow(store, engine),
   })
   return (
     <TouchSlider
@@ -596,19 +593,13 @@ function TrackMix({ store, engine, track, index, level }: { store: ProjectStore;
   const live = useLiveMix(track.volume, {
     audio: (next) => previewChannel(engine, store.project, 'volume', track.id, next),
     project: (next) => store.reviseMix({ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }, next, false, 0),
-    commit: () => {
-      engine.armMixFollow()
-      store.finishMixGesture()
-    },
+    commit: () => settleMixFollow(store, engine),
     sample: () => engine.currentTimelineSample(),
   })
   const pan = useLiveMix(track.pan, {
     audio: (next) => previewChannel(engine, store.project, 'pan', track.id, next),
     project: (next) => store.reviseMix({ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }, next, false, 0),
-    commit: () => {
-      engine.armMixFollow()
-      store.finishMixGesture()
-    },
+    commit: () => settleMixFollow(store, engine),
     sample: () => engine.currentTimelineSample(),
   })
   return (

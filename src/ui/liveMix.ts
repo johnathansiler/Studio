@@ -3,6 +3,25 @@ import { onNextFrame } from '../audio/ticker'
 import { groupForTrack } from '../model/mixGroups'
 import type { Project } from '../model/types'
 
+/**
+ * Tell the engine to skip a graph rebuild only when this gesture actually drafted a change.
+ * A rejected write, or a release with no draft, clears the flag so the next sync can add strips.
+ */
+export function settleMixFollow(
+  store: { readonly mixDraftOpen: boolean; finishMixGesture: () => boolean },
+  engine: { armMixFollow?: () => void; clearMixFollow?: () => void },
+) {
+  if (!store.mixDraftOpen) {
+    engine.clearMixFollow?.()
+    store.finishMixGesture()
+    return false
+  }
+  engine.armMixFollow?.()
+  const emitted = store.finishMixGesture()
+  if (!emitted) engine.clearMixFollow?.()
+  return emitted
+}
+
 /** Move this fader and any linked strips on the nodes that already exist. */
 export function previewChannel(
   engine: { previewMix: (target: 'volume' | 'pan', id: string, value: number) => void },

@@ -3005,14 +3005,20 @@ export class ProjectStore {
     this.quantizePreview = null
   }
 
-  /** Seal the open fader gesture and notify once. */
+  /** True after `reviseMix` opened the one undo step for this finger. */
+  get mixDraftOpen() {
+    return this.drafted
+  }
+
+  /** Seal the open fader gesture and notify once. False when nothing was drafted. */
   finishMixGesture() {
     const open = this.drafted
     this.drafted = false
     this.touching = false
-    if (!open) return
+    if (!open) return false
     this.journal.seal(this.project)
     this.emit()
+    return true
   }
 
   /**
@@ -3094,8 +3100,13 @@ export class ProjectStore {
 
   private applySpec(spec: AutoSpec, value: number) {
     const next = clamp(value, spec.min, spec.max)
-    if (spec.target === 'volume') patchMixer(this.project, spec.trackId, { volume: next })
-    else if (spec.target === 'pan') patchMixer(this.project, spec.trackId, { pan: next })
+    if (spec.target === 'volume') {
+      patchMixer(this.project, spec.trackId, { volume: next })
+      mirrorTrackMix(this.project, spec.trackId)
+    } else if (spec.target === 'pan') {
+      patchMixer(this.project, spec.trackId, { pan: next })
+      mirrorTrackMix(this.project, spec.trackId)
+    }
     else if (spec.target === 'send' && spec.sendId) {
       const send = this.track(spec.trackId)?.sends.find((item) => item.id === spec.sendId)
       if (send) send.gain = next

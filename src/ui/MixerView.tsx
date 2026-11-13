@@ -10,7 +10,7 @@ import type { Track } from '../model/types'
 import { AddTrackButton } from './AddTrack'
 import { AutoFader, ChannelAutomation, MixFlags, PanKnob, panWords } from './AutomationLane'
 import { watchLevel } from './levelMeter'
-import { useLiveMix } from './liveMix'
+import { settleMixFollow, useLiveMix } from './liveMix'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, StripInserts } from './PluginSheet'
@@ -542,10 +542,7 @@ function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; e
   const live = useLiveMix(value, {
     audio: (next) => engine.previewMix('volume', 'master', next),
     project: (next) => store.reviseMaster(next),
-    commit: () => {
-      engine.armMixFollow()
-      store.finishMixGesture()
-    },
+    commit: () => settleMixFollow(store, engine),
   })
   const db = gainToDb(live.value)
   return (
@@ -580,6 +577,10 @@ function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; e
         onFocus={() => store.beginAutomationTouch()}
         onBlur={() => store.endAutomationTouch()}
         onChange={(next) => {
+          if (store.remoteFollow) {
+            engine.clearMixFollow()
+            return
+          }
           engine.armMixFollow()
           store.setMasterVolume(next)
         }}
