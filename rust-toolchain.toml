@@ -1,3 +1,5 @@
+# The committed DSP module (src/audio/wasm/dspBytes.sha256) was built with
+# rustc 1.99.1 (58cf8f9c3, 2026-10-13). `stable` moves and changes those bytes.
 [toolchain]
-channel = "stable"
+channel = "1.99.1"
 targets = ["wasm32-unknown-unknown"]

@@ -10,15 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
       - name: Test the DSP core and the plugin shell
-        run: cargo test --manifest-path core/Cargo.toml
+        run: cargo test --locked --manifest-path core/Cargo.toml
       - name: Build the CLAP and VST3 shell
-        run: cargo build -p cueharbor-plugin --manifest-path core/Cargo.toml
+        run: cargo build --locked -p cueharbor-plugin --manifest-path core/Cargo.toml
       - name: Build the WASM DSP
-        run: cargo build -p cueharbor-dsp --release --target wasm32-unknown-unknown --manifest-path core/Cargo.toml
+        run: cargo build --locked -p cueharbor-dsp --release --target wasm32-unknown-unknown --manifest-path core/Cargo.toml
       - name: Check the committed WASM matches the Rust source
         run: node scripts/check-dsp-hash.mjs
 
