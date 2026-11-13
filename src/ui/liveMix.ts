@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { onNextFrame } from '../audio/ticker'
 import { groupForTrack } from '../model/mixGroups'
 import type { Project } from '../model/types'
@@ -130,11 +130,14 @@ export function useLiveMix(value: number, opts: {
       sample: () => optsRef.current.sample?.() ?? 0,
     })
   }
-  useEffect(() => {
-    if (!dragging.current) setShown(value)
-  }, [value])
+  // Undo, reset, and a collaborator change `value` on this render. Copying it into
+  // `shown` from an effect leaves a window where a drag starts at the last finger
+  // position. While the finger is up, the picture and the gesture origin are the
+  // store value. `shown` leads only for the frames of a drag.
+  if (!dragging.current && !Object.is(shown, value)) setShown(value)
+  const display = dragging.current ? shown : value
   return {
-    value: shown,
+    value: display,
     move(next: number) {
       dragging.current = true
       drag.current!.move(next)
