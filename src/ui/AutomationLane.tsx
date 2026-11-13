@@ -4,6 +4,7 @@ import { gainToDb } from '../model/time'
 import { DbRead } from './DbRead'
 import { controlDefault } from './paramDefaults'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
+import { previewChannel, settleMixFollow, useLiveMix } from './liveMix'
 import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
 import type { AutoSpec } from '../model/automation'
@@ -161,11 +162,42 @@ export function panWords(value: number) {
   return formatPan(value)
 }
 
+function mixLocked(store: ProjectStore, spec: AutoSpec, rolling: boolean) {
+  const mode = channelAutomationMode(store.project, spec.trackId === 'master' ? 'master' : spec.trackId)
+  return rolling && mode === 'read' && lanePoints(store.project, spec).length > 0
+}
+
+function commitMix(store: ProjectStore, engine: AudioEngine, spec: AutoSpec, rolling: boolean, value: number, trail: { value: number; sample: number }[]) {
+  if (mixLocked(store, spec, rolling) || !store.reviseMix(spec, value, rolling, engine.currentTimelineSample())) {
+    engine.clearMixFollow()
+    return false
+  }
+  for (const point of trail) {
+    if (!store.reviseMix(spec, point.value, rolling, point.sample)) {
+      engine.clearMixFollow()
+      return false
+    }
+  }
+  return settleMixFollow(store, engine)
+}
+
 export function AutoFader({ store, engine, spec, value, label, className, vertical: verticalProp, readout = false }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string; vertical?: boolean; readout?: boolean }) {
   const { rolling, shown } = useShownValue(store, engine, spec, value)
+  const target = spec.target === 'pan' ? 'pan' : 'volume'
+  const live = useLiveMix(shown, {
+    audio: (next) => {
+      if (mixLocked(store, spec, rolling)) return
+      previewChannel(engine, store.project, target, spec.trackId, next)
+    },
+    project: (next) => {
+      if (!mixLocked(store, spec, rolling)) store.reviseMix(spec, next, rolling, engine.currentTimelineSample())
+    },
+    commit: () => settleMixFollow(store, engine),
+    sample: () => engine.currentTimelineSample(),
+  })
   const span = spec.max - spec.min
   const vertical = verticalProp ?? className !== 'pan'
-  const db = gainToDb(shown)
+  const db = gainToDb(live.value)
   return (
     <>
       <TouchSlider
@@ -176,24 +208,27 @@ export function AutoFader({ store, engine, spec, value, label, className, vertic
         min={spec.min}
         max={spec.max}
         step={span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1}
-        value={shown}
+        value={live.value}
         fallback={controlDefault({ label, className, param: spec.param, target: spec.target, min: spec.min, max: spec.max }) ?? spec.min}
         format={readout ? gainToDb : undefined}
         matchLength={readout}
         valueText={readout ? db : undefined}
         onStart={() => store.beginAutomationTouch()}
-        onCommit={() => store.endAutomationTouch()}
-        onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
+        onCommit={() => {
+          live.release()
+          store.endAutomationTouch()
+        }}
+        onChange={live.move}
       />
       {readout && (
         <DbRead
-          gain={shown}
+          gain={live.value}
           min={spec.min}
           max={spec.max}
           label={`${label} decibels`}
           onFocus={() => store.beginAutomationTouch()}
           onBlur={() => store.endAutomationTouch()}
-          onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
+          onChange={(next) => commitMix(store, engine, spec, rolling, next, [{ value: next, sample: engine.currentTimelineSample() }])}
         />
       )}
     </>
@@ -203,20 +238,34 @@ export function AutoFader({ store, engine, spec, value, label, className, vertic
 /** Small pan knob. Drag right to pan right. Shift, or a second finger, moves in finer steps. */
 export function PanKnob({ store, engine, spec, value, label }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string }) {
   const { rolling, shown } = useShownValue(store, engine, spec, value)
+  const live = useLiveMix(shown, {
+    audio: (next) => {
+      if (mixLocked(store, spec, rolling)) return
+      previewChannel(engine, store.project, 'pan', spec.trackId, next)
+    },
+    project: (next) => {
+      if (!mixLocked(store, spec, rolling)) store.reviseMix(spec, next, rolling, engine.currentTimelineSample())
+    },
+    commit: () => settleMixFollow(store, engine),
+    sample: () => engine.currentTimelineSample(),
+  })
   const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
     min: spec.min,
     max: spec.max,
-    value: shown,
+    value: live.value,
     fallback: 0,
     axis: 'x',
     format: panWords,
     onStart: () => store.beginAutomationTouch(),
-    onCommit: () => store.endAutomationTouch(),
-    onChange: (next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample()),
+    onCommit: () => {
+      live.release()
+      store.endAutomationTouch()
+    },
+    onChange: live.move,
   })
-  const unit = Math.max(0, Math.min(1, (shown - spec.min) / ((spec.max - spec.min) || 1)))
+  const unit = Math.max(0, Math.min(1, (live.value - spec.min) / ((spec.max - spec.min) || 1)))
   const angle = -140 + unit * 280
-  const words = panWords(shown)
+  const words = panWords(live.value)
   return (
     <div className={`pan-knob-wrap${dragging ? ' dragging' : ''}`}>
       <button
@@ -228,18 +277,19 @@ export function PanKnob({ store, engine, spec, value, label }: { store: ProjectS
         title={label}
         aria-valuemin={spec.min}
         aria-valuemax={spec.max}
-        aria-valuenow={Math.round(shown * 1000) / 1000}
+        aria-valuenow={Math.round(live.value * 1000) / 1000}
         aria-valuetext={words}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
           const step = event.shiftKey ? 0.001 : 0.01
           const write = (next: number) => {
+            const value = Math.max(spec.min, Math.min(spec.max, next))
             store.beginAutomationTouch()
-            store.setAutomated(spec, Math.max(spec.min, Math.min(spec.max, next)), rolling, engine.currentTimelineSample())
+            commitMix(store, engine, spec, rolling, value, [{ value, sample: engine.currentTimelineSample() }])
             store.endAutomationTouch()
           }
-          if (event.key === 'ArrowUp' || event.key === 'ArrowRight') write(shown + step)
-          if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') write(shown - step)
+          if (event.key === 'ArrowUp' || event.key === 'ArrowRight') write(live.value + step)
+          if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') write(live.value - step)
           if (event.key === 'Home') write(spec.min)
           if (event.key === 'End') write(spec.max)
         }}

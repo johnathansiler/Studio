@@ -37,6 +37,8 @@ const SCRIPT_BLOCK = 256
  */
 export class LiveRack {
   cpu = 0
+  /** Times the mixer routing graph was disconnected and wired again. */
+  rebuilds = 0
   quality: 'full' | 'eco' = 'full'
   clock: () => number = () => 0
   assetOf: (id: string) => { channels: Float32Array[] } | undefined = () => undefined
@@ -604,6 +606,7 @@ export class LiveRack {
     const localBus = this.localBus
     const remoteBus = this.remoteBus
     if (!ctx || !project || !localBus || !remoteBus) return
+    this.rebuilds += 1
     for (const link of this.links) {
       try { link.from.disconnect(link.to) } catch { /* already gone */ }
     }

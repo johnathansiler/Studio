@@ -799,7 +799,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .fade {
   position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(0,0,0,.45), transparent); pointer-events: none;
 }
-.playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--amber); z-index: 4; pointer-events: none; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--amber); z-index: 4; pointer-events: none; will-change: transform; }
 .playhead::before { content: ''; position: absolute; top: 0; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 8px solid var(--amber); }
 
 .mixer { height: 100%; overflow: auto; display: flex; gap: 10px; padding: 16px; background: #121a16; align-items: stretch; justify-content: flex-start; }

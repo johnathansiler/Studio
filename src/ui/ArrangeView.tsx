@@ -3,6 +3,7 @@ import { useScreenOverlay } from './screenOverlay'
 import { browserWidthFor, usePushPhase } from './dockPush'
 import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
+import { subscribeFrame, wakeTicker } from '../audio/ticker'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
 import { clipPlayRatio, snapClipTimeline } from '../audio/clipSnap'
@@ -18,11 +19,12 @@ import { quartersPerBar } from '../model/time'
 import { editorForGesture, hasStepSequencer } from '../model/editorOpen'
 import { showsOnscreenPiano } from '../model/onscreenPiano'
 import { showsOpenBeatMachine } from '../instruments/pads/identity'
-import { holdMeter } from './levels'
+import { watchLevel } from './levelMeter'
+import { placePlayhead } from './playhead'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
-import { displayedPlayhead } from '../model/transportSync'
+import { displayedPlayhead, transportMoving } from '../model/transportSync'
 import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
@@ -255,8 +257,10 @@ export function ArrangeView({
   const pxRef = useRef(px)
   pxRef.current = px
   const [position, setPosition] = useState(engine.positionSamples)
-  const [levels, setLevels] = useState<Record<string, number>>({})
-  const [midiOn, setMidiOn] = useState<Record<string, boolean>>({})
+  const positionRef = useRef(engine.positionSamples)
+  const projectRef = useRef(project)
+  projectRef.current = project
+  const barRef = useRef(Number.NaN)
   const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number>; pattern: Record<string, number> } | null>(null)
   const [patternMenu, setPatternMenu] = useState<{ x: number; y: number } | null>(null)
   const form = useFormFactor()
@@ -363,35 +367,64 @@ export function ArrangeView({
     window.addEventListener('pointercancel', up)
   }
   useEffect(() => subscribeTools(() => setToolState(activeTool())), [])
-  useEffect(() => engine.subscribe(() => setPosition(engine.positionSamples)), [engine])
+  useLayoutEffect(() => {
+    const node = innerRef.current?.querySelector<HTMLElement>('[data-playhead="arrange"]')
+    if (!node) return
+    const projectNow = projectRef.current
+    placePlayhead(node, displayedPlayhead(positionRef.current, projectNow), projectNow.sampleRate, pxRef.current)
+  })
+  useEffect(() => engine.subscribe(() => {
+    positionRef.current = engine.visualSample()
+    if (transportMoving(engine.status)) return
+    setPosition(engine.positionSamples)
+  }), [engine])
   useEffect(() => {
-    let frame = 0
-    const holds: Record<string, { value: number; at: number }> = {}
-    let painted: Record<string, number> = {}
-    const tick = (now: number) => {
-      const next = engine.levels?.()
-      if (next) {
-        const peaks: Record<string, number> = {}
-        let changed = false
-        const ids = new Set([...Object.keys(holds), ...Object.keys(next.tracks)])
-        for (const id of ids) {
-          const hold = holds[id] ?? (holds[id] = { value: 0, at: now })
-          const shown = holdMeter(hold, next.tracks[id] ?? 0, now)
-          if (shown <= 0) delete holds[id]
-          peaks[id] = shown
-          if (Math.abs((painted[id] ?? 0) - shown) >= 0.015) changed = true
-        }
-        if (changed) {
-          painted = peaks
-          setLevels(peaks)
+    const paintHead = () => {
+      const node = innerRef.current?.querySelector<HTMLElement>('[data-playhead="arrange"]')
+      if (!node) return false
+      const projectNow = projectRef.current
+      const sample = displayedPlayhead(engine.visualSample(), projectNow)
+      positionRef.current = sample
+      placePlayhead(node, sample, projectNow.sampleRate, pxRef.current)
+      const strip = document.querySelector<HTMLElement>('[data-playhead-strip]')
+      if (strip) strip.setAttribute('aria-valuenow', String(Math.round(sample)))
+      const bar = Math.floor(projectSampleBeat(projectNow, sample))
+      if (bar !== barRef.current) {
+        barRef.current = bar
+        setPosition(sample)
+      }
+      return transportMoving(engine.status)
+    }
+    const head = subscribeFrame(paintHead)
+    const midiPainted: Record<string, boolean> = {}
+    const midi = subscribeFrame(() => {
+      const root = headsRef.current
+      const activity = engine.midiActivity?.() ?? {}
+      if (root) {
+        for (const node of root.querySelectorAll<HTMLElement>('[data-midi-activity]')) {
+          const id = node.dataset.midiActivity || ''
+          const on = !!activity[id]
+          if (midiPainted[id] === on) continue
+          midiPainted[id] = on
+          node.dataset.lit = on ? '1' : '0'
+          node.setAttribute('aria-label', on ? 'MIDI activity. Notes are playing.' : 'MIDI activity. Idle.')
         }
       }
-      const midi = engine.midiActivity?.()
-      if (midi) setMidiOn(midi)
-      frame = window.requestAnimationFrame(tick)
+      const sheetId = trackRef.current
+      const sheetBar = document.querySelector<HTMLElement>('[data-track-meter] b')
+      if (sheetId && sheetBar) {
+        const level = engine.levels?.().tracks[sheetId] ?? 0
+        sheetBar.style.width = `${Math.max(0, Math.min(1, level)) * 100}%`
+      }
+      return transportMoving(engine.status) || Object.values(activity).some(Boolean)
+    })
+    const wake = () => wakeTicker()
+    const off = engine.subscribe(wake)
+    return () => {
+      head()
+      midi()
+      off()
     }
-    frame = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(frame)
   }, [engine])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1103,22 +1136,22 @@ export function ArrangeView({
           aria-label={phone ? 'Arrange touchpad. Drag to scroll the timeline.' : undefined}
           onPointerDown={phone ? onTouchpadDown : undefined}
         >
-          <SongMapHead store={store} position={position} compact />
+          <SongMapHead store={store} position={position} sampleAt={() => positionRef.current} compact />
         </div>
         {project.tracks.map((track) => (
           <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} data-track-name={track.name} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => { if (phone) { setPhoneFocus('track'); store.selectClip(track.id, null, false, false) }; store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
               <div className="track-meter-row">
                 <span className="mini-meter" data-arrange-meter={track.id} aria-hidden>
-                  <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
+                  <ArrangeMeter engine={engine} id={track.id} />
                 </span>
                 <span className="track-live" data-track-live={track.id}>
                   <i
                     className="midi-activity"
                     data-midi-activity={track.id}
-                    data-lit={midiOn[track.id] ? '1' : '0'}
+                    data-lit="0"
                     role="img"
-                    aria-label={midiOn[track.id] ? 'MIDI activity. Notes are playing.' : 'MIDI activity. Idle.'}
+                    aria-label="MIDI activity. Idle."
                   />
                 </span>
                 <TrackPresence trackId={track.id} />
@@ -1519,7 +1552,7 @@ export function ArrangeView({
           ))}
           {marquee && <div className="marquee" style={marquee} />}
           <RemoteTimeline peers={remotes} sampleRate={project.sampleRate} px={px} />
-          <div className="playhead" data-playhead="arrange" style={{ left: (displayedPlayhead(position, project) / project.sampleRate) * px }} />
+          <div className="playhead" data-playhead="arrange" style={{ left: 0 }} />
         </div>
         </div>
         <TimelineOverview
@@ -1585,8 +1618,9 @@ export function ArrangeView({
         >
           <TrackOptions
             store={store}
+            engine={engine}
             track={sheetTrack}
-            level={levels[sheetTrack.id] ?? 0}
+            level={0}
             automationOpen={!!store.openLanes[sheetTrack.id]}
             participants={session.state.participants.filter((person) => person.id !== session.state.selfId)}
             onClose={closeSheets}
@@ -1978,6 +2012,19 @@ function ClipView({
     </div>
     </div>
   )
+}
+
+function ArrangeMeter({ engine, id }: { engine: AudioEngine; id: string }) {
+  const bar = useRef<HTMLElement>(null)
+  useEffect(() => watchLevel(
+    engine,
+    () => engine.levels?.().tracks[id] ?? 0,
+    (shown) => {
+      const node = bar.current
+      if (node) node.style.transform = `scaleX(${shown})`
+    },
+  ), [engine, id])
+  return <i ref={bar} />
 }
 
 function ClipEdges({

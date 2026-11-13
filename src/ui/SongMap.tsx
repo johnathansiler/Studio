@@ -44,13 +44,14 @@ export function SmartTempoBar({ store }: { store: ProjectStore }) {
   )
 }
 
-export function SongMapHead({ store, position, compact = false }: { store: ProjectStore; position: number; compact?: boolean }) {
+export function SongMapHead({ store, position, sampleAt, compact = false }: { store: ProjectStore; position: number; sampleAt?: () => number; compact?: boolean }) {
   const project = store.project
   if (compact) return null
   const section = project.sections?.find((item) => item.id === store.sectionId) ?? null
   const point = (project.tempoMap ?? []).find((item) => store.tempoPointBeat != null && Math.abs(item.beat - store.tempoPointBeat) < 0.04)
-  const meter = meterAtSample(project, position)
-  const playBeat = () => projectSampleBeat(project, position)
+  const at = () => sampleAt?.() ?? position
+  const meter = meterAtSample(project, at())
+  const playBeat = () => projectSampleBeat(project, at())
   return (
     <div className="map-head">
       <div className="row">
@@ -68,7 +69,7 @@ export function SongMapHead({ store, position, compact = false }: { store: Proje
           title="Add a tempo change at the playhead."
           aria-label="Tempo. Add a tempo change at the playhead."
           disabled={store.remoteFollow}
-          onClick={() => store.addTempoPoint(project.snap ? Math.round(playBeat()) : playBeat(), tempoAtSample(project, position))}
+          onClick={() => store.addTempoPoint(project.snap ? Math.round(playBeat()) : playBeat(), tempoAtSample(project, at()))}
         >
           <strong>Tempo</strong>
           <small>Change the tempo at the playhead.</small>

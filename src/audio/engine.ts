@@ -43,6 +43,7 @@ import { audibleIds } from '../model/audible'
 import { automationSchedule, channelAutomationMode, laneFor, valueAtMappedSample } from '../model/automation'
 import { notePanGains } from './level'
 import { applyRamps, smoothParam } from './paramCurve'
+import { wakeTicker } from './ticker'
 import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
@@ -231,6 +232,8 @@ export class AudioEngine {
   private repeatWatch = false
   private beatPump: ((now: number, horizon: number) => void) | null = null
   private raf = 0
+  /** The next sync only moves faders and pans. The routing graph stays put. */
+  private mixFollow = false
   private playing = false
   private sessionWatch: (() => void) | null = null
   private sessionBusy = false
@@ -692,11 +695,18 @@ export class AudioEngine {
   }
 
   sync(project: Project, assetOf: (id: string) => AudioAsset | undefined) {
+    const mixOnly = this.mixFollow
+    this.mixFollow = false
     const loopFlip = this.loopArmed != null && this.loopArmed !== project.loopEnabled
     this.loopArmed = project.loopEnabled
     this.project = project
     this.assetOf = assetOf
     if (!this.ctx || !this.localBus || !this.remoteBus || !this.masterGain || !this.masterStrip) return
+    if (mixOnly && this.strips.size > 0) {
+      this.applyMasterGain()
+      this.applyMixerAutomation()
+      return
+    }
     for (const track of project.tracks) {
       if (!this.strips.has(track.id)) this.strips.set(track.id, createStrip(this.ctx))
     }
@@ -1260,6 +1270,50 @@ export class AudioEngine {
     smoothParam(this.masterGain.gain, gain, this.ctx.currentTime)
   }
 
+  /**
+   * The next project sync is a fader or pan edit.
+   * Gain and pan move on the nodes that already exist. The routing graph is not rebuilt.
+   */
+  armMixFollow() {
+    this.mixFollow = true
+  }
+
+  /** Drop a mix-only follow that never became a real edit. */
+  clearMixFollow() {
+    this.mixFollow = false
+  }
+
+  /** How many times the mixer routing graph was torn down and wired again. */
+  get graphRebuilds() {
+    return this.rack.rebuilds
+  }
+
+  /**
+   * Hear a fader or pan immediately. `setTargetAtTime` (via the shared smoother)
+   * hides zipper clicks without touching the routing graph.
+   */
+  previewMix(target: 'volume' | 'pan', id: string, value: number) {
+    const ctx = this.ctx
+    if (!ctx) return
+    const now = ctx.currentTime
+    if (id === 'master') {
+      if (target !== 'volume' || !this.masterGain) return
+      const gain = this.referenceOn ? 0 : value * this.compareGain
+      smoothParam(this.masterGain.gain, gain, now)
+      return
+    }
+    const strip = this.strips.get(id)
+    if (strip) {
+      if (target === 'volume') smoothParam(strip.fader.gain, Math.max(0, value), now)
+      else smoothParam(strip.pan.pan, Math.max(-1, Math.min(1, value)), now)
+      return
+    }
+    const trim = this.drumTrims.get(id)
+    if (!trim) return
+    if (target === 'volume') smoothParam(trim.gain.gain, Math.max(0, value), now)
+    else smoothParam(trim.pan.pan, Math.max(-1, Math.min(1, value)), now)
+  }
+
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
   mixMeters() {
     this.sampleLoudness()
@@ -1527,6 +1581,7 @@ export class AudioEngine {
     const from = when ?? now
     this.midiMarks.push({ id: trackId, from, until: from + Math.max(0.08, dur) })
     if (this.midiMarks.length > 512) this.midiMarks.splice(0, this.midiMarks.length - 256)
+    wakeTicker(12)
   }
 
   /** A held key, pad, or incoming MIDI note. Pair +1 with a later -1. */
@@ -1565,6 +1620,19 @@ export class AudioEngine {
   currentTimelineSample() {
     if (this.playing && this.ctx) return Math.max(0, this.sampleAt(this.ctx.currentTime))
     return this.positionSamples
+  }
+
+  /**
+   * Playhead sample for the screen. It keeps the fraction from AudioContext time
+   * so the line can move by a fraction of a pixel.
+   */
+  visualSample() {
+    if (!(this.playing && this.ctx)) return this.positionSamples
+    const linear = this.sampleAt(this.ctx.currentTime)
+    const project = this.project
+    const patternLoop = project && this.status !== 'recording' ? emptyPatternLoopSamples(project) : 0
+    if (patternLoop > 1 && linear >= 0) return linear % patternLoop
+    return this.heardSample(linear)
   }
 
   seek(sample: number) {
