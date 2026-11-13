@@ -3,6 +3,7 @@ import { FEATURES } from '../features'
 import { controlLaw, formatPan } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
 import { GestureReadout, useDragValue } from './kit/controls'
+import { createMixDrag, useLiveMix } from './liveMix'
 import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
 import {
@@ -47,6 +48,8 @@ type RackEngine = {
   currentTimelineSample?: () => number
   seek?: (sample: number) => void
   unlock?: () => void
+  previewMix?: (target: 'volume' | 'pan', id: string, value: number) => void
+  armMixFollow?: () => void
   previewSequence?: (events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[]) => void
   previewPcm?: (channels: Float32Array[], sampleRate?: number) => void
 }
@@ -104,6 +107,51 @@ function graphNow(mode: GraphMode, cell: Pick<StepCell, 'velocity' | 'pan' | 'pi
   return cell.velocity
 }
 
+function LiveRange({
+  label,
+  title,
+  min,
+  max,
+  value,
+  onAudio,
+  onCommit,
+}: {
+  label: string
+  title: string
+  min: number
+  max: number
+  value: number
+  onAudio: (next: number) => void
+  onCommit: (next: number) => void
+}) {
+  const held = useRef(false)
+  const live = useLiveMix(value, {
+    audio: onAudio,
+    commit: (next) => onCommit(next),
+  })
+  return (
+    <label className="rack-field" title={title}>
+      <span>Pan</span>
+      <input
+        aria-label={label}
+        title={title}
+        type="range"
+        min={min}
+        max={max}
+        step="any"
+        value={live.value}
+        onPointerDown={() => { held.current = true }}
+        onPointerUp={() => { held.current = false; live.release() }}
+        onPointerCancel={() => { held.current = false; live.release() }}
+        onChange={(event) => {
+          live.move(Number(event.target.value))
+          if (!held.current) live.release()
+        }}
+      />
+    </label>
+  )
+}
+
 function knobAngle(value: number, min: number, max: number) {
   const span = max - min || 1
   const t = Math.max(0, Math.min(1, (value - min) / span))
@@ -118,6 +166,7 @@ function Knob({
   step,
   value,
   onChange,
+  onLive,
   onDone,
 }: {
   label: string
@@ -127,26 +176,47 @@ function Knob({
   step: number
   value: number
   onChange: (next: number, drag: boolean) => void
-  onDone: () => void
+  onLive?: (next: number) => void
+  onDone: (next: number) => void
 }) {
   const law = controlLaw({ label, min, max })
-  const shown = law === 'db' ? gainToDb(value) : law === 'pan' ? formatPan(value) : value.toFixed(2)
+  const [live, setLive] = useState<number | null>(null)
+  const handlers = useRef({ onLive, onDone, onChange })
+  handlers.current = { onLive, onDone, onChange }
+  const drag = useRef<ReturnType<typeof createMixDrag> | null>(null)
+  if (!drag.current) {
+    drag.current = createMixDrag({
+      audio: (next) => handlers.current.onLive?.(next),
+      screen: setLive,
+      commit: (next) => handlers.current.onDone(next),
+    })
+  }
+  useEffect(() => { setLive(null) }, [value])
+  const shownValue = live ?? value
+  const shown = law === 'db' ? gainToDb(shownValue) : law === 'pan' ? formatPan(shownValue) : shownValue.toFixed(2)
   const set = (next: number, fromDrag: boolean) => {
     const clamped = Math.max(min, Math.min(max, next))
-    if (law) onChange(clamped, fromDrag)
-    else onChange(Number((Math.round(clamped / step) * step).toFixed(2)), fromDrag)
+    const snapped = law ? clamped : Number((Math.round(clamped / step) * step).toFixed(2))
+    if (fromDrag && handlers.current.onLive) drag.current!.move(snapped)
+    else onChange(snapped, fromDrag)
   }
   const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
     min,
     max,
-    value,
+    value: shownValue,
     fallback: (min + max) / 2,
     format: law === 'db' ? gainToDb : law === 'pan' ? formatPan : undefined,
     onChange: (next) => set(next, true),
-    onCommit: onDone,
+    onCommit: () => {
+      const done = handlers.current.onLive ? drag.current!.finish() : null
+      if (handlers.current.onLive) {
+        if (done) handlers.current.onDone(done.value)
+        else setLive(null)
+      } else handlers.current.onDone(shownValue)
+    },
   })
   const span = max - min || 1
-  const unit = Math.max(0, Math.min(1, (value - min) / span))
+  const unit = Math.max(0, Math.min(1, (shownValue - min) / span))
   return (
     <button
       ref={ref}
@@ -158,13 +228,13 @@ function Knob({
       aria-label={`${label}. ${hint}`}
       aria-valuemin={min}
       aria-valuemax={max}
-      aria-valuenow={Number(value.toFixed(2))}
+      aria-valuenow={Number(shownValue.toFixed(2))}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowUp' || event.key === 'ArrowRight') set(value + step, false)
-        if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') set(value - step, false)
+        if (event.key === 'ArrowUp' || event.key === 'ArrowRight') set(shownValue + step, false)
+        if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') set(shownValue - step, false)
       }}
     >
-      <i style={{ transform: `rotate(${knobAngle(value, min, max)}deg)` }} />
+      <i style={{ transform: `rotate(${knobAngle(shownValue, min, max)}deg)` }} />
       {(dragging || readout) && <em className="rack-readout">{readout?.text ?? shown}</em>}
       <GestureReadout readout={readout} />
     </button>
@@ -611,21 +681,21 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
               </select>
             </label>
             {phone && (
-              <label className="rack-field" title={rowCopy('pan').hint}>
-                <span>Pan</span>
-                <input
-                  aria-label={`${focus.name} ${rowCopy('pan').label}. ${rowCopy('pan').hint}`}
-                  title={rowCopy('pan').hint}
-                  type="range"
-                  min={-1}
-                  max={1}
-                  step="any"
-                  value={focus.pan}
-                  onChange={(event) => store.setChannel(focus.id, { pan: Number(event.target.value) }, true)}
-                  onPointerUp={() => store.endDraft()}
-                  onPointerCancel={() => store.endDraft()}
-                />
-              </label>
+              <LiveRange
+                label={`${focus.name} ${rowCopy('pan').label}. ${rowCopy('pan').hint}`}
+                title={rowCopy('pan').hint}
+                min={-1}
+                max={1}
+                value={focus.pan}
+                onAudio={(next) => {
+                  engine.previewMix?.('pan', focus.id, next)
+                  store.reviseChannel(focus.id, { pan: next })
+                }}
+                onCommit={() => {
+                  engine.armMixFollow?.()
+                  store.finishMixGesture()
+                }}
+              />
             )}
             <label className="rack-field" title={rowCopy('steps').hint}>
               <span>Loop</span>
@@ -785,8 +855,17 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
                     max={1}
                     step={0.01}
                     value={channel.pan}
-                    onChange={(next, drag) => store.setChannel(channel.id, { pan: next }, drag)}
-                    onDone={() => store.endDraft()}
+                    onLive={engine.previewMix ? (next) => { engine.previewMix!('pan', channel.id, next); store.reviseChannel(channel.id, { pan: next }) } : undefined}
+                    onChange={(next, drag) => {
+                      if (drag && engine.previewMix) return
+                      store.setChannel(channel.id, { pan: next }, drag)
+                    }}
+                    onDone={(next) => {
+                      if (engine.previewMix && Number.isFinite(next)) {
+                        engine.armMixFollow?.()
+                        store.finishMixGesture()
+                      } else store.endDraft()
+                    }}
                   />
                 )}
                 <Knob
@@ -796,8 +875,17 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
                   max={1}
                   step={0.01}
                   value={channel.volume}
-                  onChange={(next, drag) => store.setChannel(channel.id, { volume: next }, drag)}
-                  onDone={() => store.endDraft()}
+                  onLive={engine.previewMix ? (next) => { engine.previewMix!('volume', channel.id, next); store.reviseChannel(channel.id, { volume: next }) } : undefined}
+                  onChange={(next, drag) => {
+                    if (drag && engine.previewMix) return
+                    store.setChannel(channel.id, { volume: next }, drag)
+                  }}
+                  onDone={(next) => {
+                    if (engine.previewMix && Number.isFinite(next)) {
+                      engine.armMixFollow?.()
+                      store.finishMixGesture()
+                    } else store.endDraft()
+                  }}
                 />
                 <button
                   type="button"

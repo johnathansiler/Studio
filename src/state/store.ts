@@ -2087,6 +2087,13 @@ export class ProjectStore {
     })
   }
 
+  /** Master fader while a finger is down. The app is told once, on release. */
+  reviseMaster(volume: number) {
+    if (this.remoteFollow) return
+    this.holdDraft()
+    this.project.masterVolume = clamp(volume, 0, 1.25)
+  }
+
   /** One channel's automation mode. Other channels are left alone. */
   setTrackAutomation(trackId: string, mode: 'off' | 'read' | 'touch' | 'latch') {
     this.mutate(() => {
@@ -2961,6 +2968,91 @@ export class ProjectStore {
       const fromValue = previous?.value ?? value
       this.punchSpec(spec, fromBeat, beat, fromValue, value)
       this.write = { key, beat, value, spec }
+    })
+  }
+
+  /**
+   * Follow a fader or pan while the finger is down.
+   * The project value updates so the gesture stays continuous, without a render or a history step.
+   * `finishMixGesture` seals one undo step and notifies the app.
+   */
+  reviseMix(spec: AutoSpec, value: number, playing: boolean, sample: number) {
+    if (this.remoteFollow) return false
+    const mode = channelAutomationMode(this.project, spec.trackId === 'master' ? 'master' : spec.trackId)
+    if (playing && mode === 'read' && this.pointsOf(spec).length > 0) return false
+    this.holdDraft()
+    const writing = playing && (mode === 'latch' || (mode === 'touch' && this.touching))
+    this.applySpec(spec, value)
+    if (!writing) {
+      this.write = null
+      return true
+    }
+    const beat = projectSampleBeat(this.project, sample)
+    const key = specKey(spec)
+    const previous = this.write?.key === key ? this.write : null
+    this.punchSpec(spec, previous?.beat ?? beat, beat, previous?.value ?? value, value)
+    this.write = { key, beat, value, spec }
+    return true
+  }
+
+  /** Open the one undo step for a drag. Later revisions edit that step and do not notify. */
+  private holdDraft() {
+    if (this.drafted) return
+    this.journal.seal(this.project)
+    this.journal.open(this.project)
+    this.drafted = true
+    this.editGeneration += 1
+    this.quantizePreview = null
+  }
+
+  /** Seal the open fader gesture and notify once. */
+  finishMixGesture() {
+    const open = this.drafted
+    this.drafted = false
+    this.touching = false
+    if (!open) return
+    this.journal.seal(this.project)
+    this.emit()
+  }
+
+  /**
+   * One fader or pan gesture. The whole trail is a single undo step.
+   * Call while the touch is still open so latch and touch write into that step.
+   */
+  commitMixGesture(spec: AutoSpec, trail: { value: number; sample: number }[], playing: boolean) {
+    if (!trail.length) return
+    const mode = channelAutomationMode(this.project, spec.trackId === 'master' ? 'master' : spec.trackId)
+    if (playing && mode === 'read' && this.pointsOf(spec).length > 0) return
+    const writing = playing && (mode === 'latch' || (mode === 'touch' && this.touching))
+    const gesture = this.touching || writing
+    const run = gesture ? (fn: () => void) => this.draft(fn) : (fn: () => void) => this.mutate(fn)
+    run(() => {
+      const last = trail[trail.length - 1]
+      this.applySpec(spec, last.value)
+      if (!writing) {
+        this.write = null
+        return
+      }
+      let prev = trail[0]
+      if (trail.length === 1) {
+        const beat = projectSampleBeat(this.project, prev.sample)
+        this.punchSpec(spec, beat, beat, prev.value, prev.value)
+        this.write = { key: specKey(spec), beat, value: prev.value, spec }
+        return
+      }
+      for (let i = 1; i < trail.length; i++) {
+        const point = trail[i]
+        this.punchSpec(
+          spec,
+          projectSampleBeat(this.project, prev.sample),
+          projectSampleBeat(this.project, point.sample),
+          prev.value,
+          point.value,
+        )
+        prev = point
+      }
+      const beat = projectSampleBeat(this.project, prev.sample)
+      this.write = { key: specKey(spec), beat, value: prev.value, spec }
     })
   }
 
@@ -5880,6 +5972,16 @@ export class ProjectStore {
       if (patch.fine != null) cell.fine = Math.max(-100, Math.min(100, patch.fine))
       if (patch.gate != null) cell.gate = Math.max(0.05, Math.min(1, patch.gate))
     })
+  }
+
+  /** Drum-row fader or pan while a finger is down. One undo step is sealed on release. */
+  reviseChannel(channelId: string, patch: { volume?: number; pan?: number }) {
+    if (this.remoteFollow) return
+    this.holdDraft()
+    const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
+    if (!channel) return
+    if (patch.volume != null) channel.volume = Math.max(0, Math.min(1.5, patch.volume))
+    if (patch.pan != null) channel.pan = Math.max(-1, Math.min(1, patch.pan))
   }
 
   setChannel(channelId: string, patch: Partial<{ volume: number; pan: number; mute: boolean; solo: boolean; output: string | null; steps: number; swing: number | null; name: string }>, drag = false) {

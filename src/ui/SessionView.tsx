@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { subscribeFrame, wakeTicker } from '../audio/ticker'
 import { LAUNCH_QUANTS, QUANT_LABEL, sceneClip, SESSION_SCENES } from '../model/launch'
 import { clipLoopSamples, slotDisplay } from '../model/sessionSlots'
+import { transportMoving } from '../model/transportSync'
 import {
   clipPaint,
   instrumentFor,
@@ -30,6 +32,7 @@ import { SessionDetail } from './sessionDetail'
 import { sessionTargetAt } from './sessionPointer'
 import { gainToDb } from '../model/time'
 import { TouchSlider } from './kit/controls'
+import { previewChannel, useLiveMix } from './liveMix'
 import './sessionGrid.css'
 import './sessionLive.css'
 
@@ -103,14 +106,49 @@ function SessionBody({
   }, [compact])
 
   useEffect(() => {
-    let frame = 0
-    const tick = () => {
-      setNow(engine.currentTimelineSample())
-      frame = window.requestAnimationFrame(tick)
+    let phases = ''
+    const unsub = subscribeFrame(() => {
+      const sample = engine.visualSample()
+      const root = clipScroll.current
+      const project = store.project
+      let next = ''
+      if (root) {
+        for (const track of sessionTracks(project.tracks)) {
+          const playingId = store.launched[track.id]
+          const hand = store.handoff[track.id]
+          for (let scene = 0; scene < SESSION_SCENES; scene++) {
+            const clip = sceneClip(track, scene)
+            const phase = slotDisplay({
+              clipId: clip?.id ?? null,
+              launchedId: playingId ?? null,
+              handoffId: hand?.clipId,
+              handoffAt: hand?.at,
+              now: sample,
+              launchAt: store.launchAt[track.id],
+              stopAt: store.stopAt[track.id],
+              lengthSamples: clip ? clipLoopSamples(clip, project.sampleRate, project.tempo) : 1,
+            })
+            next += phase.phase
+            for (const slot of root.querySelectorAll<HTMLElement>('[data-session-slot]')) {
+              if (slot.dataset.sessionSlot !== track.id || slot.dataset.scene !== String(scene)) continue
+              const bar = slot.querySelector<HTMLElement>('.slot-progress')
+              if (bar) bar.style.width = `${Math.round(phase.progress * 100)}%`
+            }
+          }
+        }
+      }
+      if (next !== phases) {
+        phases = next
+        setNow(sample)
+      }
+      return transportMoving(engine.status)
+    })
+    const off = engine.subscribe(() => wakeTicker())
+    return () => {
+      unsub()
+      off()
     }
-    frame = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(frame)
-  }, [engine])
+  }, [engine, store])
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -306,11 +344,11 @@ function SessionBody({
           {mixerOn && (
             <div className="sl-mixline" ref={mixScroll} onScroll={(event) => syncScroll(event.currentTarget, clipScroll.current)}>
               {tracks.map((track, index) => (
-                <TrackMix key={track.id} store={store} track={track} index={index} level={levels.tracks[track.id] ?? 0} />
+                <TrackMix key={track.id} store={store} engine={engine} track={track} index={index} level={levels.tracks[track.id] ?? 0} />
               ))}
               <div className="sl-mix sl-master" data-mixer="master">
                 <div className="sl-fader">
-                  <TouchSlider vertical label="Master volume" title="Master volume." min={0} max={1.25} step={0.001} value={grid.project.masterVolume} fallback={0.9} format={gainToDb} onStart={() => store.beginAutomationTouch()} onCommit={() => store.endAutomationTouch()} onChange={(value) => store.setMasterVolume(value)} />
+                  <MasterFader store={store} engine={engine} value={grid.project.masterVolume} />
                   <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, levels.master * 140)}%` }} /></div>
                 </div>
               </div>
@@ -500,17 +538,88 @@ function TrackColumn({
   )
 }
 
-function TrackMix({ store, track, index, level }: { store: ProjectStore; track: Track; index: number; level: number }) {
+function PanRange({ name, value, onMove, onRelease, onHold }: { name: string; value: number; onMove: (next: number) => void; onRelease: () => void; onHold: () => void }) {
+  const held = useRef(false)
+  return (
+    <input
+      aria-label={`${name} pan`}
+      title="Pan."
+      data-fallback="0"
+      type="range"
+      min={-1}
+      max={1}
+      step="any"
+      value={value}
+      onPointerDown={() => { held.current = true; onHold() }}
+      onPointerUp={() => { held.current = false; onRelease() }}
+      onPointerCancel={() => { held.current = false; onRelease() }}
+      onChange={(event) => {
+        onMove(Number(event.target.value))
+        if (!held.current) onRelease()
+      }}
+    />
+  )
+}
+
+function MasterFader({ store, engine, value }: { store: ProjectStore; engine: AudioEngine; value: number }) {
+  const live = useLiveMix(value, {
+    audio: (next) => engine.previewMix('volume', 'master', next),
+    project: (next) => store.reviseMaster(next),
+    commit: () => {
+      engine.armMixFollow()
+      store.finishMixGesture()
+    },
+  })
+  return (
+    <TouchSlider
+      vertical
+      label="Master volume"
+      title="Master volume."
+      min={0}
+      max={1.25}
+      step={0.001}
+      value={live.value}
+      fallback={0.9}
+      format={gainToDb}
+      onStart={() => store.beginAutomationTouch()}
+      onCommit={() => {
+        live.release()
+        store.endAutomationTouch()
+      }}
+      onChange={live.move}
+    />
+  )
+}
+
+function TrackMix({ store, engine, track, index, level }: { store: ProjectStore; engine: AudioEngine; track: Track; index: number; level: number }) {
   const buses = store.project.tracks.filter((item) => item.type === 'bus')
+  const live = useLiveMix(track.volume, {
+    audio: (next) => previewChannel(engine, store.project, 'volume', track.id, next),
+    project: (next) => store.reviseMix({ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }, next, false, 0),
+    commit: () => {
+      engine.armMixFollow()
+      store.finishMixGesture()
+    },
+    sample: () => engine.currentTimelineSample(),
+  })
+  const pan = useLiveMix(track.pan, {
+    audio: (next) => previewChannel(engine, store.project, 'pan', track.id, next),
+    project: (next) => store.reviseMix({ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }, next, false, 0),
+    commit: () => {
+      engine.armMixFollow()
+      store.finishMixGesture()
+    },
+    sample: () => engine.currentTimelineSample(),
+  })
   return (
     <div className="sl-mix" data-mixer={track.id}>
       <div className="sl-fader">
-        <TouchSlider vertical label={`${track.name} volume`} title="Volume." min={0} max={1.25} step={0.001} value={track.volume} fallback={0.8} format={gainToDb} onStart={() => store.beginAutomationTouch()} onCommit={() => store.endAutomationTouch()} onChange={(value) => store.updateTrack(track.id, { volume: value })} />
+        <TouchSlider vertical label={`${track.name} volume`} title="Volume." min={0} max={1.25} step={0.001} value={live.value} fallback={0.8} format={gainToDb} onStart={() => store.beginAutomationTouch()} onCommit={() => { live.release(); store.endAutomationTouch() }} onChange={live.move} />
         <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, level * 160)}%` }} /></div>
       </div>
       <label className="sl-pan">
         Pan
-        <input aria-label={`${track.name} pan`} title="Pan." data-fallback="0" type="range" min={-1} max={1} step="any" value={track.pan} onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
+        <PanRange name={track.name} value={pan.value} onMove={pan.move} onRelease={() => { pan.release(); store.endAutomationTouch() }} onHold={() => store.beginAutomationTouch()} />
       </label>
       <div className="sl-flags">
         <button type="button" className={track.mute ? 'mute on' : ''} title="Activator. Turn the track on or off." onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>{index + 1}</button>

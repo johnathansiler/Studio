@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { AudioEngine } from '../audio/engine'
 import { gainToDb } from '../model/time'
+import { useLiveMix } from './liveMix'
 import { DbRead } from './DbRead'
 import type { ProjectStore } from '../state/store'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
@@ -11,6 +13,60 @@ import { BevelSelect } from './BevelSelect'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { addOrOpenAutoTune } from './AutoTuneFace'
 import './trackOptions.css'
+
+function VolumeRange({ store, engine, trackId, volume, label, title }: { store: ProjectStore; engine?: AudioEngine; trackId: string; volume: number; label: string; title: string }) {
+  const held = useRef(false)
+  const live = useLiveMix(volume, {
+    audio: (next) => engine?.previewMix('volume', trackId, next),
+    project: (next) => {
+      if (engine) store.reviseMix({ trackId, target: 'volume', param: 'volume', min: 0, max: 1.25 }, next, false, 0)
+    },
+    commit: () => {
+      if (!engine) return
+      engine.armMixFollow()
+      store.finishMixGesture()
+    },
+  })
+  return (
+    <input
+      type="range"
+      min={0}
+      max={1.25}
+      step="any"
+      data-track-action="volume"
+      title={title}
+      aria-label={label}
+      aria-valuetext={gainToDb(live.value)}
+      value={engine ? live.value : volume}
+      onPointerDown={() => {
+        held.current = true
+        store.beginAutomationTouch()
+      }}
+      onPointerUp={() => {
+        held.current = false
+        if (engine) live.release()
+        store.endAutomationTouch()
+      }}
+      onPointerCancel={() => {
+        held.current = false
+        if (engine) live.release()
+        store.endAutomationTouch()
+      }}
+      onChange={(event) => {
+        const next = Number(event.target.value)
+        if (!engine) {
+          store.updateTrack(trackId, { volume: next })
+          return
+        }
+        live.move(next)
+        if (!held.current) {
+          live.release()
+          store.endAutomationTouch()
+        }
+      }}
+    />
+  )
+}
 
 export function trackKindLabel(track: { type: string }) {
   if (track.type === 'audio') return 'Audio'
@@ -59,6 +115,7 @@ const INPUTS = [
 
 export function TrackOptions({
   store,
+  engine,
   track,
   level,
   automationOpen,
@@ -72,6 +129,7 @@ export function TrackOptions({
   onOpenPlugins,
 }: {
   store: ProjectStore
+  engine?: AudioEngine
   track: Track
   level: number
   automationOpen: boolean
@@ -151,7 +209,10 @@ export function TrackOptions({
               label={`${track.name} volume decibels`}
               onFocus={() => store.beginAutomationTouch()}
               onBlur={() => store.endAutomationTouch()}
-              onChange={(next) => store.updateTrack(track.id, { volume: next })}
+              onChange={(next) => {
+                engine?.armMixFollow()
+                store.updateTrack(track.id, { volume: next })
+              }}
             />
           </b>
         </div>
@@ -159,21 +220,7 @@ export function TrackOptions({
           <i className="track-meter" data-track-meter="" aria-hidden="true">
             <b style={{ width: `${Math.max(0, Math.min(1, level)) * 100}%` }} />
           </i>
-          <input
-            type="range"
-            min={0}
-            max={1.25}
-            step="any"
-            data-track-action="volume"
-            title={volume.hint}
-            aria-label={`${volume.label}. ${volume.hint}`}
-            aria-valuetext={gainToDb(track.volume)}
-            value={track.volume}
-            onPointerDown={() => store.beginAutomationTouch()}
-            onPointerUp={() => store.endAutomationTouch()}
-            onPointerCancel={() => store.endAutomationTouch()}
-            onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })}
-          />
+          <VolumeRange store={store} engine={engine} trackId={track.id} volume={track.volume} label={`${volume.label}. ${volume.hint}`} title={volume.hint} />
         </div>
       </div>
       <div className="track-toggles" role="group" aria-label="Track switches">

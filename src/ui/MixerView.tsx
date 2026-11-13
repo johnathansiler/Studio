@@ -9,11 +9,12 @@ import type { ProjectStore } from '../state/store'
 import type { Track } from '../model/types'
 import { AddTrackButton } from './AddTrack'
 import { AutoFader, ChannelAutomation, MixFlags, PanKnob, panWords } from './AutomationLane'
+import { watchLevel } from './levelMeter'
+import { useLiveMix } from './liveMix'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, StripInserts } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
-import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
 import { useScreenOverlay } from './screenOverlay'
 import { useFormFactor } from './form'
@@ -538,7 +539,15 @@ function VolumeLane({
 }
 
 function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; engine: AudioEngine; value: number; vertical: boolean }) {
-  const db = gainToDb(value)
+  const live = useLiveMix(value, {
+    audio: (next) => engine.previewMix('volume', 'master', next),
+    project: (next) => store.reviseMaster(next),
+    commit: () => {
+      engine.armMixFollow()
+      store.finishMixGesture()
+    },
+  })
+  const db = gainToDb(live.value)
   return (
     <div className="fader-row volume-row">
       <FaderScale />
@@ -551,23 +560,29 @@ function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; e
         min={0}
         max={1.25}
         step={0.01}
-        value={value}
+        value={live.value}
         fallback={0.9}
         format={gainToDb}
         matchLength
         valueText={db}
         onStart={() => store.beginAutomationTouch()}
-        onCommit={() => store.endAutomationTouch()}
-        onChange={(next) => store.setMasterVolume(next)}
+        onCommit={() => {
+          live.release()
+          store.endAutomationTouch()
+        }}
+        onChange={live.move}
       />
       <DbRead
-        gain={value}
+        gain={live.value}
         min={0}
         max={1.25}
         label="Master volume decibels"
         onFocus={() => store.beginAutomationTouch()}
         onBlur={() => store.endAutomationTouch()}
-        onChange={(next) => store.setMasterVolume(next)}
+        onChange={(next) => {
+          engine.armMixFollow()
+          store.setMasterVolume(next)
+        }}
       />
     </div>
   )
@@ -827,27 +842,21 @@ function LevelReadout({ engine }: { engine: AudioEngine }) {
 }
 
 function Meter({ engine, id }: { engine: AudioEngine; id: string }) {
-  const [level, setLevel] = useState(0)
-  useEffect(() => {
-    let frame = 0
-    const hold = { value: 0, at: 0 }
-    let painted = 0
-    const tick = (now: number) => {
+  const bar = useRef<HTMLElement>(null)
+  useEffect(() => watchLevel(
+    engine,
+    () => {
       const levels = engine.levels()
-      const raw = id === 'master' ? levels.master : (levels.tracks[id] || 0)
-      const shown = holdMeter(hold, raw, now)
-      if (Math.abs(painted - shown) >= 0.015) {
-        painted = shown
-        setLevel(shown)
-      }
-      frame = window.requestAnimationFrame(tick)
-    }
-    frame = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(frame)
-  }, [engine, id])
+      return id === 'master' ? levels.master : (levels.tracks[id] || 0)
+    },
+    (shown) => {
+      const node = bar.current
+      if (node) node.style.height = `${shown * 100}%`
+    },
+  ), [engine, id])
   return (
     <div className="meter" aria-hidden="true">
-      <b style={{ height: `${level * 100}%` }} />
+      <b ref={bar} />
     </div>
   )
 }
