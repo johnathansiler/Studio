@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FEATURES, preferArrangeTransport, preferArrangeView } from './features'
 import { installControlGuards } from './ui/gestures'
 import { AudioEngine } from './audio/engine'
@@ -34,35 +34,21 @@ import { beatsToSamples, countInBarsOf, samplesToBeats } from './model/time'
 import { looseGroup, presentSoundEntries, samplerFromNotes } from './sounds/noteGroups'
 import type { SoundEntry } from './sounds/types'
 
-const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
-import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
-import { StepSequencerPanel } from './ui/StepSequencerPanel'
 import type { TrackChoice } from './model/addTrack'
-import { ExportSheet } from './ui/ExportSheet'
 import { collectRecordInputs } from './midi/inputs'
 import { hidesHardwareMidi } from './model/midiTools'
 import { formFactor, type FormFactor } from './ui/form'
 import { MidiTools } from './ui/MidiTools'
-import { PerformPop } from './ui/PerformPop'
-import { MixerView } from './ui/MixerView'
-import { PluginSheet } from './ui/PluginSheet'
-import { LazySheet } from './ui/sheetFallback'
+import { LazySheet, SheetFallback } from './ui/sheetFallback'
 import { ideasPageFromSearch, ideasSheetRequested, type IdeasPage } from './unstuck/ideasPage'
 import './ui/guideSheet.css'
 import { panelChoice } from './ui/panelMemory'
-import { ShellBrowser } from './ui/PlaylistBrowser'
 import { browserWidthFor, usePushPhase } from './ui/dockPush'
-import { PadsPanel } from './ui/PadsPanel'
-import { ScalerPanel } from './ui/ScalerPanel'
 import { clampSoundWidth, readSoundWidth } from './sounds/panel'
 import { loadScaleCatalog } from './theory'
-import { QuantizeSheet } from './ui/QuantizeSheet'
-import { MidiDock } from './ui/MidiDock'
-import { ProjectSheet } from './ui/ProjectSheet'
-import { PatchSheet } from './ui/PatchSheet'
-import { RackView } from './ui/RackView'
+import { ScalerPanel } from './ui/ScalerPanel'
 import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTab'
 import './ui/collab.css'
 import { AnchoredMenu } from './ui/AnchoredMenu'
@@ -71,34 +57,51 @@ import { IdeasBulbIcon, TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
 import { activeTool } from './state/tools'
-import { VideoDock } from './ui/VideoDock'
 
-declare const __CUEHARBOR_SESSION__: boolean
-
-const UnstuckSheet = lazy(() => import('./unstuck/UnstuckSheet').then((mod) => ({ default: mod.UnstuckSheet })))
-const AnalysisSheet = lazy(() => import('./ui/AnalysisSheet').then((mod) => ({ default: mod.AnalysisSheet })))
-const KnockPop = lazy(() => import('./ui/KnockPop').then((mod) => ({ default: mod.KnockPop })))
-const SpectralSheet = lazy(() => import('./ui/SpectralSheet').then((mod) => ({ default: mod.SpectralSheet })))
-const SessionPane = __CUEHARBOR_SESSION__
-  ? lazy(() => import('./ui/SessionView').then((mod) => ({ default: mod.SessionView })))
-  : function HiddenSession(_props: Record<string, unknown>) { return null }
 import { visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
 import { CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
-import { MainMenu } from './ui/MainMenu'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
-import { KeyboardDock } from './ui/KeyboardDock'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
 import { sheetHistoryPop } from './ui/arrangePanel'
 import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble } from './ui/Hint'
-import { WaveEditor } from './ui/WaveEditor'
+import {
+  ExportSheet,
+  FaceGallery,
+  KeyboardDock,
+  MainMenu,
+  MidiDock,
+  MixerView,
+  PadsPanel,
+  PatchSheet,
+  PendingMenu,
+  PendingPane,
+  PerformPop,
+  PluginSheet,
+  ProjectSheet,
+  QuantizeSheet,
+  RackView,
+  SessionPane,
+  ShellBrowser,
+  StepSequencerPanel,
+  TunerPop,
+  VideoDock,
+  WaveEditor,
+  moduleView,
+  preloadStudioIdle,
+  preloadView,
+} from './ui/lazyViews'
+const loadUnstuck = moduleView(() => import('./unstuck/UnstuckSheet'), 'UnstuckSheet')
+const loadAnalysis = moduleView(() => import('./ui/AnalysisSheet'), 'AnalysisSheet')
+const loadKnock = moduleView(() => import('./ui/KnockPop'), 'KnockPop')
+const loadSpectral = moduleView(() => import('./ui/SpectralSheet'), 'SpectralSheet')
 import { Toasts } from './ui/Toasts'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -154,12 +157,16 @@ export function App() {
   useEffect(() => installControlGuards(document), [])
   useEffect(() => {
     const warm = () => {
+      preloadView('menu')
+      preloadView('mix')
+      preloadView('pads')
       void import('./ui/IdeasPop')
       void import('./ui/PlayersSheet')
       void import('./unstuck/UnstuckSheet')
       void import('./ui/AnalysisSheet')
       void import('./ui/KnockPop')
       void import('./ui/SpectralSheet')
+      preloadStudioIdle()
     }
     const idle = window.requestIdleCallback
     if (typeof idle === 'function') {
@@ -2014,7 +2021,7 @@ async function importDropped(files: FileList) {
           ? 'arrange'
           : 'other'
   const menuButton = (
-    <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
+    <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onPointerEnter={() => preloadView('menu')} onPointerDown={() => preloadView('menu')} onTouchStart={() => preloadView('menu')} onClick={() => setMenuOpen((open) => !open)}>
       <MenuIcon />
       <span className="menu-word">Menu</span>
     </button>
@@ -2053,11 +2060,7 @@ async function importDropped(files: FileList) {
   )
 
   if (new URLSearchParams(window.location.search).get('faces') === '1') {
-    return (
-      <Suspense fallback={null}>
-        <FaceGallery />
-      </Suspense>
-    )
+    return <FaceGallery />
   }
 
   return (
@@ -2109,10 +2112,17 @@ async function importDropped(files: FileList) {
           collabBadge={collabBadge}
           onView={showView}
           onCollab={showCollab}
+          onWarm={(view) => {
+            if (view === 'mix') preloadView('mix')
+            else if (view === 'session') preloadView('session')
+            else if (view === 'collab') preloadView('collab')
+          }}
         />
         {!phone && historyButtons}
         {!phone && !transportShown && ideasButton}
         <AnchoredMenu fill sheet={phone} open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
+          {menuOpen && (
+          <Suspense fallback={<PendingMenu />}>
           <MainMenu
             items={visibleMenu({
               phone,
@@ -2169,6 +2179,8 @@ async function importDropped(files: FileList) {
               else if (action === 'shortcuts') { setMenuOpen(false); setHelp(true) }
             }}
           />
+          </Suspense>
+          )}
         </AnchoredMenu>
       </header>
       {transportShown && (
@@ -2216,6 +2228,8 @@ async function importDropped(files: FileList) {
                 setMenuOpen(false)
                 setSoundsOpen((open) => !open)
               }}
+              onWarmMenu={() => preloadView('menu')}
+              onWarmBrowse={() => preloadView('browse')}
               onMenuAction={(action) => {
                 if (action === 'new') beginNewProject()
                 else if (action === 'open') { setMenuOpen(false); void openProjects() }
@@ -2256,6 +2270,7 @@ async function importDropped(files: FileList) {
       >
         {shellPhase !== 'off' && (
           <div className="shell-browser">
+            <Suspense fallback={<PendingPane className="shell-browser-pending" label="Browse" />}>
             <ShellBrowser
               store={store}
               engine={engine}
@@ -2263,10 +2278,12 @@ async function importDropped(files: FileList) {
               onSeek={(sample) => void locate(sample)}
               onClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
             />
+            </Suspense>
           </div>
         )}
         {collabShown && (
           <div className="collab-pane" data-collab-panel="open">
+            <Suspense fallback={<PendingPane className="collab-pending" label="Collab" />}>
             <VideoDock
               simple={false}
               session={session}
@@ -2281,6 +2298,7 @@ async function importDropped(files: FileList) {
               }}
               onJoinInvite={joinCollab}
             />
+            </Suspense>
           </div>
         )}
         {surface === 'studio' && !collabShown && (
@@ -2310,9 +2328,13 @@ async function importDropped(files: FileList) {
                   phoneBar={null}
                 />
               )}
-              {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />}
+              {editorView === 'mix' && (
+                <Suspense fallback={<PendingPane className="mixer-view" label="Mix" />}>
+                  <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />
+                </Suspense>
+              )}
               {FEATURES.session && editorView === 'session' && (
-                <Suspense fallback={null}>
+                <Suspense fallback={<PendingPane className="session-grid" label="Session" />}>
                   <SessionPane
                     store={store}
                     engine={engine}
@@ -2357,9 +2379,12 @@ async function importDropped(files: FileList) {
             <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
           )}
           {surface === 'studio' && panel === 'steps' && store.stepTrackId && (
-            <StepSequencerPanel store={store} engine={engine} onClose={closeStepSequencer} />
+            <Suspense fallback={<PendingPane className="step-sequencer" label="Step sequencer" />}>
+              <StepSequencerPanel store={store} engine={engine} onClose={closeStepSequencer} />
+            </Suspense>
           )}
           {surface === 'studio' && panel === 'pads' && store.padsTrackId && (
+            <Suspense fallback={<PendingPane className="mpc" label="Beat Machine" />}>
             <PadsPanel
               store={store}
               engine={engine}
@@ -2370,32 +2395,70 @@ async function importDropped(files: FileList) {
               onEdit={(clipId) => openPiano(store.padsTrackId!, clipId)}
               onKeyboard={openBeatKeyboard}
             />
+            </Suspense>
           )}
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
-            <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
+            <Suspense fallback={<PendingPane className="rack" label="Instrument" />}>
+              <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
+            </Suspense>
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <MidiDock store={store} engine={engine} onIdeas={() => openIdeas('progressions')} onGenerate={() => openPlugin('write')} onClose={closePiano} />
+            <Suspense fallback={<PendingPane className="midi-dock" label="Piano roll" />}>
+              <MidiDock store={store} engine={engine} onIdeas={() => openIdeas('progressions')} onGenerate={() => openPlugin('write')} onClose={closePiano} />
+            </Suspense>
           )}
         </div>}
       </div>
-      <PluginSheet store={store} engine={engine} />
-      {store.patchTrackId && <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />}
-      <QuantizeSheet store={store} />
-      {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
+      {store.pluginFocus && (
+        <Suspense fallback={<SheetFallback label="Plugin" onClose={() => store.focusPlugin(null)} />}>
+          <PluginSheet store={store} engine={engine} />
+        </Suspense>
+      )}
+      {store.patchTrackId && (
+        <Suspense fallback={<SheetFallback label="Patch" onClose={() => store.openPatch(store.patchTrackId!)} />}>
+          <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />
+        </Suspense>
+      )}
+      {store.quantizeOpen && (
+        <Suspense fallback={<SheetFallback label="Quantize" onClose={() => store.closeQuantize()} />}>
+          <QuantizeSheet store={store} />
+        </Suspense>
+      )}
+      {tuneOpen && (
+        <Suspense fallback={<SheetFallback label="Tuner" onClose={() => setTuneOpen(false)} />}>
+          <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />
+        </Suspense>
+      )}
       {unstuckOpen && (
-        <LazySheet label="Ideas" className="guide-sheet unstuck-sheet" onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}>
-          <UnstuckSheet
-            store={store}
-            engine={engine}
-            page={ideasPage}
-            onPage={setIdeasPage}
-            onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
-          />
+        <LazySheet
+          label="Ideas"
+          className="guide-sheet unstuck-sheet"
+          onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
+          load={loadUnstuck}
+        >
+          {(View) => (
+            <View
+              store={store}
+              engine={engine}
+              page={ideasPage}
+              onPage={setIdeasPage}
+              onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
+            />
+          )}
         </LazySheet>
       )}
-      {analysisTrackId && <LazySheet label="Analysis" className="analysis-sheet" onClose={() => setAnalysisTrackId(null)}><AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} /></LazySheet>}
+      {analysisTrackId && (
+        <LazySheet
+          label="Analysis"
+          className="analysis-sheet"
+          onClose={() => setAnalysisTrackId(null)}
+          load={loadAnalysis}
+        >
+          {(View) => <View store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
+        </LazySheet>
+      )}
       {perform && (
+        <Suspense fallback={<SheetFallback label="Perform" onClose={() => setPerform(null)} />}>
         <PerformPop
           mode={perform}
           store={store}
@@ -2404,6 +2467,7 @@ async function importDropped(files: FileList) {
           onRecord={() => void record()}
           onClose={() => setPerform(null)}
         />
+        </Suspense>
       )}
       <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(event) => void importAudio(event.target.files)} />
       <input ref={projectFileRef} type="file" accept=".cueharbor,.json,application/json,application/zip" hidden onChange={(event) => void importProject(event.target.files?.[0] || null)} />
@@ -2417,6 +2481,7 @@ async function importDropped(files: FileList) {
         </button>
       )}
       {projectsOpen && (
+        <Suspense fallback={<SheetFallback label="Projects" onClose={() => setProjectsOpen(false)} />}>
         <ProjectSheet
           dockSheet={phone}
           projects={projects}
@@ -2467,8 +2532,10 @@ async function importDropped(files: FileList) {
           onAudio={() => fileRef.current?.click()}
           onKeep={() => void requestPersistentStorage().then(() => storageReport().then((report) => setPersisted(report.persisted)))}
         />
+        </Suspense>
       )}
       {exportOpen && (
+        <Suspense fallback={<SheetFallback label="Export" onClose={() => setExportOpen(false)} />}>
         <ExportSheet
           store={store}
           phone={phone || form === 'fold'}
@@ -2481,6 +2548,7 @@ async function importDropped(files: FileList) {
             setExportOpen(false)
           }}
         />
+        </Suspense>
       )}
       {help && (
         <div className="modal-back" data-screen-overlay="" role="dialog" aria-label="Shortcuts" onClick={() => setHelp(false)}>
@@ -2517,14 +2585,36 @@ async function importDropped(files: FileList) {
           </div>
         </div>
       )}
-      {knockOpen && <LazySheet label="Knock" className="knock-pop" onClose={() => setKnockOpen(false)}><KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} /></LazySheet>}
-      {store.spectralTrackId != null && (
-        <LazySheet label="Spectral repair" className="spectral-sheet" onClose={() => store.closeSpectral()}>
-          <SpectralSheet store={store} />
+      {knockOpen && (
+        <LazySheet
+          label="Knock"
+          className="knock-pop"
+          onClose={() => setKnockOpen(false)}
+          load={loadKnock}
+        >
+          {(View) => <View store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
         </LazySheet>
       )}
-      {store.waveClipId && <WaveEditor store={store} engine={engine} />}
-      <KeyboardDock store={store} engine={engine} onEditNotes={editNotes} />
+      {store.spectralTrackId != null && (
+        <LazySheet
+          label="Spectral repair"
+          className="spectral-sheet"
+          onClose={() => store.closeSpectral()}
+          load={loadSpectral}
+        >
+          {(View) => <View store={store} />}
+        </LazySheet>
+      )}
+      {store.waveClipId && (
+        <Suspense fallback={<SheetFallback label="Sample editor" onClose={() => store.closeWaveEditor()} />}>
+          <WaveEditor store={store} engine={engine} />
+        </Suspense>
+      )}
+      {store.keyboardMidi && (
+        <Suspense fallback={<div className="keyboard-dock view-pending" data-view-pending="" aria-busy="true" aria-label="Keyboard" />}>
+          <KeyboardDock store={store} engine={engine} onEditNotes={editNotes} />
+        </Suspense>
+      )}
       <HintBubble />
       <Toasts store={store} />
     </div>

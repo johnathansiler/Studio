@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { interactiveAudioContext, openMicTap } from '../audio/micTap'
 import { analyzeProjectInWorker, transcribeHumInWorker } from '../analysis/job'
 import { analysisReadout, rememberTrackAnalysis, trackAnalysis } from '../analysis/cache'
 import type { AnalysisResult, HumNote } from '../analysis/types'
@@ -237,30 +238,27 @@ function startMic() {
   let alive = true
   return navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
-  }).then((stream) => {
-    const ctx = new AudioContext()
-    const source = ctx.createMediaStreamSource(stream)
-    const proc = ctx.createScriptProcessor(4096, 1, 1)
-    const sink = ctx.createGain()
-    sink.gain.value = 0
-    proc.onaudioprocess = (event) => {
-      if (!alive) return
-      chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
+  }).then(async (stream) => {
+    const ctx = interactiveAudioContext()
+    const tap = await openMicTap(ctx, stream, null)
+    if (!tap) {
+      for (const track of stream.getTracks()) track.stop()
+      await ctx.close()
+      throw new Error('This browser cannot hear the microphone.')
     }
-    source.connect(proc)
-    proc.connect(sink)
-    sink.connect(ctx.destination)
+    tap.start((frame) => {
+      if (alive) chunks.push(frame)
+    })
     const sampleRate = ctx.sampleRate || 48000
     return {
       alive: () => alive,
       stop: () => {
         if (!alive) return chunks
         alive = false
-        proc.disconnect()
-        source.disconnect()
-        sink.disconnect()
+        tap.close()
         for (const track of stream.getTracks()) track.stop()
         void ctx.close()
+        // The hum model reads 48 kHz. The mic itself runs at the device rate.
         if (sampleRate !== 48000 && chunks.length) {
           return [resample(concat(chunks), sampleRate, 48000)]
         }

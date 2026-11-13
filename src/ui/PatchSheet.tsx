@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
+import { interactiveAudioContext } from '../audio/micTap'
 import { detectRoot } from '../audio/sample/engine'
 import { fetchCatalogSound } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
@@ -434,7 +435,7 @@ function XyPad({
 }
 
 async function loadAudio(file: File, store: ProjectStore, trackId: string, layerId: string) {
-  const ctx = new AudioContext()
+  const ctx = interactiveAudioContext()
   try {
     const decoded = await ctx.decodeAudioData(await file.arrayBuffer())
     const id = uid('smp')

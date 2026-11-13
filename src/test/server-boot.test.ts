@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -22,6 +22,8 @@ describe('production server', () => {
     const port = await freePort()
     const dir = mkdtempSync(path.join(tmpdir(), 'cueharbor-static-'))
     writeFileSync(path.join(dir, 'index.html'), '<!doctype html><title>CueHarbor</title>')
+    mkdirSync(path.join(dir, 'assets'))
+    writeFileSync(path.join(dir, 'assets', 'app-test.js'), 'console.log("cueharbor")')
     const logs: string[] = []
     const child: ChildProcess = spawn(process.execPath, ['--experimental-strip-types', 'server/index.ts'], {
       cwd: process.cwd(),
@@ -57,6 +59,14 @@ describe('production server', () => {
       expect(failure, logs.join('')).toBe('')
       expect(status, logs.join('')).toBe(200)
       expect(body).toContain('CueHarbor')
+      const pageHeaders = await fetch(`http://127.0.0.1:${port}/`, { method: 'HEAD' })
+      expect(pageHeaders.headers.get('cache-control')).toBe('no-cache')
+      const asset = await fetch(`http://127.0.0.1:${port}/assets/app-test.js`)
+      expect(asset.status).toBe(200)
+      expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+      const health = await fetch(`http://127.0.0.1:${port}/api/health`)
+      expect(health.status).toBe(200)
+      expect(health.headers.get('cache-control')).toBe('no-store')
     } finally {
       if (child.exitCode == null) child.kill('SIGTERM')
       rmSync(dir, { recursive: true, force: true })

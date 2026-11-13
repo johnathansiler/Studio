@@ -33,17 +33,19 @@ import type { ProjectStore } from '../state/store'
 import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
-import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
+import type { BrowserTab } from './PlaylistBrowser'
+import { PlaylistBrowser, preloadView } from './lazyViews'
 import { readBrowsePlace, writeBrowsePlace } from './browsePlace'
 import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark } from './AutoTuneFace'
 import { AddTrackButton } from './AddTrack'
 import { OpenBeatMachineButton } from './BeatMachineButton'
-import { KeyboardToggle } from './KeyboardDock'
+import { KeyboardToggle } from './keyboardChrome'
 import type { TrackChoice } from '../model/addTrack'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
-import { TrackOptions, trackKindLabel } from './TrackOptions'
+import { trackKindLabel } from './trackKind'
+import { TrackOptions } from './TrackOptions'
 import { ARRANGE_SHEET_EVENT, popSheetHistory, publishArrangeSheet, rememberSheetHistory, sheetHistoryKey, type UtilitySheet } from './arrangePanel'
 import { BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS } from './phoneContext'
 import { setPhoneFocus } from './phoneFocus'
@@ -90,6 +92,8 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         className={`cap-btn${browserOpen ? ' on' : ''}`}
         aria-pressed={browserOpen}
         title="Sounds and loops. Open sounds, instruments, and loops."
+        onPointerDown={() => preloadView('browse')}
+        onTouchStart={() => preloadView('browse')}
         onClick={onBrowser}
       >
         <strong>Browser</strong>

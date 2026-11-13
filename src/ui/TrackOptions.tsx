@@ -10,9 +10,12 @@ import { isSampledInstrument } from '../instruments/sampled'
 import type { Track } from '../model/types'
 import { TRACK_ROW, TRACK_SHEET, copyOf } from './chrome'
 import { BevelSelect } from './BevelSelect'
-import { InsertList, RouteFields, SendList } from './PluginSheet'
+import { InsertList, RouteFields, SendList } from './pluginInserts'
+import { trackKindLabel } from './trackKind'
 import { addOrOpenAutoTune } from './AutoTuneFace'
 import './trackOptions.css'
+
+export { trackKindLabel }
 
 function VolumeRange({ store, engine, trackId, volume, label, title }: { store: ProjectStore; engine?: AudioEngine; trackId: string; volume: number; label: string; title: string }) {
   const held = useRef(false)
@@ -65,14 +68,6 @@ function VolumeRange({ store, engine, trackId, volume, label, title }: { store: 
       }}
     />
   )
-}
-
-export function trackKindLabel(track: { type: string }) {
-  if (track.type === 'audio') return 'Audio'
-  if (track.type === 'bus') return 'Bus'
-  if (track.type === 'group') return 'Group'
-  if (track.type === 'midi') return 'Instrument'
-  return 'Track'
 }
 
 export function trackCanArm(track: { type: string }, userAgent = '') {
