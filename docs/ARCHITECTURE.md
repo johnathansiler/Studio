@@ -167,7 +167,7 @@ Each step is small enough to listen to on its own. Do not start the native port 
 
 #### Build the shared core
 
-From the repository root, with Rust stable and the `wasm32-unknown-unknown` target:
+From the repository root, with the toolchain pinned in `rust-toolchain.toml` (1.99.1) and the `wasm32-unknown-unknown` target:
 
 ```bash
 cargo test
