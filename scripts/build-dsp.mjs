@@ -31,7 +31,7 @@ if (!cargoOnPath()) {
 
 const build = spawnSync(
   'cargo',
-  ['build', '-p', 'cueharbor-dsp', '--release', '--target', 'wasm32-unknown-unknown', '--manifest-path', manifest],
+  ['build', '-p', 'cueharbor-dsp', '--locked', '--release', '--target', 'wasm32-unknown-unknown', '--manifest-path', manifest],
   { cwd: root, stdio: 'inherit' },
 )
 if (build.error || build.status !== 0) process.exit(build.status || 1)
