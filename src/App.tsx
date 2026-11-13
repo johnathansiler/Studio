@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FEATURES, preferArrangeTransport, preferArrangeView } from './features'
 import { installControlGuards } from './ui/gestures'
 import { AudioEngine } from './audio/engine'
@@ -34,7 +34,6 @@ import { beatsToSamples, countInBarsOf, samplesToBeats } from './model/time'
 import { looseGroup, presentSoundEntries, samplerFromNotes } from './sounds/noteGroups'
 import type { SoundEntry } from './sounds/types'
 
-const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import type { TrackChoice } from './model/addTrack'
@@ -59,10 +58,6 @@ import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
 import { activeTool } from './state/tools'
 
-const UnstuckSheet = lazy(() => import('./unstuck/UnstuckSheet').then((mod) => ({ default: mod.UnstuckSheet })))
-const AnalysisSheet = lazy(() => import('./ui/AnalysisSheet').then((mod) => ({ default: mod.AnalysisSheet })))
-const KnockPop = lazy(() => import('./ui/KnockPop').then((mod) => ({ default: mod.KnockPop })))
-const SpectralSheet = lazy(() => import('./ui/SpectralSheet').then((mod) => ({ default: mod.SpectralSheet })))
 import { visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
@@ -79,6 +74,7 @@ import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble } from './ui/Hint'
 import {
   ExportSheet,
+  FaceGallery,
   KeyboardDock,
   MainMenu,
   MidiDock,
@@ -98,9 +94,14 @@ import {
   TunerPop,
   VideoDock,
   WaveEditor,
+  moduleView,
   preloadStudioIdle,
   preloadView,
 } from './ui/lazyViews'
+const loadUnstuck = moduleView(() => import('./unstuck/UnstuckSheet'), 'UnstuckSheet')
+const loadAnalysis = moduleView(() => import('./ui/AnalysisSheet'), 'AnalysisSheet')
+const loadKnock = moduleView(() => import('./ui/KnockPop'), 'KnockPop')
+const loadSpectral = moduleView(() => import('./ui/SpectralSheet'), 'SpectralSheet')
 import { Toasts } from './ui/Toasts'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -2059,11 +2060,7 @@ async function importDropped(files: FileList) {
   )
 
   if (new URLSearchParams(window.location.search).get('faces') === '1') {
-    return (
-      <Suspense fallback={null}>
-        <FaceGallery />
-      </Suspense>
-    )
+    return <FaceGallery />
   }
 
   return (
@@ -2433,17 +2430,33 @@ async function importDropped(files: FileList) {
         </Suspense>
       )}
       {unstuckOpen && (
-        <LazySheet label="Ideas" className="guide-sheet unstuck-sheet" onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}>
-          <UnstuckSheet
-            store={store}
-            engine={engine}
-            page={ideasPage}
-            onPage={setIdeasPage}
-            onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
-          />
+        <LazySheet
+          label="Ideas"
+          className="guide-sheet unstuck-sheet"
+          onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
+          load={loadUnstuck}
+        >
+          {(View) => (
+            <View
+              store={store}
+              engine={engine}
+              page={ideasPage}
+              onPage={setIdeasPage}
+              onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
+            />
+          )}
         </LazySheet>
       )}
-      {analysisTrackId && <LazySheet label="Analysis" className="analysis-sheet" onClose={() => setAnalysisTrackId(null)}><AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} /></LazySheet>}
+      {analysisTrackId && (
+        <LazySheet
+          label="Analysis"
+          className="analysis-sheet"
+          onClose={() => setAnalysisTrackId(null)}
+          load={loadAnalysis}
+        >
+          {(View) => <View store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
+        </LazySheet>
+      )}
       {perform && (
         <Suspense fallback={<SheetFallback label="Perform" onClose={() => setPerform(null)} />}>
         <PerformPop
@@ -2572,10 +2585,24 @@ async function importDropped(files: FileList) {
           </div>
         </div>
       )}
-      {knockOpen && <LazySheet label="Knock" className="knock-pop" onClose={() => setKnockOpen(false)}><KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} /></LazySheet>}
+      {knockOpen && (
+        <LazySheet
+          label="Knock"
+          className="knock-pop"
+          onClose={() => setKnockOpen(false)}
+          load={loadKnock}
+        >
+          {(View) => <View store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
+        </LazySheet>
+      )}
       {store.spectralTrackId != null && (
-        <LazySheet label="Spectral repair" className="spectral-sheet" onClose={() => store.closeSpectral()}>
-          <SpectralSheet store={store} />
+        <LazySheet
+          label="Spectral repair"
+          className="spectral-sheet"
+          onClose={() => store.closeSpectral()}
+          load={loadSpectral}
+        >
+          {(View) => <View store={store} />}
         </LazySheet>
       )}
       {store.waveClipId && (

@@ -1,32 +1,117 @@
-import { lazy } from 'react'
+import { Component, lazy, Suspense, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react'
 
 declare const __CUEHARBOR_SESSION__: boolean
 
 /**
  * Views that are not on the first Arrange screen.
  * Each factory is a dynamic import so the entry chunk can paint Arrange first.
+ * A failed import is not cached: Retry builds a new lazy component.
  */
 
-export const MixerView = lazy(() => import('./MixerView').then((mod) => ({ default: mod.MixerView })))
-export const PadsPanel = lazy(() => import('./PadsPanel').then((mod) => ({ default: mod.PadsPanel })))
-export const PluginSheet = lazy(() => import('./PluginSheet').then((mod) => ({ default: mod.PluginSheet })))
-export const WaveEditor = lazy(() => import('./WaveEditor').then((mod) => ({ default: mod.WaveEditor })))
-export const MainMenu = lazy(() => import('./MainMenu').then((mod) => ({ default: mod.MainMenu })))
-export const KeyboardDock = lazy(() => import('./KeyboardDock').then((mod) => ({ default: mod.KeyboardDock })))
-export const StepSequencerPanel = lazy(() => import('./StepSequencerPanel').then((mod) => ({ default: mod.StepSequencerPanel })))
-export const RackView = lazy(() => import('./RackView').then((mod) => ({ default: mod.RackView })))
-export const MidiDock = lazy(() => import('./MidiDock').then((mod) => ({ default: mod.MidiDock })))
-export const ExportSheet = lazy(() => import('./ExportSheet').then((mod) => ({ default: mod.ExportSheet })))
-export const ProjectSheet = lazy(() => import('./ProjectSheet').then((mod) => ({ default: mod.ProjectSheet })))
-export const QuantizeSheet = lazy(() => import('./QuantizeSheet').then((mod) => ({ default: mod.QuantizeSheet })))
-export const PatchSheet = lazy(() => import('./PatchSheet').then((mod) => ({ default: mod.PatchSheet })))
-export const PerformPop = lazy(() => import('./PerformPop').then((mod) => ({ default: mod.PerformPop })))
-export const VideoDock = lazy(() => import('./VideoDock').then((mod) => ({ default: mod.VideoDock })))
-export const ShellBrowser = lazy(() => import('./PlaylistBrowser').then((mod) => ({ default: mod.ShellBrowser })))
-export const TunerPop = lazy(() => import('./AmpPop').then((mod) => ({ default: mod.TunerPop })))
+export function ChunkMiss({ label, className, onRetry }: { label: string; className?: string; onRetry: () => void }) {
+  return (
+    <div className={['chunk-miss', 'view-pending', className].filter(Boolean).join(' ')} data-chunk-miss="" role="alert">
+      <p className="hint">Couldn't load — <button type="button" className="text-btn" onClick={onRetry}>Retry</button></p>
+      <span className="sr-only">{label}</span>
+    </div>
+  )
+}
+
+interface BoundaryProps {
+  label: string
+  className?: string
+  onRetry: () => void
+  children: ReactNode
+}
+
+interface BoundaryState {
+  failed: boolean
+}
+
+export class ChunkBoundary extends Component<BoundaryProps, BoundaryState> {
+  state: BoundaryState = { failed: false }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { failed: true }
+  }
+
+  render() {
+    if (this.state.failed) return <ChunkMiss label={this.props.label} className={this.props.className} onRetry={this.props.onRetry} />
+    return this.props.children
+  }
+}
+
+/** A failed dynamic import stays in the browser module map, so Retry has to ask for a new URL. */
+export function retryChunkUrl(message: string, attempt: number): string | null {
+  const matched = message.match(/https?:\/\/[^\s)'"]+/)
+  if (!matched || attempt < 1) return null
+  const url = new URL(matched[0])
+  url.searchParams.set('cueharbor-retry', String(attempt))
+  return url.href
+}
+
+function refetch<T>(load: () => Promise<T>, attempt: number): Promise<T> {
+  if (attempt < 1) return load()
+  return load().catch((error: unknown) => {
+    const url = retryChunkUrl(error instanceof Error ? error.message : String(error), attempt)
+    if (!url) throw error
+    return import(/* @vite-ignore */ url) as Promise<T>
+  })
+}
+
+/** Name a module export without contextually typing it as ComponentType, which collapses the props to never. */
+export function moduleView<M, K extends keyof M>(load: () => Promise<M>, key: K) {
+  return (attempt = 0) => refetch(load, attempt).then((mod) => ({ default: mod[key] }))
+}
+
+function retryable<C extends ComponentType<any>>(
+  load: (attempt?: number) => Promise<{ default: C }>,
+  label: string,
+  pendingClass: string,
+) {
+  // One lazy component for every mount. A resolved chunk does not suspend again
+  // when the view moves (phone sheet to side column). Retry replaces it.
+  let attempt = 0
+  let Current = lazy(() => load(attempt))
+  return function RetryableView(props: ComponentProps<C>) {
+    const [tick, setTick] = useState(0)
+    const retry = () => {
+      attempt += 1
+      Current = lazy(() => load(attempt))
+      setTick(attempt)
+    }
+    return (
+      <ChunkBoundary key={tick} label={label} className={pendingClass} onRetry={retry}>
+        <Suspense fallback={<PendingPane className={pendingClass} label={label} />}>
+          <Current {...props} />
+        </Suspense>
+      </ChunkBoundary>
+    )
+  }
+}
+
+export const MixerView = retryable(moduleView(() => import('./MixerView'), 'MixerView'), 'Mix', 'mixer-view')
+export const PadsPanel = retryable(moduleView(() => import('./PadsPanel'), 'PadsPanel'), 'Beat Machine', 'mpc')
+export const PluginSheet = retryable(moduleView(() => import('./PluginSheet'), 'PluginSheet'), 'Plugin', 'sheet-pending')
+export const WaveEditor = retryable(moduleView(() => import('./WaveEditor'), 'WaveEditor'), 'Sample editor', 'wave-editor')
+export const MainMenu = retryable(moduleView(() => import('./MainMenu'), 'MainMenu'), 'Menu', 'menu-pending')
+export const KeyboardDock = retryable(moduleView(() => import('./KeyboardDock'), 'KeyboardDock'), 'Keyboard', 'keyboard-dock')
+export const StepSequencerPanel = retryable(moduleView(() => import('./StepSequencerPanel'), 'StepSequencerPanel'), 'Step sequencer', 'step-sequencer')
+export const RackView = retryable(moduleView(() => import('./RackView'), 'RackView'), 'Instrument', 'rack')
+export const MidiDock = retryable(moduleView(() => import('./MidiDock'), 'MidiDock'), 'Piano roll', 'midi-dock')
+export const ExportSheet = retryable(moduleView(() => import('./ExportSheet'), 'ExportSheet'), 'Export', 'sheet-pending')
+export const ProjectSheet = retryable(moduleView(() => import('./ProjectSheet'), 'ProjectSheet'), 'Projects', 'sheet-pending')
+export const QuantizeSheet = retryable(moduleView(() => import('./QuantizeSheet'), 'QuantizeSheet'), 'Quantize', 'sheet-pending')
+export const PatchSheet = retryable(moduleView(() => import('./PatchSheet'), 'PatchSheet'), 'Patch', 'sheet-pending')
+export const PerformPop = retryable(moduleView(() => import('./PerformPop'), 'PerformPop'), 'Perform', 'sheet-pending')
+export const VideoDock = retryable(moduleView(() => import('./VideoDock'), 'VideoDock'), 'Collab', 'collab-pending')
+export const ShellBrowser = retryable(moduleView(() => import('./PlaylistBrowser'), 'ShellBrowser'), 'Browse', 'playlist-browser')
+export const PlaylistBrowser = retryable(moduleView(() => import('./PlaylistBrowser'), 'PlaylistBrowser'), 'Browse', 'playlist-browser')
+export const TunerPop = retryable(moduleView(() => import('./AmpPop'), 'TunerPop'), 'Tuner', 'sheet-pending')
+export const FaceGallery = retryable(moduleView(() => import('./faces/PluginFace'), 'FaceGallery'), 'Faces', 'view-pending')
 
 export const SessionPane = __CUEHARBOR_SESSION__
-  ? lazy(() => import('./SessionView').then((mod) => ({ default: mod.SessionView })))
+  ? retryable(moduleView(() => import('./SessionView'), 'SessionView'), 'Session', 'session-grid')
   : function HiddenSession(_props: Record<string, unknown>) { return null }
 
 const loads: Record<string, () => Promise<unknown>> = {

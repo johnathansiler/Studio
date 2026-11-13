@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { scheduleWasmPreload } from './audio/wasm/flag'
 import { App } from './App'
+import { installPreloadReload } from './ui/chunkReload'
 import './styles.css'
 import './ui/remoteFixes.css'
 import './ui/arrangeSpace.css'
@@ -18,6 +19,7 @@ import './ui/trackColumn.css'
 import './ui/equalGrid.css'
 
 scheduleWasmPreload()
+installPreloadReload()
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

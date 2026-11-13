@@ -33,7 +33,8 @@ import type { ProjectStore } from '../state/store'
 import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
-import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
+import type { BrowserTab } from './PlaylistBrowser'
+import { PlaylistBrowser, preloadView } from './lazyViews'
 import { readBrowsePlace, writeBrowsePlace } from './browsePlace'
 import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark } from './AutoTuneFace'
@@ -91,6 +92,8 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         className={`cap-btn${browserOpen ? ' on' : ''}`}
         aria-pressed={browserOpen}
         title="Sounds and loops. Open sounds, instruments, and loops."
+        onPointerDown={() => preloadView('browse')}
+        onTouchStart={() => preloadView('browse')}
         onClick={onBrowser}
       >
         <strong>Browser</strong>

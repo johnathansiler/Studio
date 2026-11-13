@@ -625,6 +625,16 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .editor { min-height: 0; min-width: 0; }
 .view-pending { flex: 1 1 auto; min-height: 0; min-width: 0; height: 100%; }
 .menu-pending { min-height: 12rem; }
+.chunk-miss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 4.5rem;
+  padding: 12px;
+  color: var(--muted);
+}
+.chunk-miss .text-btn { min-height: 36px; }
 
 .arrange-wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .tool-row { display: flex; gap: 4px; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--line); background: #141c18; min-width: 0; }

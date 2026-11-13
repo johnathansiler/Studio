@@ -13,7 +13,7 @@ import type { ProjectStore } from '../state/store'
 import { commitPluginPreset } from '../presets/project'
 import { formFactor } from './form'
 import { PresetControls } from './PresetControls'
-import { InsertList } from './PluginSheet'
+import { InsertList } from './pluginInserts'
 import { shareOrDownload } from './share'
 
 export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
