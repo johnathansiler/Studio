@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { installPreloadReload, preloadReloadDecision } from '../ui/chunkReload'
-import { retryChunkUrl } from '../ui/lazyViews'
+import { installPreloadReload, preloadReloadDecision, rememberPreloadFailure } from '../ui/chunkReload'
+import { missingExportMessage, refetchModule, retryChunkUrl } from '../ui/lazyViews'
 
 describe('chunk retry url', () => {
   it('keeps the first import and cache-busts a failed one', () => {
@@ -29,13 +29,38 @@ describe('stale chunk reload', () => {
       },
     }
     installPreloadReload(target as unknown as Window)
-    const event = new Event('vite:preloadError')
+    const event = new Event('vite:preloadError', { cancelable: true })
     const prevent = vi.spyOn(event, 'preventDefault')
     dispatch(event)
-    expect(prevent).toHaveBeenCalled()
+    expect(prevent).toHaveBeenCalledOnce()
     expect(reloads).toEqual([1])
     expect(storage.get('cueharbor-chunk-reload')).toBe('1')
-    dispatch(new Event('vite:preloadError'))
+    const again = new Event('vite:preloadError', { cancelable: true })
+    const preventAgain = vi.spyOn(again, 'preventDefault')
+    dispatch(again)
+    expect(preventAgain).not.toHaveBeenCalled()
+    expect(again.defaultPrevented).toBe(false)
     expect(reloads).toEqual([1])
+  })
+})
+
+describe('a preload that resolves undefined', () => {
+  it('treats the missing module as a failure and loads a new url', async () => {
+    const message = 'Failed to fetch dynamically imported module: http://127.0.0.1:4173/assets/MixerView-abc.js'
+    rememberPreloadFailure(message)
+    expect(missingExportMessage(undefined, 'MixerView', message)).toBe(message)
+    expect(missingExportMessage({ MixerView() { return null } }, 'MixerView')).toBeNull()
+    const seen: string[] = []
+    type MixModule = { MixerView: () => null }
+    const missing = async (): Promise<MixModule | undefined> => undefined
+    await expect(refetchModule(missing, 'MixerView', 0, async () => {
+      throw new Error('first miss must not bust')
+    })).rejects.toThrow(/MixerView/)
+    const loaded = await refetchModule(missing, 'MixerView', 1, async (url) => {
+      seen.push(url)
+      return { MixerView() { return null } }
+    })
+    expect(seen).toEqual(['http://127.0.0.1:4173/assets/MixerView-abc.js?cueharbor-retry=1'])
+    expect(loaded.default).toBeTypeOf('function')
   })
 })

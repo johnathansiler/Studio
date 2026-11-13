@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react'
+import { lastPreloadFailure } from './chunkReload'
 
 declare const __CUEHARBOR_SESSION__: boolean
 
@@ -50,18 +51,40 @@ export function retryChunkUrl(message: string, attempt: number): string | null {
   return url.href
 }
 
-function refetch<T>(load: () => Promise<T>, attempt: number): Promise<T> {
-  if (attempt < 1) return load()
-  return load().catch((error: unknown) => {
-    const url = retryChunkUrl(error instanceof Error ? error.message : String(error), attempt)
+/** Null when the module has the named export. Otherwise a message Retry can cache-bust from. */
+export function missingExportMessage(mod: unknown, key: string, preloadMessage = ''): string | null {
+  if (mod != null && typeof mod === 'object' && (mod as Record<string, unknown>)[key] != null) return null
+  return preloadMessage || `Failed to fetch dynamically imported module: missing ${key}`
+}
+
+/**
+ * Load a named export. A rejected import, a resolved undefined (Vite does this
+ * when vite:preloadError is cancelled), or a missing export all take the same
+ * retry path: a new URL, because the failed module stays in the browser map.
+ */
+export function refetchModule<M, K extends keyof M>(
+  load: () => Promise<M | null | undefined>,
+  key: K,
+  attempt: number,
+  bust: (url: string) => Promise<M | null | undefined> = (url) => import(/* @vite-ignore */ url),
+): Promise<{ default: M[K] }> {
+  const read = (mod: M | null | undefined) => {
+    const message = missingExportMessage(mod, String(key), lastPreloadFailure())
+    if (message) throw new Error(message)
+    return { default: (mod as M)[key] }
+  }
+  return load().then(read).catch((error: unknown) => {
+    if (attempt < 1) throw error
+    const message = `${error instanceof Error ? error.message : String(error)}\n${lastPreloadFailure()}`
+    const url = retryChunkUrl(message, attempt)
     if (!url) throw error
-    return import(/* @vite-ignore */ url) as Promise<T>
+    return bust(url).then(read)
   })
 }
 
 /** Name a module export without contextually typing it as ComponentType, which collapses the props to never. */
 export function moduleView<M, K extends keyof M>(load: () => Promise<M>, key: K) {
-  return (attempt = 0) => refetch(load, attempt).then((mod) => ({ default: mod[key] }))
+  return (attempt = 0) => refetchModule(load, key, attempt)
 }
 
 function retryable<C extends ComponentType<any>>(
