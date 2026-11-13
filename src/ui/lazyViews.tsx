@@ -38,7 +38,6 @@ const loads: Record<string, () => Promise<unknown>> = {
   menu: () => import('./MainMenu'),
   keys: () => import('./KeyboardDock'),
   steps: () => import('./StepSequencerPanel'),
-  scaler: () => import('./ScalerPanel'),
   rack: () => import('./RackView'),
   piano: () => import('./MidiDock'),
   export: () => import('./ExportSheet'),
