@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { interactiveAudioContext } from '../audio/micTap'
 import { GENRES, LOUDNESS_TARGETS, analyzeMix, buildChain, loudnessMatch, matchEq, octaveBands, targetById, targetVerdict } from '../audio/master/assistant'
 import { masterAlbum, masterDistribution, sharedChain } from '../audio/master/batch'
 import { renderArrangement } from '../audio/bounce'
@@ -110,7 +111,7 @@ export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; e
       try {
         decoded = decodeWavPCM(bytes)
       } catch {
-        const ctx = new AudioContext()
+        const ctx = interactiveAudioContext()
         const audio = await ctx.decodeAudioData(bytes.slice(0))
         const left = new Float32Array(audio.getChannelData(0))
         const right = new Float32Array(audio.getChannelData(audio.numberOfChannels > 1 ? 1 : 0))

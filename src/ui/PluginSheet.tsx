@@ -5,7 +5,7 @@ import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { commitPluginPreset } from '../presets/project'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
 import { controlChoices, controlLabel, controlText } from '../audio/plugins/readout'
-import { insertsBeatMachine, pluginIsBeatMachine } from '../instruments/pads/identity'
+import { insertsBeatMachine } from '../instruments/pads/identity'
 import { chainSections, trackHasScaler } from '../instruments/scaler/chain'
 import { AnchoredMenu } from './AnchoredMenu'
 import { PresetControls } from './PresetControls'
@@ -19,6 +19,7 @@ import { NOTE_NAMES, SCALES } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
 import { selectPlugin } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { insertLabel } from './insertLabel'
 import { SamplePanel } from './SamplePanel'
 import { useScreenOverlay } from './screenOverlay'
 
@@ -478,13 +479,7 @@ export function RouteFields({ store, trackId, labeled = false }: { store: Projec
   )
 }
 
-/** Full plugin names. The strip can ellipsize; the accessible name stays the word. */
-export function insertLabel(pluginId: string, plugin?: { pluginId: string; params?: Record<string, number> }) {
-  if (pluginId === 'steps') return 'Step Sequencer'
-  if (plugin && pluginIsBeatMachine(plugin)) return 'Beat Machine'
-  if (pluginId === 'pads' || pluginId === 'drums' || pluginId === 'drum-machine') return 'Beat Machine'
-  return descriptor(pluginId)?.name ?? pluginId
-}
+export { insertLabel } from './insertLabel'
 
 /** Instrument and effect choices. Beat Machine leads the list on a MIDI track. */
 export function insertChoices<T extends { id: string; name: string }>(entries: readonly T[], midi: boolean): { id: string; name: string }[] {

@@ -155,6 +155,8 @@ export function PhoneDock({
   menuRef,
   onMenu,
   onBrowse,
+  onWarmMenu,
+  onWarmBrowse,
   onMenuAction: _onMenuAction,
   onUndo,
   onRedo,
@@ -169,6 +171,8 @@ export function PhoneDock({
   menuRef: RefObject<HTMLButtonElement | null>
   onMenu: () => void
   onBrowse: () => void
+  onWarmMenu?: () => void
+  onWarmBrowse?: () => void
   onMenuAction: (action: string) => void
   onUndo: () => void
   onRedo: () => void
@@ -356,6 +360,8 @@ export function PhoneDock({
           title="Project, edit, view, and settings."
           aria-expanded={menuOpen}
           aria-controls="shell-menu"
+          onPointerEnter={onWarmMenu}
+          onTouchStart={onWarmMenu}
           onClick={onMenu}
         >
           <span className="menu-word">Menu</span>
@@ -367,6 +373,8 @@ export function PhoneDock({
           aria-pressed={browseOpen}
           aria-label="Browse"
           title="My Library, patterns, and clips."
+          onPointerEnter={onWarmBrowse}
+          onTouchStart={onWarmBrowse}
           onClick={onBrowse}
         >
           Browse

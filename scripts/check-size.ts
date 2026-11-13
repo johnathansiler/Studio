@@ -2,8 +2,8 @@ import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-/** A shipped file at or under this size stays on the app host. */
-export const MAX_DIST_BYTES = 5 * 1024 * 1024
+/** A shipped file at or under this size stays on the app host. The entry chunk is under 2 MB after the view split. */
+export const MAX_DIST_BYTES = 2 * 1024 * 1024
 
 export function distFiles(dir: string) {
   const out: { path: string; size: number }[] = []

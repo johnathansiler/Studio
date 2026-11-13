@@ -455,7 +455,7 @@ async function handleLibrary(req: IncomingMessage, res: ServerResponse, url: URL
 }
 
 function json(res: ServerResponse, body: unknown, status = 200) {
-  res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+  res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' })
   res.end(JSON.stringify(body))
 }
 
