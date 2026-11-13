@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { useScreenOverlay } from './screenOverlay'
 import { browserWidthFor, usePushPhase } from './dockPush'
 import { createPortal } from 'react-dom'
@@ -44,11 +44,11 @@ import type { TrackChoice } from '../model/addTrack'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
 import { trackKindLabel } from './trackKind'
-const TrackOptions = lazy(() => import('./TrackOptions').then((mod) => ({ default: mod.TrackOptions })))
+import { TrackOptions } from './TrackOptions'
 import { ARRANGE_SHEET_EVENT, popSheetHistory, publishArrangeSheet, rememberSheetHistory, sheetHistoryKey, type UtilitySheet } from './arrangePanel'
 import { BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS } from './phoneContext'
 import { setPhoneFocus } from './phoneFocus'
-const PluginsDrawer = lazy(() => import('./PluginsDrawer').then((mod) => ({ default: mod.PluginsDrawer })))
+import { PluginsDrawer } from './PluginsDrawer'
 import { TRACK_ROW, copyOf } from './chrome'
 import { useFormFactor } from './form'
 import './guideSheet.css'
@@ -1595,11 +1595,7 @@ export function ArrangeView({
           onClose={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }}
         />
       )}
-      {pluginsPhase !== 'off' && (
-        <Suspense fallback={<div className="plugins-drawer view-pending" data-view-pending="" aria-busy="true" aria-label="Plugins" />}>
-          <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />
-        </Suspense>
-      )}
+      {pluginsPhase !== 'off' && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />}
       <UtilitySheets
         utility={utility}
         store={store}
@@ -1621,7 +1617,6 @@ export function ArrangeView({
           detail={trackKindLabel(sheetTrack)}
           onClose={closeSheets}
         >
-          <Suspense fallback={<div className="view-pending" data-view-pending="" aria-busy="true" aria-label="Track" />}>
           <TrackOptions
             store={store}
             engine={engine}
@@ -1641,7 +1636,6 @@ export function ArrangeView({
               setPluginsOpen(true)
             } : undefined}
           />
-          </Suspense>
         </ArrangeBottomSheet>
       )}
       </div>

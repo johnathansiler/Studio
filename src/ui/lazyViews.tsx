@@ -14,7 +14,6 @@ export const WaveEditor = lazy(() => import('./WaveEditor').then((mod) => ({ def
 export const MainMenu = lazy(() => import('./MainMenu').then((mod) => ({ default: mod.MainMenu })))
 export const KeyboardDock = lazy(() => import('./KeyboardDock').then((mod) => ({ default: mod.KeyboardDock })))
 export const StepSequencerPanel = lazy(() => import('./StepSequencerPanel').then((mod) => ({ default: mod.StepSequencerPanel })))
-export const ScalerPanel = lazy(() => import('./ScalerPanel').then((mod) => ({ default: mod.ScalerPanel })))
 export const RackView = lazy(() => import('./RackView').then((mod) => ({ default: mod.RackView })))
 export const MidiDock = lazy(() => import('./MidiDock').then((mod) => ({ default: mod.MidiDock })))
 export const ExportSheet = lazy(() => import('./ExportSheet').then((mod) => ({ default: mod.ExportSheet })))

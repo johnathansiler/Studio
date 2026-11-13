@@ -49,6 +49,7 @@ import { panelChoice } from './ui/panelMemory'
 import { browserWidthFor, usePushPhase } from './ui/dockPush'
 import { clampSoundWidth, readSoundWidth } from './sounds/panel'
 import { loadScaleCatalog } from './theory'
+import { ScalerPanel } from './ui/ScalerPanel'
 import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTab'
 import './ui/collab.css'
 import { AnchoredMenu } from './ui/AnchoredMenu'
@@ -91,7 +92,6 @@ import {
   ProjectSheet,
   QuantizeSheet,
   RackView,
-  ScalerPanel,
   SessionPane,
   ShellBrowser,
   StepSequencerPanel,
@@ -2379,9 +2379,7 @@ async function importDropped(files: FileList) {
             title="Drag to resize the editor."
           />
           {surface === 'studio' && panel === 'scaler' && store.scalerTrackId && (
-            <Suspense fallback={<PendingPane className="scaler-panel" label="Scaler" />}>
-              <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
-            </Suspense>
+            <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
           )}
           {surface === 'studio' && panel === 'steps' && store.stepTrackId && (
             <Suspense fallback={<PendingPane className="step-sequencer" label="Step sequencer" />}>
