@@ -1,4 +1,4 @@
-import { insertLabel } from './PluginSheet'
+import { insertLabel } from './insertLabel'
 import { formatPan } from '../model/mixLaw'
 import { NOTE_NAMES, scaleById } from '../model/scale'
 import { lengthReadout, positionReadout } from '../model/snapGrid'
@@ -7,7 +7,7 @@ import { gainToDb, quartersPerBar } from '../model/time'
 import type { PatternClip } from '../model/steps'
 import type { AudioClip, MidiClip, PluginInstance, Project, Track } from '../model/types'
 import { formatTempo } from '../model/tap'
-import { trackKindLabel } from './TrackOptions'
+import { trackKindLabel } from './trackKind'
 
 const SOURCE_IDS = new Set(['sampler', 'synth', 'scaler', 'steps', 'pads', 'drums', 'drum-machine'])
 

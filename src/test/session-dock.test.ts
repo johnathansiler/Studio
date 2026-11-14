@@ -272,6 +272,7 @@ describe('arrange on first load', () => {
       expect(await page.locator('[data-session-browser="open"]').count()).toBe(0)
       expect(await page.getByRole('button', { name: /To arrangement/ }).count()).toBe(0)
       await page.locator('.menu-btn').click()
+      await page.locator('#shell-menu [data-menu-action]').first().waitFor()
       const actions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
       expect(actions).not.toContain('session-mode')
       expect(actions).not.toContain('capture')

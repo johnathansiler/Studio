@@ -10,6 +10,7 @@ import { projectSampleBeat } from '../model/tempoMap'
 import { degreeTone, findScale, isBuiltinScale, isTwelveTone, toneName } from '../theory'
 import { padFaceName } from '../instruments/pads/record'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
+import { interactiveAudioContext, openMicTap } from '../audio/micTap'
 import { decodeWavPCM } from '../model/wav'
 import { selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -691,7 +692,7 @@ function PadTools({
   return (
     <div className="tool-row">
       <button type="button" className={browser ? 'on' : ''} onClick={onBrowser}>Browser</button>
-      <button type="button" onClick={() => void sampleMic().then((buffer) => buffer && store.assignPadSample(bank, padIndex, buffer, 48000, 'Mic'))}>Mic</button>
+      <button type="button" onClick={() => void sampleMic().then((heard) => heard && store.assignPadSample(bank, padIndex, heard.samples, heard.sampleRate, 'Mic'))}>Mic</button>
       <button type="button" onClick={() => {
         const track = store.project.tracks.find((item) => item.clips.length)
         const clip = track?.clips[0]
@@ -897,24 +898,23 @@ function light(outputs: { send: (data: number[]) => void }[], pitch: number, vel
   }
 }
 
-async function sampleMic(): Promise<Float32Array | null> {
+async function sampleMic(): Promise<{ samples: Float32Array; sampleRate: number } | null> {
   if (!navigator.mediaDevices?.getUserMedia) return null
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const ctx = new AudioContext()
-    const source = ctx.createMediaStreamSource(stream)
-    const processor = ctx.createScriptProcessor(2048, 1, 1)
-    const silent = ctx.createGain()
-    silent.gain.value = 0
+    const ctx = interactiveAudioContext()
+    const tap = await openMicTap(ctx, stream, null)
+    if (!tap) {
+      stream.getTracks().forEach((track) => track.stop())
+      await ctx.close()
+      return null
+    }
     const chunks: Float32Array[] = []
-    processor.onaudioprocess = (event) => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
-    source.connect(processor)
-    processor.connect(silent)
-    silent.connect(ctx.destination)
+    tap.start((frame) => chunks.push(frame))
     await new Promise((resolve) => window.setTimeout(resolve, 1200))
-    processor.disconnect()
-    source.disconnect()
+    tap.close()
     stream.getTracks().forEach((track) => track.stop())
+    const sampleRate = ctx.sampleRate
     await ctx.close()
     const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
     const mixed = new Float32Array(length)
@@ -923,7 +923,7 @@ async function sampleMic(): Promise<Float32Array | null> {
       mixed.set(chunk, offset)
       offset += chunk.length
     }
-    return mixed.length ? mixed : null
+    return mixed.length ? { samples: mixed, sampleRate } : null
   } catch {
     return null
   }

@@ -84,7 +84,7 @@ describe('phone and landscape layout bugs', () => {
     const { browser, page } = await boot(390, 844)
     try {
       await page.getByRole('button', { name: /^Menu/ }).click()
-      await page.locator('#shell-menu').waitFor()
+      await page.locator('#shell-menu [data-menu-action]').first().waitFor()
       const actions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
       expect(actions).toEqual(['undo', 'redo', 'new', 'open', 'save', 'export', 'midi', 'latency', 'shortcuts'])
 

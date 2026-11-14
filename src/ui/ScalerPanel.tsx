@@ -1,4 +1,4 @@
-import { lazy, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { detectedScales, FIFTHS, modulationChords, moodOf, progressionMood, qualityLabel, type ModChord, type Mood } from '../instruments/scaler/face'
 import { notesFromSlots } from '../instruments/scaler/clips'
@@ -12,9 +12,10 @@ import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { allProgressions, allScales, GENRE_INFO, getScale, harmonize, loadScaleCatalog, progressionsFor, realizeProgression, scaleFamilies, songSets, spellScale, VOICINGS, type VoicingId } from '../theory'
 import type { TheoryProgression } from '../theory/types'
+import { moduleView } from './lazyViews'
 import { LazyGenerate } from './sheetFallback'
 
-const GeneratePanel = lazy(() => import('./GeneratePop').then((mod) => ({ default: mod.GeneratePanel })))
+const loadGenerate = moduleView(() => import('./GeneratePop'), 'GeneratePanel')
 import { scalerPatch } from '../presets/apply'
 import { commitScalerPreset } from '../presets/project'
 import { ScalerPerformances } from './ScalerPerformances'
@@ -979,8 +980,8 @@ const scaleList = allScales()
 
         <details className="scaler-fold" open hidden={opt !== 'write'}>
           <summary>Write</summary>
-          <LazyGenerate>
-            <GeneratePanel store={store} engine={engine} trackId={trackId} scale={{ root: state.root, scale: state.scale, library: state.library }} />
+          <LazyGenerate load={loadGenerate}>
+            {(View) => <View store={store} engine={engine} trackId={trackId} scale={{ root: state.root, scale: state.scale, library: state.library }} />}
           </LazyGenerate>
         </details>
       </div>

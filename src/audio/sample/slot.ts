@@ -1,3 +1,4 @@
+import { openMicTap } from '../micTap'
 import { resampleSinc } from '../quality/resample'
 import { musicCaptureAttempts } from '../../model/codecs'
 import { uid, type AudioAsset, type AudioClip, type Project, type SampleZone, type SamplerState } from '../../model/types'
@@ -342,7 +343,7 @@ export async function browserDecode(bytes: ArrayBuffer, sampleRate: number | nul
   const wanted = sampleRate && AUDIO_RATES.has(sampleRate) ? sampleRate : undefined
   let ctx: AudioContext
   try {
-    ctx = new AudioContext(wanted ? { sampleRate: wanted } : undefined)
+    ctx = new AudioContext(wanted ? { latencyHint: 'interactive', sampleRate: wanted } : { latencyHint: 'interactive' })
   } catch {
     ctx = new AudioContext()
   }
@@ -555,28 +556,12 @@ export async function openInputCapture(options: OpenInputOptions): Promise<Input
     }
     if (!stream) throw last instanceof Error ? last : new Error('Could not open the microphone.')
   }
-  const src = options.context.createMediaStreamSource(stream)
-  const silent = options.context.createGain()
-  silent.gain.value = 0
-  const proc = options.context.createScriptProcessor(2048, 1, 1)
-  let splitter: Connectable | null = null
-  if (options.channel != null && options.context.createChannelSplitter) {
-    splitter = options.context.createChannelSplitter(options.channel + 1)
-    src.connect(splitter)
-    splitter.connect(proc, options.channel, 0)
-  } else src.connect(proc)
-  proc.connect(silent)
-  silent.connect(options.context.destination)
-  let handler: ((frame: Float32Array) => void) | null = null
-  proc.onaudioprocess = (event) => {
-    if (!handler) return
-    handler(Float32Array.from(event.inputBuffer.getChannelData(0)))
-  }
+  const tap = await openMicTap(options.context as unknown as AudioContext, stream, options.channel)
+  if (!tap) throw new Error('This browser cannot record from the microphone.')
   const source: CaptureSource = {
-    sampleRate: options.context.sampleRate,
+    sampleRate: tap.sampleRate,
     start(onFrame) {
-      handler = onFrame
-      return () => { handler = null }
+      return tap.start(onFrame)
     },
   }
   return {
@@ -584,11 +569,7 @@ export async function openInputCapture(options: OpenInputOptions): Promise<Input
     stream,
     opened,
     close() {
-      handler = null
-      try { proc.disconnect() } catch { /* already stopped */ }
-      try { splitter?.disconnect() } catch { /* already stopped */ }
-      try { src.disconnect() } catch { /* already stopped */ }
-      try { silent.disconnect() } catch { /* already stopped */ }
+      tap.close()
       if (opened) stream?.getTracks().forEach((track) => track.stop())
     },
   }

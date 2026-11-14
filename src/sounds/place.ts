@@ -1,4 +1,5 @@
 import { isAacFile, readLameDelay, trimAacPriming, trimCodecPadding } from '../audio/codecTrim'
+import { interactiveAudioContext } from '../audio/micTap'
 import { normalizePeak } from '../audio/level'
 import { bpmFromName, fitLoopBeats } from '../audio/loopSeam'
 import { resampleSinc } from '../audio/quality/resample'
@@ -155,7 +156,7 @@ export async function decodeSoundBytes(bytes: ArrayBuffer): Promise<{ sampleRate
     }
   }
   if (typeof AudioContext !== 'undefined') {
-    const ctx = new AudioContext()
+    const ctx = interactiveAudioContext()
     try {
       const decoded = await ctx.decodeAudioData(bytes.slice(0))
       const raw = new Uint8Array(bytes)

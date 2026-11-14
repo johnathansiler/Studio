@@ -50,7 +50,8 @@ import { LiveRack } from './liveRack'
 import { audioStateOf, planInterruption, planRecovery, type RecoveryAction } from './core/session'
 import { publishNotice } from './core/notice'
 import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGesture, routeChangePlan, routeOf, type RouteSnapshot } from './core/driver'
-import { bufferHintOf, formatLatencyReadout, latencyHintOrder, writeBufferHint, type BufferHint } from './core/buffer'
+import { bufferHintOf, formatLatencyReadout, writeBufferHint, type BufferHint } from './core/buffer'
+import { contextAttempts } from './core/contextOptions'
 import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, clipSliceEnvelope, drumLevel, liveWhen, nextTimelineSample, placeNoteTime, scheduleDelaySeconds } from './liveStage'
 import { normalizePeak, safetyCurve } from './level'
 import { fileDither } from './master/ditherPlan'
@@ -478,7 +479,7 @@ export class AudioEngine {
     void preloadWasmInserts()
     this.hadGesture = true
     if (!this.ctx) {
-      this.ctx = openContext(48000, this.bufferHint)
+      this.ctx = openContext(this.bufferHint)
       this.buildMaster()
       this.bindAudioSession(this.ctx)
       if (this.project) this.sync(this.project, this.assetOf)
@@ -487,11 +488,11 @@ export class AudioEngine {
     return this.ctx
   }
 
-  async resume(preferredRate = 48000, settle = true) {
+  async resume(_preferredRate = 48000, settle = true) {
     const wasmReady = preloadWasmInserts()
     const fresh = !this.ctx
     if (!this.ctx) {
-      this.ctx = openContext(preferredRate, this.bufferHint)
+      this.ctx = openContext(this.bufferHint)
       this.buildMaster()
     }
     this.bindAudioSession(this.ctx)
@@ -5553,12 +5554,8 @@ function hintStorage() {
   }
 }
 
-function openContext(sampleRate: number | undefined, hint: BufferHint) {
-  const options: AudioContextOptions[] = []
-  for (const item of latencyHintOrder(hint)) {
-    options.push({ latencyHint: item })
-    if (sampleRate) options.push({ latencyHint: item, sampleRate })
-  }
+function openContext(hint: BufferHint) {
+  const options = contextAttempts(hint)
   let last: unknown
   for (const option of options) {
     try {

@@ -68,7 +68,7 @@ describe('scoped arrange changes', () => {
         await page.setViewportSize(size)
         await page.getByRole('button', { name: /^Menu/ }).click()
         const menu = page.locator('#shell-menu')
-        await menu.waitFor()
+        await menu.locator('[data-menu-action]').first().waitFor()
         await page.waitForFunction(() => {
           const node = document.querySelector('#shell-menu')?.closest('.anchored-menu')
           return !!node && node.getAttribute('data-menu-size') !== 'pending'

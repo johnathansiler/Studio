@@ -1,4 +1,5 @@
 import { OPEN_BEAT_MACHINE } from '../instruments/pads/identity'
+import { preloadView } from './lazyViews'
 import type { ProjectStore } from '../state/store'
 
 function PadGridIcon() {
@@ -28,6 +29,8 @@ export function OpenBeatMachineButton({
       data-beat-machine={trackId}
       aria-label={OPEN_BEAT_MACHINE}
       title={OPEN_BEAT_MACHINE}
+      onPointerEnter={() => preloadView('pads')}
+      onTouchStart={() => preloadView('pads')}
       onClick={(event) => {
         event.stopPropagation()
         if (onOpen) onOpen(trackId)

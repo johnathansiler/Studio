@@ -78,7 +78,7 @@ class InsertProcessor extends AudioWorkletProcessor {
   private keys = new Map<string, Float32Array>()
   private automation: AutomationLane[] = []
   private tempo = 120
-  private projectRate = 48000
+  private projectRate = sampleRate
   private tempoMap: TempoPoint[] = []
   private scaleRoot = 0
   private scaleIntervals: number[] = [0, 2, 4, 5, 7, 9, 11]
@@ -95,14 +95,14 @@ class InsertProcessor extends AudioWorkletProcessor {
   private paramKeys: string[][] = []
   private ins: Float32Array[] = [new Float32Array(0), new Float32Array(0)]
   private outs: Float32Array[] = [new Float32Array(0), new Float32Array(0)]
-  private clock = { tempo: 120, tempoMap: [] as TempoPoint[], automation: [] as AutomationLane[], sampleRate: 48000 }
+  private clock = { tempo: 120, tempoMap: [] as TempoPoint[], automation: [] as AutomationLane[], sampleRate }
   private keyViews = new Map<string, { buf: Float32Array; view: Float32Array; length: number }>()
   private pool: ChainPool = prepareChainPool(MAX_SLOTS, 2, MAX_BLOCK)
   private scratch: AccurateScratch = prepareAccurate(MAX_SLOTS, MAX_BLOCK)
   private silence = new Float32Array(MAX_BLOCK)
   private silenceViews = new Map<number, Float32Array>()
   private blockCtx: BlockContext = {
-    sampleRate: 48000,
+    sampleRate,
     tempo: 120,
     sampleTime: 0,
     sidechain: null,
@@ -347,7 +347,7 @@ class InsertProcessor extends AudioWorkletProcessor {
     this.clock.tempo = this.tempo
     this.clock.tempoMap = this.tempoMap
     this.clock.automation = this.automation
-    this.clock.sampleRate = this.projectRate
+    this.clock.sampleRate = this.projectRate > 0 ? this.projectRate : sampleRate
     const beat = projectSampleBeat(this.clock, sampleTime)
     const ctx = this.blockCtx
     ctx.sampleRate = sampleRate

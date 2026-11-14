@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUFFER_HINTS, bufferHintOf, formatLatencyReadout, latencyHintOrder, readBufferHint, writeBufferHint } from '../audio/core/buffer'
+import { contextAttempts } from '../audio/core/contextOptions'
 import { compensateGraph, reportedLatency } from '../audio/core/latency'
 import { createNativePlugin } from '../audio/core/registry'
 import { BlockSmoother, ParamSmoother, SampleGlide, isSteppedParam, usesBlockValue } from '../audio/core/smooth'
@@ -358,6 +359,8 @@ describe('buffer hint', () => {
     expect(bufferHintOf('nope')).toBe('interactive')
     expect(latencyHintOrder('playback')[0]).toBe('playback')
     expect(latencyHintOrder('balanced')).toEqual(['balanced', 'interactive', 'playback'])
+    expect(contextAttempts('interactive').map((item) => item.latencyHint)).toEqual(['interactive', 'balanced', 'playback', undefined])
+    expect(contextAttempts('interactive').some((item) => 'sampleRate' in item)).toBe(false)
     const memory = new Map<string, string>()
     const storage = {
       getItem: (key: string) => memory.get(key) ?? null,

@@ -257,7 +257,7 @@ describe('arrange plugins drawer', () => {
     expect(html).toContain('Pulls sung notes onto the song key.')
     expect(html).toContain('>Add Plugin<')
     expect(html).toContain('aria-expanded="true"')
-    const sheet = readFileSync(new URL('../ui/PluginSheet.tsx', import.meta.url), 'utf8')
+    const sheet = readFileSync(new URL('../ui/pluginInserts.tsx', import.meta.url), 'utf8')
     const drawer = readFileSync(new URL('../ui/PluginsDrawer.tsx', import.meta.url), 'utf8')
     expect(sheet).toContain('addInsert(store, trackId, plugin.id)')
     expect(sheet).toContain('insertMenuChoices(store, trackId)')

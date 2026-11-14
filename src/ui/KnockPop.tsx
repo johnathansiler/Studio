@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { interactiveAudioContext } from '../audio/micTap'
 import { CLICK_NAMES, DRIVE_NAMES, knockPadPitch, noteLabel, NOTE_NAMES, renderKnockBuffer, SCALE_NAMES, detectPitch } from '../audio/rack/knock'
 import { commitDevicePreset } from '../presets/project'
 import { PresetControls } from './PresetControls'
@@ -65,11 +66,12 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
   const signature = params ? JSON.stringify(params) : ''
   useEffect(() => {
     if (!params || !waveRef.current || !specRef.current || !curveRef.current) return
-    const rendered = renderKnockBuffer(params, [{ sample: 0, pitch: 36, vel: 0.9 }], 48000, store.project.tempo, 2048)
+    const rate = engine.sampleRate > 0 ? engine.sampleRate : store.project.sampleRate
+    const rendered = renderKnockBuffer(params, [{ sample: 0, pitch: 36, vel: 0.9 }], rate, store.project.tempo, 2048)
     drawWave(waveRef.current, rendered.left)
-    drawSpectrum(specRef.current, rendered.left)
+    drawSpectrum(specRef.current, rendered.left, rate)
     drawCurve(curveRef.current, params.punch || 0, params.pdec || 40, params.pcurve || 0)
-  }, [signature, store.project.tempo])
+  }, [signature, store.project.tempo, engine])
 
   useEffect(() => {
     const root = padsRef.current
@@ -248,7 +250,7 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
 }
 
 async function loadKnockSample(store: ProjectStore, engine: AudioEngine, trackId: string, deviceId: string, file: File) {
-  const ctx = engine.ctx ?? new AudioContext()
+  const ctx = engine.ctx ?? interactiveAudioContext()
   const audio = await ctx.decodeAudioData((await file.arrayBuffer()).slice(0))
   const channels = Array.from({ length: audio.numberOfChannels }, (_, index) => audio.getChannelData(index).slice())
   const found = detectPitch(channels[0], audio.sampleRate)
@@ -286,14 +288,14 @@ function drawCurve(canvas: HTMLCanvasElement, punch: number, decayMs: number, cu
   ctx.stroke()
 }
 
-function drawSpectrum(canvas: HTMLCanvasElement, samples: Float32Array) {
+function drawSpectrum(canvas: HTMLCanvasElement, samples: Float32Array, sampleRate: number) {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const { width, height } = canvas
   ctx.clearRect(0, 0, width, height)
   const bins = [45, 70, 100, 160, 260, 500, 1000, 2000, 4000, 7000]
   bins.forEach((freq, index) => {
-    const mag = goertzel(samples, freq, 48000)
+    const mag = goertzel(samples, freq, sampleRate)
     const bar = Math.min(height - 2, mag * height * 8)
     ctx.fillStyle = freq < 140 ? '#79b8d4' : '#73c48f'
     const w = width / bins.length - 4

@@ -392,7 +392,7 @@ describe('phone arrange layout', () => {
           }
 
           await page.getByRole('button', { name: /^Menu/ }).click()
-          await page.locator('#shell-menu').waitFor()
+          await page.locator('#shell-menu [data-menu-action]').first().waitFor()
           const menu = await sheetClearance('.anchored-menu.phone-sheet', 'Menu')
           expect(menu, shot.name).toBeTruthy()
           expect(menu!.coversTabs, shot.name).toBe(false)
@@ -542,7 +542,7 @@ describe('phone arrange layout', () => {
           expect(mix.moreBottom, shot.name).toBeLessThanOrEqual((mix.barBottom ?? 0) + 1)
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-mix.png` })
           await page.getByRole('button', { name: /^Menu/ }).click()
-          await page.locator('#shell-menu').waitFor()
+          await page.locator('#shell-menu [data-menu-action]').first().waitFor()
           if (shot.name === '390x844') {
             const mixActions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
             expect(mixActions).toContain('new')

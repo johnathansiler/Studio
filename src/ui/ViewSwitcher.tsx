@@ -8,6 +8,7 @@ export function ViewSwitcher({
   collabBadge,
   onView,
   onCollab,
+  onWarm,
 }: {
   active: 'arrange' | 'mix' | 'beats' | 'session' | null
   collabShown: boolean
@@ -15,6 +16,7 @@ export function ViewSwitcher({
   collabBadge: boolean
   onView: (view: 'arrange' | 'mix' | 'beats' | 'session') => void
   onCollab: () => void
+  onWarm?: (view: 'arrange' | 'mix' | 'beats' | 'session' | 'collab') => void
 }) {
   return (
     <ButtonTray equal className="views">
@@ -22,6 +24,8 @@ export function ViewSwitcher({
         type="button"
         className={`collab-tab ${collabShown ? 'active' : ''}`}
         {...described(copyOf(VIEW_COPY, 'collab'))}
+        onPointerEnter={() => onWarm?.('collab')}
+        onTouchStart={() => onWarm?.('collab')}
         onClick={onCollab}
       >
         Collab
@@ -36,6 +40,8 @@ export function ViewSwitcher({
             type="button"
             className={on ? 'active' : ''}
             {...described(copy)}
+            onPointerEnter={() => onWarm?.(view)}
+            onTouchStart={() => onWarm?.(view)}
             onClick={() => onView(view)}
           >
             {copy.label}
