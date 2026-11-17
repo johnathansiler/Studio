@@ -158,10 +158,11 @@ describe('loop handles, whole-number drags, and smooth waveforms', () => {
       await page.evaluate(() => window.__cueharbor.store.setView('mix'))
       await page.locator('.pan-knob').first().waitFor()
       const knob = await page.locator('.pan-knob').first().boundingBox()
+      const nudge = Math.max(8, knob!.width * 0.2)
       await drag(
         page,
         { x: knob!.x + knob!.width / 2, y: knob!.y + knob!.height / 2 },
-        { x: knob!.x + knob!.width / 2 + 60, y: knob!.y + knob!.height / 2 },
+        { x: knob!.x + knob!.width / 2 + nudge, y: knob!.y + knob!.height / 2 },
         viewport.width < 500 ? 'touch' : 'mouse',
       )
       const pan = await page.evaluate(() => window.__cueharbor.store.project.tracks[0].pan)

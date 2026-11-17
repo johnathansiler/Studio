@@ -110,7 +110,7 @@ export interface GestureElement {
 
 /** Upward or rightward movement raises the value. Whole numbers catch the finger unless `fine`. */
 export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean, travel?: number, release = false, law: MixLaw | null = null) {
-  if (law === 'pan') return dragPan({ origin: start, deltaPx: delta, min, max, fine })
+  if (law === 'pan') return dragPan({ origin: start, deltaPx: delta, min, max, fine, spanPx: travel })
   if (law === 'db') return dragGain({ origin: start, deltaPx: delta, min, max, fine })
   const pixels = travel && travel > 0 ? travel : (fine ? FINE_PX : DRAG_PX)
   return dragNumeric({ origin: start, deltaPx: delta, min, max, fine, spanPx: pixels, release })
@@ -180,6 +180,16 @@ function travelFor(spec: ControlGesture, el: GestureElement, axis: 'x' | 'y', fi
   const length = axis === 'x' ? box?.width ?? 0 : box?.height ?? 0
   const base = Math.max(length, DRAG_PX)
   return fine ? Math.max(base * 2.5, FINE_PX) : base
+}
+
+/**
+ * Width of a pan control. One horizontal drag of this length runs hard left to hard right.
+ * Missing layout keeps the legacy pixel scale so a control that has not been measured stays usable.
+ */
+function panSpanPx(el: GestureElement, axis: 'x' | 'y'): number | undefined {
+  const box = el.getBoundingClientRect?.()
+  const length = axis === 'y' ? box?.height ?? 0 : box?.width ?? 0
+  return length > 8 ? length : undefined
 }
 
 function controlCues(el: Pick<GestureElement, 'className' | 'dataset' | 'getAttribute'>): { label: string; title: string; className: string; declared: number | null } {
@@ -335,7 +345,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     const delta = steered.cross
       ? (spec.axis === 'x' ? drag.y - event.clientY : event.clientX - drag.x)
       : (spec.axis === 'x' ? event.clientX - drag.x : drag.y - event.clientY)
-    const pixels = travelFor(spec, el, spec.axis, fine)
+    const pixels = law === 'pan' ? panSpanPx(el, spec.axis) : travelFor(spec, el, spec.axis, fine)
     const before = lastValue
     const next = dragValue(drag.value, delta, spec.min, spec.max, fine, pixels, false, law)
     emit(event, next, event.clientX, event.clientY, fine)
@@ -595,7 +605,9 @@ export function installControlGuards(doc: Document) {
       ? (drag.vertical ? event.clientX - drag.x : drag.y - event.clientY)
       : (drag.vertical ? drag.y - event.clientY : event.clientX - drag.x)
     const before = Number(drag.el.value)
-    const next = dragValue(drag.value, delta, Number(drag.el.min), Number(drag.el.max), fine, undefined, false, law)
+    const box = drag.el.getBoundingClientRect()
+    const span = law === 'pan' ? (drag.vertical ? box.height : box.width) : 0
+    const next = dragValue(drag.value, delta, Number(drag.el.min), Number(drag.el.max), fine, span > 8 ? span : undefined, false, law)
     writeRange(drag.el, next)
     markIntegerLand(drag.el, before, Number(drag.el.value))
     show(event.clientX, event.clientY, mixText(law, Number(drag.el.value), drag.el.value))

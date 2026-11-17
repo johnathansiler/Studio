@@ -67,12 +67,25 @@ export function quantizeDb(db: number, step = DB_STEP): number {
   return roundTo(quantize(db, step), 1)
 }
 
+/**
+ * Pixels that move `percent` pan units when `spanPx` is one full trip from hard left to hard right.
+ * Without a measured control, the legacy `PAN_PX` scale is used by callers that pass no span.
+ */
+export function panDragPixels(percent: number, spanPx: number, fine = false): number {
+  const scale = fine ? PAN_FINE_SCALE : 1
+  return (percent * spanPx * scale) / 200
+}
+
 /** Finger delta → stored pan. `fine` keeps tenths of a pan unit. */
-export function dragPan(input: { origin: number; deltaPx: number; min?: number; max?: number; fine?: boolean }): number {
+export function dragPan(input: { origin: number; deltaPx: number; min?: number; max?: number; fine?: boolean; spanPx?: number }): number {
   const min = input.min ?? -1
   const max = input.max ?? 1
   if (!input.deltaPx) return clamp(input.origin, min, max)
-  const scale = input.fine ? PAN_PX * PAN_FINE_SCALE : PAN_PX
+  const full = Math.max(1e-6, (max - min) * 100)
+  const span = input.spanPx && input.spanPx > 0 ? input.spanPx : 0
+  const scale = span > 0
+    ? (span * (input.fine ? PAN_FINE_SCALE : 1)) / full
+    : input.fine ? PAN_PX * PAN_FINE_SCALE : PAN_PX
   let percent = clamp(input.origin, min, max) * 100 + input.deltaPx / scale
   percent = clamp(percent, min * 100, max * 100)
   if (Math.abs(percent) <= PAN_CENTER_STICK) percent = 0

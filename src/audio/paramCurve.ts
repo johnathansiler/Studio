@@ -1,6 +1,7 @@
 export interface RampParam {
   value?: number
   cancelScheduledValues(time: number): void
+  cancelAndHoldAtTime?(time: number): void
   setValueAtTime(value: number, time: number): void
   linearRampToValueAtTime(value: number, time: number): void
   setTargetAtTime?(value: number, time: number, timeConstant: number): void
@@ -23,6 +24,40 @@ export function smoothParam(param: RampParam, value: number, now: number, second
   if (Math.abs(current - target) < 1e-5) return
   if (param.setTargetAtTime) param.setTargetAtTime(target, time, tau)
   else param.linearRampToValueAtTime(target, time + tau)
+}
+
+/**
+ * A fader or pan reaches the finger inside one frame.
+ * Long enough that a step is a line, short enough that the value is there in a few milliseconds.
+ */
+export const PREVIEW_RAMP_SEC = 0.004
+
+/**
+ * Move an existing AudioParam onto `value` for a fader or pan drag.
+ * `setValueAtTime` of the target steps the sample and clicks. A 10 ms approach
+ * is still short of the finger about 50 ms later. A 4 ms line lands inside one frame.
+ *
+ * The line has to start at the value heard now. `cancelAndHoldAtTime` is absent
+ * on Firefox and throws on some Safari builds. Where it exists, a ramp that
+ * follows it still begins at the previous event, so a running context jumps.
+ * Hold when we can, then anchor with `setValueAtTime` and draw the line.
+ */
+export function writeParamNow(param: RampParam, value: number, now: number) {
+  const target = Number.isFinite(value) ? value : 0
+  const time = Number.isFinite(now) ? now : 0
+  const hold = param.cancelAndHoldAtTime
+  if (typeof hold === 'function') {
+    try {
+      hold.call(param, time)
+    } catch {
+      // Firefox has no implementation. Some Safari builds throw.
+    }
+  }
+  const current = typeof param.value === 'number' && Number.isFinite(param.value) ? param.value : target
+  param.cancelScheduledValues(time)
+  param.setValueAtTime(current, time)
+  if (Math.abs(current - target) < 1e-5) return
+  param.linearRampToValueAtTime(target, time + PREVIEW_RAMP_SEC)
 }
 
 /**

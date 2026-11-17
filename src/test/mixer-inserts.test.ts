@@ -13,7 +13,7 @@ import { writeLayout } from '../model/layoutWidth'
 import { createEmptyProject, type PluginInstance } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { MixerView } from '../ui/MixerView'
-import { addStripInsert, isInstrumentSource, stripSlotChoices } from '../ui/PluginSheet'
+import { addStripInsert, collectPluginIds, isInstrumentSource, revealNewInsert, stripSlotChoices } from '../ui/PluginSheet'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const css = [
@@ -237,6 +237,36 @@ describe('mixer insert order and pan', () => {
     }
     addStripInsert(store, vocal.id, 'eq')
     expect(store.track(vocal.id)!.plugins.map((plugin) => plugin.pluginId)).toEqual(['eq'])
+  })
+
+  it('opens the device editor as soon as an insert is added', () => {
+    const store = new ProjectStore()
+    const vocal = store.project.tracks.find((track) => track.type === 'audio')!
+    const keys = store.project.tracks.find((track) => track.type === 'midi')!
+    const before = collectPluginIds(store)
+    addStripInsert(store, vocal.id, 'eq')
+    const eq = revealNewInsert(store, vocal.id, before)
+    expect(eq?.trackId).toBe(vocal.id)
+    expect(store.pluginFocus).toEqual({ trackId: vocal.id, pluginId: eq!.id })
+    expect(store.track(vocal.id)!.plugins.find((plugin) => plugin.id === eq!.id)?.pluginId).toBe('eq')
+
+    const next = collectPluginIds(store)
+    addStripInsert(store, vocal.id, 'delay')
+    const delay = revealNewInsert(store, vocal.id, next)
+    expect(store.pluginFocus).toEqual({ trackId: vocal.id, pluginId: delay!.id })
+    expect(store.track(vocal.id)!.plugins.map((plugin) => plugin.pluginId)).toEqual(['eq', 'delay'])
+
+    const refused = collectPluginIds(store)
+    addStripInsert(store, vocal.id, 'synth')
+    expect(revealNewInsert(store, vocal.id, refused)).toBeNull()
+    expect(store.pluginFocus?.pluginId).toBe(delay!.id)
+
+    const scalerBefore = collectPluginIds(store)
+    addStripInsert(store, keys.id, 'scaler')
+    const scaler = revealNewInsert(store, keys.id, scalerBefore)
+    expect(scaler?.trackId).toBe(keys.id)
+    expect(store.scalerTrackId).toBe(keys.id)
+    expect(store.pluginFocus).toBeNull()
   })
 })
 

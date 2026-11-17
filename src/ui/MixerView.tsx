@@ -13,7 +13,7 @@ import { watchLevel } from './levelMeter'
 import { settleMixFollow, useLiveMix } from './liveMix'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
-import { InsertList, StripInserts } from './pluginInserts'
+import { InsertList, StripInserts, collectPluginIds, revealNewInsert } from './pluginInserts'
 import { TouchSlider } from './kit/controls'
 import { TrackPresence } from './presenceMarks'
 import { useScreenOverlay } from './screenOverlay'
@@ -479,7 +479,11 @@ function PhaseButton({ store, trackId, name }: { store: ProjectStore; trackId: s
       onClick={(event) => {
         event.stopPropagation()
         if (plugin) store.focusPlugin(trackId, plugin.id)
-        else store.addPlugin(trackId, 'phase')
+        else {
+          const before = collectPluginIds(store)
+          store.addPlugin(trackId, 'phase')
+          revealNewInsert(store, trackId, before)
+        }
       }}
     >
       <span className="mini-word">Phase</span>

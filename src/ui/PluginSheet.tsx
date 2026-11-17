@@ -335,6 +335,8 @@ export {
   insertChoices,
   insertMenuChoices,
   addInsert,
+  collectPluginIds,
+  revealNewInsert,
   clipInsertName,
   isInstrumentSource,
   stripCanHost,

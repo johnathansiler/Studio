@@ -53,7 +53,7 @@ export interface MixSample {
 
 /**
  * A fader or pan drag.
- * Every move writes the AudioParam immediately.
+ * Every move writes the AudioParam on this gesture. It reaches that value within a few milliseconds.
  * The screen hears the value at most once per animation frame.
  * The project store is written once, on release.
  */

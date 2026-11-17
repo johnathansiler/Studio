@@ -44,7 +44,7 @@ import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
 import { automationSchedule, channelAutomationMode, laneFor, valueAtMappedSample } from '../model/automation'
 import { notePanGains } from './level'
-import { applyRamps, smoothParam } from './paramCurve'
+import { applyRamps, smoothParam, writeParamNow } from './paramCurve'
 import { wakeTicker } from './ticker'
 import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
@@ -1306,8 +1306,8 @@ export class AudioEngine {
   }
 
   /**
-   * Hear a fader or pan immediately. `setTargetAtTime` (via the shared smoother)
-   * hides zipper clicks without touching the routing graph.
+   * Hear a fader or pan on this move. The AudioParam that already exists
+   * draws a 4 ms line to the finger, so the sample does not step.
    */
   previewMix(target: 'volume' | 'pan', id: string, value: number) {
     const ctx = this.ctx
@@ -1316,19 +1316,19 @@ export class AudioEngine {
     if (id === 'master') {
       if (target !== 'volume' || !this.masterGain) return
       const gain = this.referenceOn ? 0 : value * this.compareGain
-      smoothParam(this.masterGain.gain, gain, now)
+      writeParamNow(this.masterGain.gain, gain, now)
       return
     }
     const strip = this.strips.get(id)
     if (strip) {
-      if (target === 'volume') smoothParam(strip.fader.gain, Math.max(0, value), now)
-      else smoothParam(strip.pan.pan, Math.max(-1, Math.min(1, value)), now)
+      if (target === 'volume') writeParamNow(strip.fader.gain, Math.max(0, value), now)
+      else writeParamNow(strip.pan.pan, Math.max(-1, Math.min(1, value)), now)
       return
     }
     const trim = this.drumTrims.get(id)
     if (!trim) return
-    if (target === 'volume') smoothParam(trim.gain.gain, Math.max(0, value), now)
-    else smoothParam(trim.pan.pan, Math.max(-1, Math.min(1, value)), now)
+    if (target === 'volume') writeParamNow(trim.gain.gain, Math.max(0, value), now)
+    else writeParamNow(trim.pan.pan, Math.max(-1, Math.min(1, value)), now)
   }
 
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
