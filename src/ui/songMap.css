@@ -126,8 +126,11 @@
 .shell.phone.land .smart-tempo {
   position: absolute;
   z-index: 12;
-  /* Clear the 22px loop ruler so the offer does not sit on that bar. */
-  top: 26px;
+  /* The phone loop ruler is 22px and the playhead strip under it is 42px.
+     Sit below both so those bars stay touchable. The offer is out of flow,
+     to the right of the header column, so it does not push or cover
+     Mute, Solo, Arm, or the dock. */
+  top: calc(22px + 42px + 4px);
   left: calc(var(--track-head-w, 220px) + 8px);
   right: 8px;
   width: auto;

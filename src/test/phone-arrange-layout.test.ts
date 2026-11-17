@@ -20,7 +20,14 @@ describe('phone arrange chrome', () => {
     expect(grips).toContain('export const LOOP_GRIP_HIT = 44')
   })
 
-  it('keeps the short Add Track bar and parks the bulb beside a header-width button', () => {
+  it('floats the landscape BPM offer below the loop ruler and the playhead strip', () => {
+  const css = readFileSync(new URL('../ui/songMap.css', import.meta.url), 'utf8')
+  expect(css).toContain('position: absolute;')
+  expect(css).toContain('top: calc(22px + 42px + 4px);')
+  expect(css).toContain('left: calc(var(--track-head-w, 220px) + 8px);')
+})
+
+it('keeps the short Add Track bar and parks the bulb beside a header-width button', () => {
     const css = readFileSync(new URL('../ui/dockPush.css', import.meta.url), 'utf8')
     expect(css).toContain('height: 42px')
     expect(css).toContain('.ideas-bulb')
