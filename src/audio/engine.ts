@@ -2819,19 +2819,35 @@ export class AudioEngine {
   }
 
   private click(when: number, accent: boolean, countIn = false) {
-    if (!this.ctx || !this.metroGain) return
+    const ctx = this.ctx
+    const bus = this.localBus
+    if (!ctx || !bus) return
+    // A sample-rate rebuild closes the previous context. A click still holding
+    // that context's gain never reaches the new master meter.
+    const gainCtx = this.metroGain?.context
+    if (!this.metroGain || (gainCtx && gainCtx !== ctx)) {
+      this.metroGain = ctx.createGain()
+      this.metroGain.gain.value = 0.45
+      this.metroGain.connect(bus)
+    }
     const voice = clickVoice(accent, countIn)
-    const at = Math.max(when, this.ctx.currentTime)
-    const osc = this.ctx.createOscillator()
-    const gain = this.ctx.createGain()
+    const at = Math.max(when, ctx.currentTime)
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
     osc.type = voice.type
     osc.frequency.setValueAtTime(voice.frequency, at)
-    gain.gain.setValueAtTime(0.0001, at)
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, voice.peak), at + 0.002)
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.045)
+    const floor = 0.0001
+    const peak = Math.max(floor * 2, voice.peak)
+    const attackAt = at + voice.attack
+    const holdAt = attackAt + voice.hold
+    const endAt = holdAt + voice.decay
+    gain.gain.setValueAtTime(floor, at)
+    gain.gain.exponentialRampToValueAtTime(peak, attackAt)
+    gain.gain.linearRampToValueAtTime(peak, holdAt)
+    gain.gain.exponentialRampToValueAtTime(floor, endAt)
     let tail: AudioNode = osc
     if (voice.lowpass != null) {
-      const filter = this.ctx.createBiquadFilter()
+      const filter = ctx.createBiquadFilter()
       filter.type = 'lowpass'
       filter.frequency.setValueAtTime(voice.lowpass, at)
       filter.Q.setValueAtTime(0.7, at)
@@ -2841,10 +2857,10 @@ export class AudioEngine {
     tail.connect(gain)
     gain.connect(this.metroGain)
     osc.start(at)
-    osc.stop(at + 0.05)
+    osc.stop(endAt + 0.008)
     const chain: AudioNode[] = [osc, gain]
     if (tail !== osc) chain.push(tail)
-    this.holdVoice(at + 0.08, chain)
+    this.holdVoice(endAt + 0.04, chain)
   }
 
   /** Restart arrangement playback at the wrapped playhead so a loop toggle takes effect immediately. */
