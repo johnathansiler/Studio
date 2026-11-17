@@ -311,7 +311,11 @@ export function ArrangeView({
     if (!heads || !arrange) return
     const apply = () => {
       const width = Math.round(heads.getBoundingClientRect().width)
-      if (width > 0) arrange.style.setProperty('--track-head-w', `${width}px`)
+      if (width > 0) {
+        arrange.style.setProperty('--track-head-w', `${width}px`)
+        const shell = arrange.closest('.shell')
+        if (shell instanceof HTMLElement) shell.style.setProperty('--track-head-w', `${width}px`)
+      }
     }
     apply()
     const observer = new ResizeObserver(apply)
