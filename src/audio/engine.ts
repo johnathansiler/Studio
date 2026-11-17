@@ -289,6 +289,9 @@ export class AudioEngine {
   private perfAtCtx0 = 0
   private workletsReady = false
   private bufferHint: BufferHint = initialBufferHint(hintStorage(), typeof navigator === 'undefined' ? '' : navigator.userAgent)
+  private previewRates: { sourceRate: number; outputRate: number } | null = null
+  private renderStats: { average: number; peak: number; underrun: number } | null = null
+  private renderCapacity: { stop?: () => void } | null = null
   /** Set from the first tap. iOS will not resume a suspended context before this. */
   private hadGesture = false
   private routeSnap: RouteSnapshot | null = null
@@ -376,6 +379,32 @@ export class AudioEngine {
   latencyReadout() {
     if (!this.ctx) return formatLatencyReadout(null, null)
     return formatLatencyReadout(this.baseLatencyMs, this.deviceLatencyMs)
+  }
+
+  /** Lines for Menu and Setup. Empty fields stay visible so a phone screenshot is complete. */
+  audioReport() {
+    const ctx = this.ctx
+    const preview = this.previewRates
+    const stats = this.renderStats
+    const rate = ctx ? `${Math.round(ctx.sampleRate)} Hz` : 'not open'
+    const state = ctx?.state ?? 'closed'
+    const base = ctx ? `${(ctx.baseLatency * 1000).toFixed(1)} ms` : 'not measured'
+    const output = ctx ? `${((ctx.outputLatency || 0) * 1000).toFixed(1)} ms` : 'not measured'
+    const source = preview ? `${Math.round(preview.sourceRate)} Hz` : 'idle'
+    const played = preview ? `${Math.round(preview.outputRate)} Hz` : 'idle'
+    const load = stats ? `${Math.round(stats.average * 100)}% peak ${Math.round(stats.peak * 100)}%` : 'not reported'
+    const underrun = stats ? `${(stats.underrun * 100).toFixed(2)}%` : 'not reported'
+    return [
+      `Context ${rate}`,
+      `State ${state}`,
+      `Buffer ${this.bufferHint}`,
+      `Base ${base}`,
+      `Output ${output}`,
+      `Preview source ${source}`,
+      `Preview output ${played}`,
+      `Render load ${load}`,
+      `Underrun ${underrun}`,
+    ].join('\n')
   }
 
   /**
@@ -703,6 +732,7 @@ export class AudioEngine {
       return buffer
     })
     this.armWarmVoices()
+    this.watchRenderCapacity(ctx)
     this.localMicGain = ctx.createGain()
     this.localMicGain.gain.value = 1
   }
@@ -2056,7 +2086,35 @@ export class AudioEngine {
     for (const [peerId, stream] of this.remoteStreams) this.setRemoteMusic(peerId, stream)
   }
 
+  private watchRenderCapacity(ctx: AudioContext) {
+    try { this.renderCapacity?.stop?.() } catch { /* the previous context is gone */ }
+    this.renderCapacity = null
+    this.renderStats = null
+    const Host = (globalThis as { AudioRenderCapacity?: new () => RenderCapacity }).AudioRenderCapacity
+    if (typeof Host !== 'function') return
+    try {
+      const capacity = new Host()
+      capacity.onupdate = (event) => {
+        const row = event?.renderCapacity
+        if (!row) return
+        this.renderStats = {
+          average: numberOr(row.averageLoad),
+          peak: numberOr(row.peakLoad),
+          underrun: numberOr(row.underrunRatio),
+        }
+      }
+      capacity.start({ updateInterval: 1 })
+      this.renderCapacity = capacity
+      void ctx
+    } catch {
+      this.renderCapacity = null
+    }
+  }
+
   private dropGraph() {
+    try { this.renderCapacity?.stop?.() } catch { /* already stopped */ }
+    this.renderCapacity = null
+    this.renderStats = null
     this.unbindAudioSession()
     this.rack.dispose()
     this.libraryHost.dispose()
@@ -5176,6 +5234,7 @@ export class AudioEngine {
     const prepared = raw
       ? fitPlaybackRate(channels, fileRate, deviceRate)
       : prepareSpeakerPreview(channels, fileRate, deviceRate, loop)
+    this.previewRates = { sourceRate: fileRate, outputRate: prepared.sampleRate }
     const played = prepared.channels
     const playedLead = played[0]
     if (!playedLead?.length) return
@@ -5626,8 +5685,19 @@ function hintStorage() {
   }
 }
 
+interface RenderCapacity {
+  start(options?: { updateInterval?: number }): void
+  stop?: () => void
+  onupdate: ((event: { renderCapacity?: { averageLoad?: number; peakLoad?: number; underrunRatio?: number } }) => void) | null
+}
+
+function numberOr(value: number | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 function openContext(hint: BufferHint) {
-  const options = contextAttempts(hint)
+  const kind = deviceKind(typeof navigator === 'undefined' ? '' : navigator.userAgent)
+  const options = contextAttempts(hint, kind)
   let last: unknown
   for (const option of options) {
     try {

@@ -2100,6 +2100,7 @@ async function importDropped(files: FileList) {
             onIdeas={!phone ? () => { setMenuOpen(false); openIdeas('write') } : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
+            audioReport={() => engine.audioReport()}
             onLatency={(hint) => {
               setLatencyHint(hint)
               void engine.setLatencyChoice(hint).then((readout) => setLatencyReadout(readout))

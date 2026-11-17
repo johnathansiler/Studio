@@ -18,6 +18,7 @@ function render(pressed: (action: string) => boolean = () => false) {
     latencyHint: 'interactive',
     latencyReadout: 'Base 12.0 ms. Output 8.0 ms.',
     onLatency: () => undefined,
+    audioReport: () => 'Context 48000 Hz\nState running\nBuffer interactive\nBase 10.0 ms\nOutput 21.3 ms\nPreview source 44100 Hz\nPreview output 48000 Hz\nRender load not reported\nUnderrun not reported',
   }))
 }
 
@@ -39,6 +40,10 @@ describe('main menu rows', () => {
     expect(html).not.toContain('>4/4<')
     expect(html).not.toContain('aria-label="Time. Beats in each bar."')
     expect(html).toContain('Base 12.0 ms. Output 8.0 ms.')
+    expect(html).toContain('data-audio-diagnostics=""')
+    expect(html).toContain('Context 48000 Hz')
+    expect(html).toContain('Preview source 44100 Hz')
+    expect(html).toContain('Underrun not reported')
     expect(html).toContain('class="menu-chevron"')
     expect(html).toContain('disabled=""')
     expect(html.match(/class="menu-row( |")/g)?.length).toBe(desk.length + 1)

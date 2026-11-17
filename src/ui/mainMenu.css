@@ -1,5 +1,20 @@
 /* Project menu: one quiet list. Rows are text, not tray chips. */
 
+.audio-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.audio-readout p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
 .anchored-menu:has(#shell-menu) {
   gap: 0;
   padding: 0;

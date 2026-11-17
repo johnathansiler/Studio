@@ -338,12 +338,14 @@ export async function decodeSlotFile(bytes: ArrayBuffer, decodeNative: (bytes: A
   return copyDecoded(await decodeNative(bytes, sniffed))
 }
 
-export async function browserDecode(bytes: ArrayBuffer, sampleRate: number | null): Promise<DecodedAudio> {
+export async function browserDecode(bytes: ArrayBuffer, fileRate: number | null): Promise<DecodedAudio> {
   if (typeof AudioContext === 'undefined') throw new Error('This browser cannot decode that audio file.')
-  const wanted = sampleRate && AUDIO_RATES.has(sampleRate) ? sampleRate : undefined
+  // `fileRate` is the compressed file's rate. A context locked to it (often
+  // 44100) makes Android resample the live output once per device callback.
+  void fileRate
   let ctx: AudioContext
   try {
-    ctx = new AudioContext(wanted ? { latencyHint: 'interactive', sampleRate: wanted } : { latencyHint: 'interactive' })
+    ctx = new AudioContext({ latencyHint: 'interactive' })
   } catch {
     ctx = new AudioContext()
   }
