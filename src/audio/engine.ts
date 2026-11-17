@@ -814,16 +814,20 @@ export class AudioEngine {
         }
       }
     }
+    let clockRebuilt = false
     if (loopFlip && this.playing && this.mode === 'arrangement') {
       this.loopAudioDirty = false
       this.rearmLoop()
+      clockRebuilt = true
     } else if (rackChanged && this.playing && this.mode === 'arrangement' && this.status !== 'recording') {
       this.rearmLoop()
+      clockRebuilt = true
     } else if (this.loopAudioDirty) {
       this.applyLoopAudio()
       if (this.pendingSchedule) {
         this.pendingSchedule = false
         this.scheduleAhead()
+        clockRebuilt = true
       }
     }
     const follow = followClockToken(project)
@@ -833,7 +837,7 @@ export class AudioEngine {
     const heard = this.heardKey(project)
     const heardChanged = this.heardStamp !== '' && heard !== this.heardStamp
     this.heardStamp = heard
-    if (heardChanged && this.playing && this.mode === 'arrangement' && this.status !== 'recording' && !loopFlip && !rackChanged) {
+    if (heardChanged && this.playing && this.mode === 'arrangement' && this.status !== 'recording' && !clockRebuilt) {
       this.reviseHeard(project)
     }
   }
@@ -894,17 +898,18 @@ export class AudioEngine {
 
   /**
    * Drop queued audio that no longer matches the project and schedule the new
-   * events from just ahead of the audio clock. A sounding voice fades in 5 ms
-   * when its event was removed. The replacement starts inside one quantum plus
-   * the device latency, which stays under 60 ms.
+   * events from one render block ahead of the audio clock. A sounding voice
+   * fades in 5 ms when its event was removed. The replacement stays inside 60 ms.
    */
   private reviseHeard(project: Project) {
     const ctx = this.ctx
     if (!ctx) return
     const now = ctx.currentTime
     const quantum = 128 / Math.max(1, this.sampleRate)
-    const device = (ctx.baseLatency || 0) + (ctx.outputLatency || 0)
-    const safety = now + Math.min(0.05, Math.max(quantum, quantum + device))
+    // One render block ahead of the audio clock. baseLatency and outputLatency
+    // are already the delay between this clock and the speaker, so adding them
+    // again skips every note that falls in that gap.
+    const safety = now + quantum
     const epoch = this.clockEpoch(project)
     const owners = this.heardOwners(project)
     const fade = 0.005
@@ -2415,9 +2420,9 @@ export class AudioEngine {
 
   /** Stop every sounding voice, including notes that were already queued. */
   private silenceNow() {
-    this.stopSources()
-    this.keysNode?.port.postMessage({ type: 'panic' })
     const now = this.ctx?.currentTime ?? 0
+    this.stopSources(this.ctx ? now + 0.005 : undefined)
+    this.keysNode?.port.postMessage({ type: 'panic' })
     for (const voice of this.warmVoices) {
       try {
         voice.gain.gain.cancelScheduledValues(now)
@@ -5899,8 +5904,27 @@ export class AudioEngine {
       content: tag?.content,
       epoch: tag ? this.clockEpoch(this.project) : undefined,
     }
+    if (!entry.release) {
+      const gain = amplitudeParam(nodes)
+      if (gain) entry.release = (when: number) => {
+        this.fadeParam(gain, when)
+        try { entry.stop(when + 0.008) } catch { /* the voice already has a stop time */ }
+      }
+    }
     this.sources.push(entry)
     return entry
+  }
+
+  /** Ramp a sounding voice out so the stop does not cut the waveform. */
+  private fadeParam(param: AudioParam, when: number) {
+    const now = this.ctx?.currentTime ?? when
+    const start = Math.max(now, when - 0.005)
+    const end = Math.max(start + 0.005, when)
+    try {
+      param.cancelScheduledValues(start)
+      param.setValueAtTime(Math.max(0.0001, param.value || 0.0001), start)
+      param.linearRampToValueAtTime(0.0001, end)
+    } catch { /* the node has already stopped */ }
   }
 
   /** Stop a voice that has not started without throwing when `when` is before its start. */
@@ -6047,6 +6071,17 @@ interface RenderCapacity {
   start(options?: { updateInterval?: number }): void
   stop?: () => void
   onupdate: ((event: { renderCapacity?: { averageLoad?: number; peakLoad?: number; underrunRatio?: number } }) => void) | null
+}
+
+/** The envelope gain, not a filter's dB gain or a panner. */
+function amplitudeParam(nodes: AudioNode[]): AudioParam | null {
+  for (const node of nodes) {
+    const gain = (node as GainNode).gain
+    if (!gain || typeof gain.linearRampToValueAtTime !== 'function') continue
+    if ((node as OscillatorNode).frequency) continue
+    return gain
+  }
+  return null
 }
 
 function numberOr(value: number | undefined) {

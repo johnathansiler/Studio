@@ -109,6 +109,9 @@ function param(initial: number, onLinear?: (value: number, time: number) => void
 class FakeContext {
   sampleRate = 48000
   currentTime = 5
+  /** Android output delay. Scheduling must not add this on top of the audio clock. */
+  baseLatency = 0
+  outputLatency = 0
   state: AudioContextState = 'running'
   starts: RecordedStart[] = []
   stops: RecordedStop[] = []
@@ -1044,6 +1047,17 @@ describe('edit latency', () => {
     expect(row.ms).toBeLessThanOrEqual(60)
 
     expect(rows.every((item) => item.ms <= 60)).toBe(true)
+
+    // A Fold-class device reports about 42 ms of output delay. That delay is already
+    // inside the audio clock, so a note 20 ms ahead must still be queued inside 60 ms.
+    ctx.baseLatency = 0.01
+    ctx.outputLatency = 0.032
+    const addNow = ctx.currentTime
+    const beat = (engine.positionSamples / project.sampleRate) * (project.tempo / 60)
+    keys.midiClips[0].notes.push({ id: 'imminent', pitch: 72, startBeat: beat + 0.04, durationBeats: 0.25, velocity: 0.8 })
+    engine.sync(project, of)
+    const imminent = ctx.starts.filter((start) => start.now >= addNow - 0.001 && start.when >= addNow && start.when <= addNow + 0.06)
+    expect(imminent.length).toBeGreaterThan(0)
     engine.stop()
   })
 
