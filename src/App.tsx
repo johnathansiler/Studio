@@ -60,14 +60,14 @@ import { activeTool } from './state/tools'
 import { visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
-import { CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
+import { BOTTOM_COVER_EVENT, CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
-import { sheetHistoryPop } from './ui/arrangePanel'
+import { ARRANGE_SHEET_EVENT, sheetHistoryPop } from './ui/arrangePanel'
 import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble } from './ui/Hint'
@@ -254,6 +254,15 @@ export function App() {
   const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    const closeMenu = () => setMenuOpen(false)
+    document.addEventListener(ARRANGE_SHEET_EVENT, closeMenu)
+    document.addEventListener(BOTTOM_COVER_EVENT, closeMenu)
+    return () => {
+      document.removeEventListener(ARRANGE_SHEET_EVENT, closeMenu)
+      document.removeEventListener(BOTTOM_COVER_EVENT, closeMenu)
+    }
+  }, [])
   const [latencyHint, setLatencyHint] = useState(() => engine.latencyChoice)
   const [latencyReadout, setLatencyReadout] = useState(() => engine.latencyReadout())
   useEffect(() => {
@@ -319,6 +328,9 @@ export function App() {
     // Phone already started closed. ?sounds=1 and a choice made this visit still open it.
     return panelChoice('arrangeBrowser') ?? false
   })
+  useEffect(() => {
+    if (soundsOpen || unstuckOpen) setMenuOpen(false)
+  }, [soundsOpen, unstuckOpen])
   const [shellWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
   const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
   const soundReserveRef = useRef(0)
@@ -2117,7 +2129,7 @@ async function importDropped(files: FileList) {
           }}
         />
         {!phone && historyButtons}
-        <AnchoredMenu fill sheet={phone} open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
+        <AnchoredMenu edge="top" open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
           {menuOpen && (
           <Suspense fallback={<PendingMenu />}>
           <MainMenu
