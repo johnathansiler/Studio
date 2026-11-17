@@ -7,7 +7,7 @@ import { clickVoice } from './metroClick'
 import { onSpectralCommit } from './spectral/job'
 import { followClockToken, onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
-import { analyserRms, applyInserts, createStrip, releaseStrip, type StripNodes } from './strips'
+import { analyserPeak, analyserRms, applyInserts, createStrip, prepareMeter, releasePeak, releaseStrip, type StripNodes } from './strips'
 import { midiLit, pruneMidiMarks, type MidiMark } from '../model/midiActivity'
 import { compPieces } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
@@ -188,7 +188,17 @@ export class AudioEngine {
   private talkAnalyser: AnalyserNode | null = null
   private cueReturnGain: GainNode | null = null
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
-  private meterScratch = new Float32Array(256)
+  private meterScratch = new Float32Array(4096)
+  /** Peak hold for each analyser, released from the audio clock. The slot is reused. */
+  private meterHolds = new WeakMap<AnalyserNode, { held: number; at: number }>()
+  /**
+   * Last `levels()` result for this context and audio time.
+   * Arrange and mix each ask once per strip inside one frame. The analyser data
+   * does not change until `currentTime` does, so those asks share one scan.
+   */
+  private levelContext: AudioContext | null = null
+  private levelStamp = Number.NaN
+  private levelCache: { master: number; input: number; talk: number; tracks: Record<string, number> } | null = null
   private readonly rackHost = new RackHost()
   private readonly padHost = new PadHost()
   private readonly libraryHost = new LibraryHost()
@@ -651,8 +661,8 @@ export class AudioEngine {
     this.localBus.connect(this.masterStrip.input)
     this.masterStrip.output.connect(this.masterGain)
     this.masterMeter = ctx.createAnalyser()
-    this.masterMeter.fftSize = 256
     this.masterMeter.smoothingTimeConstant = 0.35
+    prepareMeter(this.masterMeter, ctx.sampleRate)
     this.masterGain.connect(this.masterMeter)
     this.masterMeter.connect(this.cueDest)
     this.masterMeter.connect(this.monitorDelay)
@@ -709,7 +719,11 @@ export class AudioEngine {
       return
     }
     for (const track of project.tracks) {
-      if (!this.strips.has(track.id)) this.strips.set(track.id, createStrip(this.ctx))
+      if (!this.strips.has(track.id)) {
+        const strip = createStrip(this.ctx)
+        prepareMeter(strip.analyser, this.ctx.sampleRate)
+        this.strips.set(track.id, strip)
+      }
     }
     for (const id of [...this.strips.keys()]) {
       if (!project.tracks.some((t) => t.id === id)) {
@@ -1603,18 +1617,44 @@ export class AudioEngine {
   }
 
   levels() {
+    const ctx = this.ctx
+    const at = ctx?.currentTime ?? -1
+    if (this.levelCache && this.levelContext === ctx && this.levelStamp === at) return this.levelCache
     const tracks: Record<string, number> = {}
-    for (const [id, strip] of this.strips) tracks[id] = analyserRms(strip.analyser, this.meterScratch)
-    return {
+    for (const [id, strip] of this.strips) tracks[id] = this.meterLevel(strip.analyser)
+    const sample = {
       master: this.masterMeter
-        ? analyserRms(this.masterMeter, this.meterScratch)
+        ? this.meterLevel(this.masterMeter)
         : this.masterStrip
-          ? analyserRms(this.masterStrip.analyser, this.meterScratch)
+          ? this.meterLevel(this.masterStrip.analyser)
           : 0,
       input: this.inputAnalyser ? analyserRms(this.inputAnalyser, this.meterScratch) : 0,
       talk: this.talkAnalyser ? analyserRms(this.talkAnalyser, this.meterScratch) : 0,
       tracks,
     }
+    this.levelContext = ctx
+    this.levelStamp = at
+    this.levelCache = sample
+    return sample
+  }
+
+  /**
+   * Peak of the analyser window, then a short release.
+   * The window covers a display frame, so a click or a hat is in the buffer
+   * on the next poll. The release lets that peak survive one late frame, and
+   * it is gone before a mute check reads the level.
+   */
+  private meterLevel(analyser: AnalyserNode) {
+    const instant = analyserPeak(analyser, this.meterScratch)
+    const now = this.ctx?.currentTime ?? 0
+    let slot = this.meterHolds.get(analyser)
+    if (!slot) {
+      slot = { held: 0, at: now }
+      this.meterHolds.set(analyser, slot)
+    }
+    slot.held = releasePeak(slot.held, instant, now - slot.at)
+    slot.at = now
+    return slot.held
   }
 
   /** Timeline sample from the audio clock, including while the tab is in the background. */
@@ -2819,19 +2859,35 @@ export class AudioEngine {
   }
 
   private click(when: number, accent: boolean, countIn = false) {
-    if (!this.ctx || !this.metroGain) return
+    const ctx = this.ctx
+    const bus = this.localBus
+    if (!ctx || !bus) return
+    // A sample-rate rebuild closes the previous context. A click still holding
+    // that context's gain never reaches the new master meter.
+    const gainCtx = this.metroGain?.context
+    if (!this.metroGain || (gainCtx && gainCtx !== ctx)) {
+      this.metroGain = ctx.createGain()
+      this.metroGain.gain.value = 0.45
+      this.metroGain.connect(bus)
+    }
     const voice = clickVoice(accent, countIn)
-    const at = Math.max(when, this.ctx.currentTime)
-    const osc = this.ctx.createOscillator()
-    const gain = this.ctx.createGain()
+    const at = Math.max(when, ctx.currentTime)
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
     osc.type = voice.type
     osc.frequency.setValueAtTime(voice.frequency, at)
-    gain.gain.setValueAtTime(0.0001, at)
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, voice.peak), at + 0.002)
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.045)
+    const floor = 0.0001
+    const peak = Math.max(floor * 2, voice.peak)
+    const attackAt = at + voice.attack
+    const holdAt = attackAt + voice.hold
+    const endAt = holdAt + voice.decay
+    gain.gain.setValueAtTime(floor, at)
+    gain.gain.exponentialRampToValueAtTime(peak, attackAt)
+    if (voice.hold > 0) gain.gain.linearRampToValueAtTime(peak, holdAt)
+    gain.gain.exponentialRampToValueAtTime(floor, endAt)
     let tail: AudioNode = osc
     if (voice.lowpass != null) {
-      const filter = this.ctx.createBiquadFilter()
+      const filter = ctx.createBiquadFilter()
       filter.type = 'lowpass'
       filter.frequency.setValueAtTime(voice.lowpass, at)
       filter.Q.setValueAtTime(0.7, at)
@@ -2841,10 +2897,10 @@ export class AudioEngine {
     tail.connect(gain)
     gain.connect(this.metroGain)
     osc.start(at)
-    osc.stop(at + 0.05)
+    osc.stop(endAt + 0.005)
     const chain: AudioNode[] = [osc, gain]
     if (tail !== osc) chain.push(tail)
-    this.holdVoice(at + 0.08, chain)
+    this.holdVoice(endAt + 0.035, chain)
   }
 
   /** Restart arrangement playback at the wrapped playhead so a loop toggle takes effect immediately. */
