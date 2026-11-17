@@ -419,8 +419,8 @@ body:has(.shell.phone) .select-hint-host {
   font-variant-numeric: normal;
 }
 
-/* Same height as the browser sheet, sitting on the dock. Rows scroll inside that frame. */
-body:has(.shell.phone) [data-screen-overlay].phone-sheet:has(#shell-menu) {
+/* Same height as the browser sheet, sitting on the dock. The top menu does not use this. */
+body:has(.shell.phone) [data-screen-overlay].phone-sheet:has(#shell-menu):not(.menu-drop) {
   top: auto !important;
   bottom: calc(var(--phone-chrome-bottom, 108px) + 12px) !important;
   height: var(--phone-sheet-h, 46dvh) !important;

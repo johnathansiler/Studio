@@ -230,3 +230,15 @@
   max-height: 44px;
   padding: 0 2px;
 }
+
+/* A zoomed lane is shorter than 44px of controls. Keep the buttons inside the lane. */
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-compact] .head .pl-head .track-controls > .mini,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-compact] .head .pl-head .track-controls > .track-more,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-compact] .head .pl-head .track-controls > button,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-scale="tight"] .head .pl-head .track-controls > .mini,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-scale="tight"] .head .pl-head .track-controls > .track-more,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-scale="tight"] .head .pl-head .track-controls > button {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}

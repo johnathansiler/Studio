@@ -1,11 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { placeAnchoredMenu, anchoredShouldClose, menuFillsViewport, type AnchorBox } from './anchorPlace'
+import { menuSwipeCloses } from './menuDrop'
 import { syncPhoneSheetFrame } from './overlayHost'
 import { SheetClose } from './SheetClose'
 import { useScreenOverlay } from './screenOverlay'
 import './anchoredMenu.css'
 import './screenOverlay.css'
+import './menuDrop.css'
 
 type MenuSize = 'dock' | 'fill' | 'sheet' | 'pending'
 
@@ -22,6 +24,7 @@ export function AnchoredMenu({
   fill = false,
   sheet = false,
   tray = false,
+  edge,
   children,
 }: {
   open: boolean
@@ -40,10 +43,18 @@ export function AnchoredMenu({
   sheet?: boolean
   /** Short overlay with a close button. Beat Machine presets use this so the list stays off Record and the dock. */
   tray?: boolean
+  /** Project menu: a sheet that drops from under the transport instead of rising from the dock. */
+  edge?: 'top'
   children: ReactNode
 }) {
   useScreenOverlay(onClose, open)
   const menuRef = useRef<HTMLDivElement>(null)
+  const dropping = edge === 'top'
+  const shown = useRef(false)
+  const heldChildren = useRef(children)
+  if (open) heldChildren.current = children
+  const [dropMounted, setDropMounted] = useState(false)
+  const [phase, setPhase] = useState<'closed' | 'in' | 'out'>('closed')
   const [mode, setMode] = useState<MenuSize>(open && sheet ? 'sheet' : open && fill ? 'pending' : 'dock')
   const [style, setStyle] = useState<{ top: number; left: number; maxHeight: number; maxWidth: number; side: 'down' | 'up' } | null>(null)
   const sizing = open && fill && !sheet && !tray
@@ -54,6 +65,24 @@ export function AnchoredMenu({
     setTracked(sizing)
     setMode(sizing ? 'pending' : 'dock')
   }
+
+  useLayoutEffect(() => {
+    if (!dropping) return
+    if (open) {
+      shown.current = true
+      setDropMounted(true)
+      setPhase('closed')
+      const frame = requestAnimationFrame(() => setPhase('in'))
+      return () => cancelAnimationFrame(frame)
+    }
+    if (!shown.current) return
+    setPhase('out')
+    const timer = window.setTimeout(() => {
+      setDropMounted(false)
+      setPhase('closed')
+    }, 200)
+    return () => window.clearTimeout(timer)
+  }, [open, dropping])
 
   useLayoutEffect(() => {
     if (!open || !tray) return
@@ -81,11 +110,11 @@ export function AnchoredMenu({
 
   useLayoutEffect(() => {
     if (tray) return
-    if (open && (mode === 'sheet' || sheet)) syncPhoneSheetFrame(document.querySelector('.shell'))
-  }, [open, mode, sheet, tray])
+    if (open && (dropping || mode === 'sheet' || sheet)) syncPhoneSheetFrame(document.querySelector('.shell'))
+  }, [open, mode, sheet, tray, dropping])
 
   useLayoutEffect(() => {
-    if (tray || !open || !fill || mode !== 'pending') return
+    if (tray || dropping || !open || !fill || mode !== 'pending') return
     const node = menuRef.current
     if (!node) return
     const clearTop = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-tabs-bottom')) || 0
@@ -103,7 +132,7 @@ export function AnchoredMenu({
   const measuring = open && fill && !sheet && mode === 'pending'
 
   useLayoutEffect(() => {
-    if (tray || !open || filling || measuring) {
+    if (tray || dropping || !open || filling || measuring) {
       if (!open) setStyle(null)
       return
     }
@@ -139,7 +168,7 @@ export function AnchoredMenu({
       live?.classList.remove('anchored-trigger')
       live?.removeAttribute('data-anchor-side')
     }
-  }, [open, anchor, prefer, trigger, triggerRef, filling, measuring, tray])
+  }, [open, anchor, prefer, trigger, triggerRef, filling, measuring, tray, dropping])
 
   useEffect(() => {
     if (!open) return
@@ -165,11 +194,64 @@ export function AnchoredMenu({
     }
   }, [open, onClose, trigger, triggerRef, filling, mode])
 
-  if (!open && typeof document !== 'undefined') return null
+  if (dropping && !dropMounted && typeof document !== 'undefined') return null
+  if (!dropping && !open && typeof document !== 'undefined') return null
+
+  function onGrabPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 && event.pointerType !== 'touch') return
+    event.preventDefault()
+    event.stopPropagation()
+    const handle = event.currentTarget
+    const panel = handle.closest('.menu-drop-panel') as HTMLElement | null
+    try { handle.setPointerCapture(event.pointerId) } catch { /* The pointer can already be gone. */ }
+    const startX = event.clientX
+    const startY = event.clientY
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== event.pointerId || !panel) return
+      const dy = startY - ev.clientY
+      if (dy > 0) panel.style.transform = `translateY(${-Math.min(dy, panel.offsetHeight)}px)`
+    }
+    const finish = (ev: PointerEvent) => {
+      if (ev.pointerId !== event.pointerId) return
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', finish)
+      handle.removeEventListener('pointercancel', finish)
+      if (panel) panel.style.transform = ''
+      if (menuSwipeCloses(ev.clientX - startX, startY - ev.clientY)) onClose()
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', finish)
+    handle.addEventListener('pointercancel', finish)
+  }
 
   const showClose = Boolean(fill && open && !measuring)
-  const phoneSheet = open && fill && mode === 'sheet' && !tray
-  const menu = tray && open ? (
+  const phoneSheet = !dropping && open && fill && mode === 'sheet' && !tray
+  const menu = dropping ? (
+    <div
+      ref={menuRef}
+      id={id}
+      className={['anchored-menu', 'screen-overlay', 'phone-sheet', 'menu-drop', className].filter(Boolean).join(' ')}
+      role="dialog"
+      aria-label={label}
+      data-screen-overlay=""
+      data-open={phase === 'in' ? 'true' : 'false'}
+      data-phase={phase}
+      data-menu-edge="top"
+      data-menu-size="sheet"
+    >
+      <div className="menu-drop-panel">
+        <SheetClose onClick={onClose} />
+        <div className="phone-sheet-body">{open ? children : heldChildren.current}</div>
+        <div
+          className="menu-drop-grab"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Close menu. Swipe up."
+          onPointerDown={onGrabPointerDown}
+        />
+      </div>
+    </div>
+  ) : tray && open ? (
     <div
       ref={menuRef}
       id={id}

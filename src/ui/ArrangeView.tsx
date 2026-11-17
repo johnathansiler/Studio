@@ -47,7 +47,7 @@ import { UtilitySheets } from './UtilitySheets'
 import { trackKindLabel } from './trackKind'
 import { TrackOptions } from './TrackOptions'
 import { ARRANGE_SHEET_EVENT, popSheetHistory, publishArrangeSheet, rememberSheetHistory, sheetHistoryKey, type UtilitySheet } from './arrangePanel'
-import { BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS } from './phoneContext'
+import { BOTTOM_COVER_EVENT, BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS } from './phoneContext'
 import { setPhoneFocus } from './phoneFocus'
 import { PluginsDrawer } from './PluginsDrawer'
 import { TRACK_ROW, copyOf } from './chrome'
@@ -1226,7 +1226,10 @@ export function ArrangeView({
         menu={phoneBar?.menu}
         showPlugins
         onPlugins={() => {
-          if (!pluginsOpen) closeSheets()
+          if (!pluginsOpen) {
+            closeSheets()
+            document.dispatchEvent(new CustomEvent(BOTTOM_COVER_EVENT))
+          }
           setPluginsOpen((open) => !open)
         }}
         onBrowser={() => {
@@ -1273,7 +1276,13 @@ export function ArrangeView({
           if (event.ctrlKey || event.metaKey) return
           const body = scroller.current
           if (!body) return
+          event.preventDefault()
           body.scrollTop += event.deltaY
+        }}
+        onScroll={() => {
+          const heads = headsRef.current
+          const body = scroller.current
+          if (heads && body && body.scrollTop !== heads.scrollTop) body.scrollTop = heads.scrollTop
         }}
       >
         <div
@@ -1789,6 +1798,7 @@ export function ArrangeView({
             onOpenPlugins={phone ? () => {
               if (sheetTrack) store.selectTrack(sheetTrack.id)
               closeSheets()
+              document.dispatchEvent(new CustomEvent(BOTTOM_COVER_EVENT))
               setPluginsOpen(true)
             } : undefined}
           />
