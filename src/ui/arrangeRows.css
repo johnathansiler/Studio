@@ -115,6 +115,47 @@
   flex: none;
 }
 
+/* Add Track follows the last header inside the same scroller as the lanes.
+   A matching spacer keeps the two scroll heights equal, so the button scrolls
+   away instead of covering Mute, Solo, and Arm when a sheet shortens the view. */
+.arrange {
+  --add-track-h: 44px;
+}
+
+.arrange .heads-scroll > .track-add,
+.arrange .timeline-inner > .column-tail {
+  box-sizing: border-box;
+  height: var(--add-track-h);
+  min-height: var(--add-track-h);
+  max-height: var(--add-track-h);
+  flex: none;
+}
+
+.arrange .timeline-inner > .column-tail {
+  pointer-events: none;
+}
+
+.shell.phone.land .column-tail {
+  display: none;
+  height: 0;
+  min-height: 0;
+  max-height: 0;
+}
+
+.shell.phone:not(.land) .arrange .heads {
+  overflow: hidden;
+}
+
+.shell.phone:not(.land) .arrange .heads-scroll {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  height: auto;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 /* Wide phone shell: same portrait stack, slightly larger targets, a wider header, more timeline. */
 .shell.phone.phone-wide:not(.land) .arrange {
   /* Taller than the phone on a tall Fold, still short enough that the demo tracks clear Add Track at 700px. */
@@ -156,10 +197,36 @@
   gap: 4px;
 }
 
-.shell.phone.phone-wide:not(.land) .pl-head .mini,
-.shell.phone.phone-wide:not(.land) .pl-head .piano-open,
-.shell.phone.phone-wide:not(.land) .pl-head .beat-open,
-.shell.phone.phone-wide:not(.land) .pl-head .track-more {
+.shell.phone.phone-wide:not(.land) .arrange {
+  --add-track-h: 52px;
+}
+
+.shell.phone.phone-wide:not(.land) .arrange .heads-scroll > .track-add,
+.shell.phone.phone-wide:not(.land) .arrange .track-add .add-track-btn {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Mute, Solo, Arm, and the track menu share the header column evenly. */
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  gap: 4px;
+}
+
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls > .mini,
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls > .track-more,
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls > button {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
   height: 44px;
   min-height: 44px;
+  max-height: 44px;
+  padding: 0 2px;
 }

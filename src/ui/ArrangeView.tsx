@@ -1348,10 +1348,10 @@ export function ArrangeView({
             <LanePicker store={store} trackId={track.id} />
           </div>
         ))}
-      </div>
         <div className="track-add">
           <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
         </div>
+      </div>
       </div>
       </div>
       <div className="timeline-col">
@@ -1706,6 +1706,7 @@ export function ArrangeView({
                   })}
             </div>
           ))}
+          <div className="column-tail" aria-hidden="true" />
           {marquee && <div className="marquee" style={marquee} />}
           <RemoteTimeline peers={remotes} sampleRate={project.sampleRate} px={px} />
           <div className="playhead" data-playhead="arrange" ref={headNode} style={{ left: 0, willChange: 'transform' }} />
