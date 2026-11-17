@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { selectLayers } from '../audio/multisample/map'
 import { midiVelocity } from '../audio/multisample/types'
-import { parseLooseName } from '../library/looseName'
+import { parseChordToken, parseLooseName } from '../library/looseName'
 import { looseGroup, presentSoundEntries, samplerFromNotes } from '../sounds/noteGroups'
 import type { SoundEntry } from '../sounds/types'
 import { groupInstruments } from '../harbor/program'
@@ -117,5 +117,24 @@ describe('device-local note grouping', () => {
     expect(loud.layers[0]?.sample.bufferId).toContain('Amaj')
     expect(quiet.layers[0]?.sample.bufferId).toBe(loud.layers[0]?.sample.bufferId)
     expect(program.zones.every((zone) => zone.lovel === 1 && zone.hivel === 127)).toBe(true)
+  })
+
+  it('keeps octave-7 note names on the instrument instead of a dominant-7 row', () => {
+    expect(parseChordToken('C7')).toBeNull()
+    expect(parseChordToken('F#7')).toBeNull()
+    expect(parseChordToken('Bb7')).toBeNull()
+    expect(parseChordToken('Cmaj7')?.quality).toBe('maj7')
+    expect(parseChordToken('Amin3')).toMatchObject({ pitchClass: 9, quality: 'min', octave: 3 })
+    const listed = presentSoundEntries([
+      sound('keys/Pad_C3.wav', { pack: 'Keys', category: 'keys' }),
+      sound('keys/Pad_E4.wav', { pack: 'Keys', category: 'keys' }),
+      sound('keys/Pad_C7.wav', { pack: 'Keys', category: 'keys' }),
+      sound('keys/Pad_D7.wav', { pack: 'Keys', category: 'keys' }),
+    ])
+    const instruments = listed.filter((entry) => entry.type === 'instrument')
+    expect(instruments).toHaveLength(1)
+    expect(instruments[0]?.name.toLowerCase()).not.toMatch(/\b7$/)
+    const group = looseGroup(instruments[0]!.id)
+    expect(new Set(group?.members.map((member) => member.midi))).toEqual(new Set([48, 64, 96, 98]))
   })
 })

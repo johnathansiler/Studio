@@ -1,5 +1,6 @@
 import type { Processor, BlockContext } from '../plugins/types'
 import type { PluginInstance } from '../../model/types'
+import { fitPlaybackRate } from '../quality/playback'
 import { loadDspWasmBytes } from './engine'
 import {
   createSamplePool,
@@ -47,7 +48,11 @@ class WasmPad {
   constructor(private readonly pool: WasmPool, private readonly index: number) {}
 
   setRegion(sampleId: number, start: number, end: number) {
-    this.pool.exp.ch_voice_set_region(this.pool.ptr, this.index, sampleId, start | 0, end | 0)
+    const ratio = this.pool.ratioFor(sampleId)
+    const from = Math.max(0, Math.round(start * ratio))
+    let to = Math.max(from, Math.round(end * ratio))
+    if (ratio !== 1 && to < from + 2) to = from + 2
+    this.pool.exp.ch_voice_set_region(this.pool.ptr, this.index, sampleId, from, to)
   }
 
   setFade(fadeIn: number, fadeOut: number) {
@@ -93,15 +98,40 @@ class WasmPad {
 
 class WasmPool {
   readonly ptr: number
+  /** Source samples per stored sample. 1 when the file was already at the device rate. */
+  private readonly ratios = new Map<number, number>()
   constructor(readonly exp: VoiceExports, private readonly rate: number) {
     this.ptr = exp.ch_voice_create(rate)
     exp.ch_voice_prepare(this.ptr, rate, 8192)
   }
 
+  ratioFor(id: number) {
+    return this.ratios.get(id) ?? 1
+  }
+
+  /**
+   * The Rust reader is linear and cannot change without a new DSP module.
+   * A 96 kHz one-shot is lowpass-resampled here, then stored at the device
+   * rate, so playback does not fold the octave above Nyquist back in.
+   * Regions stay in source samples; the pad scales them by the stored ratio.
+   */
   load(id: number, data: Float32Array, fileRate = this.rate) {
-    const ptr = this.exp.ch_voice_load_ptr(this.ptr, data.length)
-    new Float32Array(this.exp.memory.buffer, ptr, data.length).set(data)
-    this.exp.ch_voice_load(this.ptr, id, data.length, fileRate)
+    let samples = data
+    let rate = fileRate
+    let ratio = 1
+    if (data.length > 1 && fileRate >= this.rate * 1.45 && this.rate > 0) {
+      const fitted = fitPlaybackRate([data], fileRate, this.rate)
+      const next = fitted.channels[0]
+      if (next && next.length > 1) {
+        samples = next
+        rate = fitted.sampleRate
+        ratio = samples.length / data.length
+      }
+    }
+    this.ratios.set(id, ratio)
+    const ptr = this.exp.ch_voice_load_ptr(this.ptr, samples.length)
+    new Float32Array(this.exp.memory.buffer, ptr, samples.length).set(samples)
+    this.exp.ch_voice_load(this.ptr, id, samples.length, rate)
   }
 
   pad(index: number) {

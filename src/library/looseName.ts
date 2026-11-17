@@ -105,10 +105,16 @@ export function chordQualityLabel(quality: string) {
   return QUALITY_LABEL[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
 }
 
-/** `Amaj`, `C#min`, `Bbmaj7`, `F#m`, `Amin3`. A plain `C4` is a note, not a chord. */
+/**
+ * `Amaj`, `C#min`, `Bbmaj7`, `F#m`, `Amin3`.
+ * A plain `C4` is a note, not a chord. `C7`, `F#7`, and `Bb7` are octave 7,
+ * not dominant chords, so a chromatic run is not pulled into a fake "7" row.
+ */
 export function parseChordToken(token: string): ChordToken | null {
   const match = token.trim().match(new RegExp(`^([A-Ga-g])([#b])?(${CHORD_QUALITY})(-1|\\d+)?$`, 'i'))
   if (!match) return null
+  const quality = match[3].toLowerCase()
+  if (quality === '7' && !match[4]) return null
   let semi = PITCH[match[1].toLowerCase()]
   if (semi == null) return null
   const accidental = (match[2] || '').toLowerCase()
@@ -117,7 +123,7 @@ export function parseChordToken(token: string): ChordToken | null {
   semi = ((semi % 12) + 12) % 12
   const octave = match[4] ? Number(match[4]) : null
   if (octave != null && (octave < -1 || octave > 9)) return null
-  return { pitchClass: semi, quality: match[3].toLowerCase(), octave }
+  return { pitchClass: semi, quality, octave }
 }
 
 /**

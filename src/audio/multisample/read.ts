@@ -95,9 +95,9 @@ export function readBandlimitedAt(sampleAt: (index: number) => number, length: n
   return sampleKernelAt(steepKernel(rate), sampleAt, pos)
 }
 
-export function readBandlimited(channel: Float32Array, pos: number, rate: number) {
+export function readBandlimited(channel: Float32Array, pos: number, rate: number, lo = 0, hi = channel.length) {
   if (channel.length < 2 || !Number.isFinite(pos)) return 0
-  return sampleKernel(steepKernel(rate), channel, pos)
+  return sampleKernel(steepKernel(rate), channel, pos, lo, hi)
 }
 
 /** Fractional read. `pos` is in source frames. */

@@ -323,7 +323,7 @@ export class SamplePool {
     const raw = voice.stretch
       ? stretchRead(buffer, start, end, voice.cursor, voice.ratePitch * wobble, region.reverse)
       : voice.rateTime >= 1.45
-        ? readBandlimited(buffer, at, playRate)
+        ? readBandlimited(buffer, at, playRate, start, end)
         : readLinear(buffer, at)
     let sample = raw * edgeGain(voice.cursor, span, region.fadeIn, region.fadeOut)
     if (voice.holdLeft <= 0) {

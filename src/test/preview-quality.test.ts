@@ -4,7 +4,8 @@ import { renderSampler } from '../audio/multisample/engine'
 import { readFrame } from '../audio/multisample/read'
 import { makeProgram, makeSample, makeZone, midiVelocity } from '../audio/multisample/types'
 import { fadePlaybackEdges, fitPlaybackRate } from '../audio/quality/playback'
-import { SamplePool } from '../audio/voices/engine'
+import { preloadWasmInserts } from '../audio/plugins/createAll'
+import { SamplePool, createSamplePool } from '../audio/voices/engine'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 
 /**
@@ -88,8 +89,7 @@ function playLibrary(channel: Float32Array, fileRate: number, outRate: number, p
   return renderSampler(program, [{ sample: 0, pitch, vel: midiVelocity(0.9) }], outRate, frames, bank)[0]
 }
 
-function playPad(channel: Float32Array, fileRate: number, outRate: number) {
-  const pool = new SamplePool(outRate)
+function playPad(channel: Float32Array, fileRate: number, outRate: number, pool = new SamplePool(outRate) as SamplePool | ReturnType<typeof createSamplePool>) {
   pool.load(1, channel, fileRate)
   const pad = pool.pad(0)
   pad.setRegion(1, 0, channel.length)
@@ -170,5 +170,30 @@ describe('preview and loaded-instrument playback', () => {
       const leaked = playPad(ultrasonic, fileRate, device)
       expect(rms(leaked, Math.floor(device * 0.02), Math.floor(device * 0.15))).toBeLessThan(0.01)
     }
+  })
+
+  it('does not let a 96 kHz pad slice read the sample before its region', () => {
+    const buffer = new Float32Array(8000)
+    for (let i = 0; i < 2000; i++) buffer[i] = 0.9
+    const pool = new SamplePool(48000)
+    pool.load(1, buffer, 96000)
+    const pad = pool.pad(0)
+    pad.setRegion(1, 2000, 8000)
+    pad.setPitch(0, 0, 'vinyl')
+    pad.setFade(0, 0)
+    const left = new Float32Array(256)
+    const right = new Float32Array(256)
+    pool.note(0, 0, 1)
+    pool.process(left, right)
+    expect(rms(left, 0, 64)).toBeLessThan(0.01)
+  })
+
+  it('lowpass-resamples a 96 kHz one-shot before the production pad reader', async () => {
+    await preloadWasmInserts()
+    const rust = createSamplePool(48000)
+    const heard = playPad(tone, fileRate, 48000, rust)
+    expect(thd(heard, 440, 48000, Math.floor(48000 * 0.04))).toBeLessThan(0.03)
+    const leaked = playPad(ultrasonic, fileRate, 48000, createSamplePool(48000))
+    expect(rms(leaked, Math.floor(48000 * 0.02), Math.floor(48000 * 0.15))).toBeLessThan(0.01)
   })
 })

@@ -486,5 +486,22 @@ describe('loose note files', () => {
     expect(aliased.map((item) => item.name).sort()).toEqual(['Keys - Stack Maj', 'Keys - Stack Min'])
     expect(aliased.find((item) => item.name.endsWith('Maj'))?.notes).toBe(2)
     expect(aliased.find((item) => item.name.endsWith('Min'))?.notes).toBe(2)
+
+    const octave7 = groupLibraryInstruments([
+      row('Keys/Piano Pack 01 C3.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+      row('Keys/Piano Pack 01 E4.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+      row('Keys/Piano Pack 01 C7.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+      row('Keys/Piano Pack 01 D7.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+    ])
+    expect(octave7).toHaveLength(1)
+    expect(octave7[0]?.name.toLowerCase()).not.toMatch(/\b7$/)
+    expect(new Set(octave7[0]?.layers.map((layer) => layer.midi))).toEqual(new Set([
+      noteMidi('C3'), noteMidi('E4'), noteMidi('C7'), noteMidi('D7'),
+    ]))
+    const looseOctave = groupLibraryInstruments([
+      row('Keys/Piano Pack 01 C7.wav', { pack: 'Keys', type: 'synth', category: 'keys', note: 'C4' }),
+      row('Keys/Piano Pack 01 D7.wav', { pack: 'Keys', type: 'synth', category: 'keys', note: 'C4' }),
+    ])
+    expect(looseOctave.some((item) => /\b7$/.test(item.name))).toBe(false)
   })
 })

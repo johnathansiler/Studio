@@ -66,8 +66,11 @@ export function polyphaseKernel(fc: number, half: number): PolyphaseKernel {
   return kernel
 }
 
-/** One source-position read. Out-of-range samples are zero, so the edges do not jump. */
-export function sampleKernel(kernel: PolyphaseKernel, channel: Float32Array, pos: number) {
+/**
+ * One source-position read. Samples outside `[lo, hi)` are zero, so a slice
+ * does not borrow the neighboring region and the file edges do not jump.
+ */
+export function sampleKernel(kernel: PolyphaseKernel, channel: Float32Array, pos: number, lo = 0, hi = channel.length) {
   const length = channel.length
   if (length < 1 || !Number.isFinite(pos)) return 0
   const origin = Math.floor(pos)
@@ -75,9 +78,11 @@ export function sampleKernel(kernel: PolyphaseKernel, channel: Float32Array, pos
   const base = row * kernel.taps
   const start = origin - kernel.half
   const rows = kernel.rows
+  const left = Math.max(0, lo)
+  const right = Math.min(length, hi)
   let acc = 0
-  const from = start < 0 ? -start : 0
-  const to = start + kernel.taps > length ? length - start : kernel.taps
+  const from = start < left ? left - start : 0
+  const to = start + kernel.taps > right ? right - start : kernel.taps
   for (let tap = from; tap < to; tap++) acc += channel[start + tap] * rows[base + tap]
   return acc
 }
