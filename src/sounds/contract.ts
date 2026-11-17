@@ -1,23 +1,32 @@
 /**
- * SoundScout 2026-11-09 host contract.
- * Audio and the catalog are read from one pinned dataset commit.
+ * Sound library pin. Audio and the catalog are read from one dataset commit.
  * `main` can move; saved projects and new downloads stay on this snapshot.
  *
- * The catalog file is newer than the audio prefix on purpose.
- * Rows keep version soundscout-2026-11-09 and paths under that prefix.
+ * The catalog filename can be newer than `version`. Row paths still use `version`.
+ *
+ * Bump only SOUND_LIBRARY_PIN when a new Hugging Face commit and catalog land.
+ * version — catalog document version. Paths stay under `${version}/`.
+ * commit — dataset commit that contains that catalog and the audio files.
+ * catalogFile — filename under catalogs/, without `.json`.
+ * The exports below are derived from this object. Do not set them on their own.
  */
+export const SOUND_LIBRARY_PIN = {
+  version: 'soundscout-2026-11-09',
+  /** Dataset commit that contains the catalog and the 1202 unique WAVs (1208 rows). */
+  commit: '0f06ae2f33f14b48bb1a549a16046c16aa47ffd2',
+  /** Catalog filename. Separate from version so this file loads while paths stay on the version prefix. */
+  catalogFile: 'soundscout-2026-11-17-4',
+} as const
 
-export const SOUNDSCOUT_VERSION = 'soundscout-2026-11-09'
+export const SOUNDSCOUT_VERSION = SOUND_LIBRARY_PIN.version
 
-/** Dataset commit that contains the catalog and the 807 unique WAVs (813 rows). */
-export const SOUND_DATASET_COMMIT = 'ab0c3259dbd20c344efc9f8db5bc0d2206e0d2f8'
+export const SOUND_DATASET_COMMIT = SOUND_LIBRARY_PIN.commit
 
 export const SOUND_DATASET_BASE = `https://huggingface.co/datasets/cueharbor/sound-library/resolve/${SOUND_DATASET_COMMIT}`
 
 export const SOUND_VERSION_PREFIX = `${SOUNDSCOUT_VERSION}/`
 
-/** Catalog filename. Separate from SOUNDSCOUT_VERSION so the 813-row file loads. */
-export const SOUND_CATALOG_FILE = 'soundscout-2026-11-10'
+export const SOUND_CATALOG_FILE = SOUND_LIBRARY_PIN.catalogFile
 
 export const SOUND_CATALOG_URL = `${SOUND_DATASET_BASE}/catalogs/${SOUND_CATALOG_FILE}.json`
 
@@ -35,6 +44,17 @@ export const PACK_LABEL: Record<string, string> = {
   'FS-HOLIZNA-LOFI': 'Holizna lo-fi',
   'FS-DEADROBOTMUSIC': 'Dead Robot Music',
   'FS-JOSEFPRES-PIANO': 'Josefpres piano',
+  'RD-SINUS-FUEGO2': 'Boombap Fuego 2',
+  'RD-SINUS-FUEGO3': 'Boombap Fuego 3',
+  'RD-TRAPWIN-BLOODMOON': 'TrapWin Blood Moon',
+  'EL-FISCHER-808': 'TR-808 (Fischer)',
+  'EL-BEATTAB-909': 'TR-909 (BeatTab)',
+  'EL-DION-707': 'TR-707 (Dion)',
+  'EL-CLIPABAY': 'Clipabay',
+  'EL-BAKER-909': 'TR-909 (Baker)',
+  'AC-MULDJORD': 'MuldjordKit (DrumGizmo)',
+  'AC-DRSKIT': 'DRSKit (DrumGizmo)',
+  'AC-AVL-BLONDEBOP': 'AVL Blonde Bop',
 }
 
 export function packLabel(pack: string) {

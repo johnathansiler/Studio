@@ -6,13 +6,19 @@ export type SoundRole = 'browse' | 'loop' | 'sampler' | 'chop' | 'drum' | 'beat'
 
 export type SampleRole = 'kick' | 'snare' | 'clap' | 'hat' | 'perc' | 'other'
 
-export function sampleRole(entry: Pick<SoundEntry, 'name' | 'tags' | 'category' | 'role'>): SampleRole {
+export function sampleRole(entry: Pick<SoundEntry, 'name' | 'tags' | 'category' | 'role' | 'drumRole'>): SampleRole {
+  const drum = (entry.drumRole ?? '').toLowerCase().replace(/_/g, '-')
+  if (drum === 'kick' || drum === '808') return 'kick'
+  if (drum === 'snare' || drum === 'rimshot') return 'snare'
+  if (drum === 'clap') return 'clap'
+  if (drum.includes('hat')) return 'hat'
+  if (drum) return 'perc'
   const category = (entry.category ?? '').toLowerCase()
-  if (category === 'kick') return 'kick'
+  if (category === 'kick' || category === '808') return 'kick'
   if (category === 'snare') return 'snare'
   if (category === 'clap') return 'clap'
-  if (category === 'hat' || category === 'hi-hat') return 'hat'
-  if (category === 'tom' || category === 'perc' || category === 'cowbell' || category === 'shaker' || category === 'tambourine' || category === 'percussion' || category === 'cymbal') return 'perc'
+  if (category === 'hat' || category === 'hi-hat' || category === 'hat-closed' || category === 'hat-open') return 'hat'
+  if (category === 'tom' || category === 'perc' || category === 'cowbell' || category === 'shaker' || category === 'tambourine' || category === 'percussion' || category === 'cymbal' || category === 'crash' || category === 'ride' || category === 'rim') return 'perc'
   const hay = `${entry.name} ${entry.tags.join(' ')}`.toLowerCase()
   if (/\bkick\b/.test(hay)) return 'kick'
   if (/\bsnare\b/.test(hay)) return 'snare'

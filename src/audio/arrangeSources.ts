@@ -518,7 +518,7 @@ function mixPad(
       vintage: kit.vintage,
       chop: kit.chop,
       velocity: 1,
-      resident: residentDrums(rate).map((drum) => ({ pitch: drum.pitch, samples: drum.samples, sampleRate: rate })),
+      resident: pad?.catalogPad ? [] : residentDrums(rate).map((drum) => ({ pitch: drum.pitch, samples: drum.samples, sampleRate: rate })),
     })
     : null
   const samples = baked?.left.length ? [baked.left, baked.right] : null

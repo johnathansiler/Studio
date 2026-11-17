@@ -307,6 +307,7 @@ export function App() {
   const editorHistory = useRef<EditorHistoryMark | null>(null)
   const recordReady = useRef(false)
   const recordEpoch = useRef(0)
+  const recordHintTimer = useRef(0)
   const holdLandscape = useRef(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
@@ -314,7 +315,9 @@ export function App() {
   const [unstuckOpen, setUnstuckOpen] = useState(() => ideasSheetRequested(window.location.search))
   const [soundsOpen, setSoundsOpen] = useState(() => {
     if (new URLSearchParams(window.location.search).get('sounds') === '1') return true
-    return panelChoice('arrangeBrowser') ?? formFactor(window.innerWidth, window.innerHeight) === 'desk'
+    // A fresh desktop visit used to dock the library over the arrange column.
+    // Phone already started closed. ?sounds=1 and a choice made this visit still open it.
+    return panelChoice('arrangeBrowser') ?? false
   })
   const [shellWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
   const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
@@ -1067,7 +1070,7 @@ export function App() {
       window.clearTimeout(punchTimer.current)
       punchTimer.current = 0
     }
-    setRecordHint('')
+    clearRecordHint()
     await session.applyLocalReset()
     store.clearToasts()
   }
@@ -1326,6 +1329,21 @@ export function App() {
     store.armPadRecord(id, projectSampleBeat(store.project, engine.positionSamples))
   }
 
+  function showRecordArmHint() {
+    window.clearTimeout(recordHintTimer.current)
+    setRecordHint('Arm a track to record.')
+    recordHintTimer.current = window.setTimeout(() => {
+      recordHintTimer.current = 0
+      setRecordHint('')
+    }, 2800)
+  }
+
+  function clearRecordHint() {
+    window.clearTimeout(recordHintTimer.current)
+    recordHintTimer.current = 0
+    setRecordHint('')
+  }
+
   async function record() {
     if (session.state.role === 'guest') {
       store.toast('The host records. Your take still lands on their timeline.', 'info')
@@ -1349,16 +1367,17 @@ export function App() {
     if (decision === 'disarm') {
       recordReady.current = false
       if (store.padRecord) store.finishPadRecord(null)
-      setRecordHint('')
+      clearRecordHint()
       return
     }
     if (decision === 'arm') {
       recordReady.current = true
       if (store.padRecord) store.finishPadRecord(null)
-      setRecordHint('Arm a track to record.')
-      window.setTimeout(() => setRecordHint(''), 2800)
+      showRecordArmHint()
       return
     }
+    // decision === 'start': a real count-in or take is beginning. Drop the arm hint now.
+    clearRecordHint()
     recordReady.current = true
     const slot = FEATURES.session ? store.sessionSlot : null
     const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
@@ -1380,8 +1399,7 @@ export function App() {
     const midiArmed = armedRecordPlan(store.project.tracks).midi.length > 0
     if (!inputs.length && !midiArmed) {
       if (store.padRecord) store.finishPadRecord(null)
-      setRecordHint('Arm a track to record.')
-      window.setTimeout(() => setRecordHint(''), 2800)
+      showRecordArmHint()
       return
     }
     const settings = store.recordSettings()
