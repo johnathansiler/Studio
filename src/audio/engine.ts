@@ -115,6 +115,14 @@ interface Stoppable {
   endAt?: number
   /** Session-loop timer. Replaced on the next pass instead of piling up. */
   loopTimer?: boolean
+  /** What this voice is playing. Edits cancel a mismatch before it is heard. */
+  owner?: string
+  /** Audio-clock time the voice was started for. */
+  startAt?: number
+  /** Identity of the musical event. A pitch, step, or gain change no longer matches. */
+  content?: string
+  /** Tempo and loop generation. A clock change drops future voices. */
+  epoch?: string
 }
 
 type PunchInfo = { timelineSample: number; cueEpochHostPerf: number; ctxTime: number }
@@ -236,6 +244,10 @@ export class AudioEngine {
   private transportNode: AudioWorkletNode | null = null
   /** Routing signature. Unchanged UI edits skip the graph rebuild. */
   private graphSig = ''
+  /** Musical events last scheduled. A change cancels the queued tail. */
+  private heardStamp = ''
+  /** Owner stamped onto the next voice `holdVoice` keeps. */
+  private queueTag: { owner: string; startAt: number; content: string } | null = null
   /** Bumped by play, seek, and stop so a late async start cannot revive transport. */
   private commandEpoch = 0
   /** Non-zero while play() or beginRecord() is waiting on the device. */
@@ -818,6 +830,149 @@ export class AudioEngine {
     if (this.followReady && follow !== this.followClock && this.playing && this.status !== 'recording') this.queueFollowRearm()
     this.followClock = follow
     this.followReady = true
+    const heard = this.heardKey(project)
+    const heardChanged = this.heardStamp !== '' && heard !== this.heardStamp
+    this.heardStamp = heard
+    if (heardChanged && this.playing && this.mode === 'arrangement' && this.status !== 'recording' && !loopFlip && !rackChanged) {
+      this.reviseHeard(project)
+    }
+  }
+
+  /** Tempo, loop, and the active pattern. Future voices from an older clock are dropped. */
+  private clockEpoch(project: Project | null) {
+    if (!project) return ''
+    return `${project.tempo}:${project.loopEnabled ? 1 : 0}:${project.loopStartSample}:${project.loopEndSample}:${project.beats?.activeId ?? ''}`
+  }
+
+  /** One entry per musical event that can be queued ahead of the speakers. */
+  private heardKey(project: Project) {
+    const parts: string[] = [this.clockEpoch(project), project.metronomeEnabled ? 'metro' : '']
+    for (const track of project.tracks) {
+      for (const clip of track.clips) {
+        if (clip.slotOnly) continue
+        parts.push(`a:${clip.id}:${clip.startSample}:${clip.durationSamples}:${clip.offsetSamples}:${clip.bufferId}:${clip.gain}:${clip.fadeInSamples}:${clip.fadeOutSamples}`)
+      }
+      for (const clip of track.midiClips) {
+        if (clip.slotOnly || clip.scene != null) continue
+        for (const note of clip.notes) {
+          if (note.muted || !(note.velocity > 0)) continue
+          parts.push(`n:${track.id}:${clip.id}:${note.id}:${note.pitch}:${note.startBeat}:${note.durationBeats}:${note.velocity}:${note.fine || 0}`)
+        }
+      }
+    }
+    for (const pattern of project.beats?.patterns ?? []) {
+        for (const channel of pattern.channels) {
+          parts.push(`s:${pattern.id}:${channel.id}:${channel.cells.map((cell) => (cell.on ? `${cell.velocity}:${cell.pitch}` : '0')).join(',')}`)
+        }
+    }
+    return parts.join('|')
+  }
+
+  private heardOwners(project: Project) {
+    const map = new Map<string, string>()
+    if (project.metronomeEnabled) map.set('metro', 'on')
+    for (const track of project.tracks) {
+      for (const clip of track.clips) {
+        if (clip.slotOnly) continue
+        map.set(`clip:${clip.id}`, `${clip.startSample}:${clip.durationSamples}:${clip.offsetSamples}:${clip.bufferId}:${clip.gain}:${clip.fadeInSamples}:${clip.fadeOutSamples}`)
+      }
+      for (const clip of track.midiClips) {
+        if (clip.slotOnly || clip.scene != null) continue
+        for (const note of clip.notes) {
+          if (note.muted || !(note.velocity > 0)) continue
+          map.set(`note:${track.id}:${clip.id}:${note.id}`, `${note.pitch}:${note.startBeat}:${note.durationBeats}:${note.velocity}:${note.fine || 0}`)
+        }
+      }
+    }
+    for (const pattern of project.beats?.patterns ?? []) {
+      for (const channel of pattern.channels) {
+        map.set(`step:${pattern.id}:${channel.id}`, channel.cells.map((cell) => (cell.on ? `${cell.velocity}:${cell.pitch}` : '0')).join(','))
+      }
+    }
+    return map
+  }
+
+  /**
+   * Drop queued audio that no longer matches the project and schedule the new
+   * events from just ahead of the audio clock. A sounding voice fades in 5 ms
+   * when its event was removed. The replacement starts inside one quantum plus
+   * the device latency, which stays under 60 ms.
+   */
+  private reviseHeard(project: Project) {
+    const ctx = this.ctx
+    if (!ctx) return
+    const now = ctx.currentTime
+    const quantum = 128 / Math.max(1, this.sampleRate)
+    const device = (ctx.baseLatency || 0) + (ctx.outputLatency || 0)
+    const safety = now + Math.min(0.05, Math.max(quantum, quantum + device))
+    const epoch = this.clockEpoch(project)
+    const owners = this.heardOwners(project)
+    const fade = 0.005
+    for (const src of this.sources) {
+      if (!src.owner || src.loopTimer) continue
+      const start = src.startAt ?? now
+      const future = start > now + 0.001
+      const want = owners.get(src.owner)
+      const changed = want == null || (src.content != null && want !== src.content)
+      // Every future voice is rebuilt from the audio clock so a kept note is not scheduled twice.
+      if (future) {
+        this.cancelVoice(src, now)
+        continue
+      }
+      if (changed) {
+        const held = src.owner.startsWith('clip:') ? this.heldAudio.get(src.owner.slice(5)) : undefined
+        if (held && held.entry === src && want != null && this.gainOnlyChange(src.content, want)) {
+          this.rampHeld(held, Math.max(0.0001, this.clipGain(project, held.clipId)), now)
+          src.content = want
+          src.epoch = epoch
+          continue
+        }
+        if (src.release) src.release(now + fade)
+        else this.cancelVoice(src, now + fade)
+        src.endAt = now + fade + 0.03
+      }
+    }
+    for (const [id, held] of [...this.heldAudio]) {
+      const want = owners.get(`clip:${id}`)
+      if (!want || !this.gainOnlyChange(held.entry.content, want) && held.entry.content !== want) this.dropHeld(id, now)
+      else if (held.entry.content !== want) {
+        this.rampHeld(held, Math.max(0.0001, this.clipGain(project, id)), now)
+        held.entry.content = want
+        held.entry.epoch = epoch
+      }
+    }
+    const sample = Math.max(0, this.sampleAt(safety))
+    this.nextLoopCtx = safety
+    this.nextLoopSample = this.heardSample(sample)
+    this.loopQueuedUntil = 0
+    this.scheduleAhead()
+  }
+
+  /** True when only the gain field of a clip identity changed. */
+  private gainOnlyChange(prev: string | undefined, next: string | undefined) {
+    if (!prev || !next) return false
+    const left = prev.split(':')
+    const right = next.split(':')
+    if (left.length !== 7 || right.length !== 7) return false
+    for (let i = 0; i < 7; i++) if (i !== 4 && left[i] !== right[i]) return false
+    return left[4] !== right[4]
+  }
+
+  private clipGain(project: Project, id: string) {
+    for (const track of project.tracks) {
+      const clip = track.clips.find((item) => item.id === id)
+      if (clip) return clip.gain
+    }
+    return 1
+  }
+
+  private rampHeld(held: { peak: number; gain: AudioParam }, peak: number, now: number) {
+    try {
+      held.gain.cancelScheduledValues(now)
+      held.gain.setValueAtTime(Math.max(0.0001, held.gain.value), now)
+      held.gain.linearRampToValueAtTime(peak, now + 0.005)
+    } catch { /* the source is already gone */ }
+    held.peak = peak
   }
 
   /** Tracks, routing, and instruments. Selection, tools, and clip notes are not part of it. */
@@ -830,7 +985,7 @@ export class AudioEngine {
       const sends = track.sends.map((send) => `${send.id}:${send.busId}:${send.enabled ? 1 : 0}:${send.preFader ? 1 : 0}`).join(',')
       const rack = track.rack?.devices.map((device) => `${device.id}:${device.kind}`).join('.') ?? ''
       const bank = track.padKit ? `${track.padKit.activeBank ?? 0}` : ''
-      sig += `${track.id}:${track.type}:${track.instrument || ''}:${track.output || ''}:${track.groupId || ''}:${track.input}:${plugs(track.plugins)}:${inserts(track.inserts)}:${sends}:${rack}:${bank};`
+      sig += `${track.id}:${track.type}:${track.instrument || ''}:${track.monitor ? 1 : 0}:${track.output || ''}:${track.groupId || ''}:${track.input}:${plugs(track.plugins)}:${inserts(track.inserts)}:${sends}:${rack}:${bank};`
     }
     return `${sig}|${plugs(project.masterPlugins)}|${inserts(project.masterInserts)}`
   }
@@ -3053,7 +3208,9 @@ export class AudioEngine {
     osc.stop(endAt + 0.005)
     const chain: AudioNode[] = [osc, gain]
     if (tail !== osc) chain.push(tail)
+    this.queueTag = { owner: 'metro', startAt: at, content: countIn ? 'count' : 'on' }
     this.holdVoice(endAt + 0.035, chain)
+    this.queueTag = null
   }
 
   /** Restart arrangement playback at the wrapped playhead so a loop toggle takes effect immediately. */
@@ -3517,7 +3674,13 @@ export class AudioEngine {
             const rawWhen = ctxTime + (span.start - timelineStart) / this.sampleRate
             const when = ctx === this.ctx ? placeNoteTime(rawWhen, ctx.currentTime) : rawWhen
             if (when == null) continue
+            this.queueTag = {
+              owner: `note:${group.owner.id}:${clip.id}:${note.id}`,
+              startAt: when,
+              content: `${note.pitch}:${note.startBeat}:${note.durationBeats}:${note.velocity}:${note.fine || 0}`,
+            }
             this.scheduleVoice(ctx, strip, note, when, span.duration / this.sampleRate, group.voice)
+            this.queueTag = null
           }
         }
       }
@@ -3555,7 +3718,14 @@ export class AudioEngine {
         const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined
         const bus = liveStrip || routed || strip
         if (!bus) continue
+        const row = pattern.channels.find((channel) => channel.id === hit.channelId)
+        this.queueTag = {
+          owner: `step:${clip.patternId}:${hit.channelId}`,
+          startAt: when,
+          content: row ? row.cells.map((cell) => (cell.on ? `${cell.velocity}:${cell.pitch}` : '0')).join(',') : `${hit.velocity}:${hit.pitch}`,
+        }
         this.scheduleHit(ctx, bus, hit, when, span.duration / this.sampleRate)
+        this.queueTag = null
       }
     }
   }
@@ -3874,7 +4044,12 @@ export class AudioEngine {
     gain.connect(strip.input)
     src.start(at, 0, playDur)
     if (!live) return
+    const identity = this.project ? this.heardOwners(this.project).get(`clip:${clip.id}`) : undefined
     this.sources.push({
+      owner: `clip:${clip.id}`,
+      startAt: at,
+      content: identity,
+      epoch: this.clockEpoch(this.project),
       endAt: at + playDur + 0.05,
       stop: (whenStop?: number) => {
         try { src.stop(whenStop) } catch { /* already stopped */ }
@@ -4048,18 +4223,13 @@ export class AudioEngine {
     ].join(':')
     const peak = Math.max(0.0001, clip.gain)
     if (held?.sig === sig) {
-      if (Math.abs(held.peak - peak) > 1e-4) {
-        const now = ctx.currentTime
-        try {
-          held.gain.cancelScheduledValues(now)
-          held.gain.setValueAtTime(Math.max(0.0001, held.gain.value), now)
-          held.gain.linearRampToValueAtTime(peak, now + 0.015)
-        } catch { /* the source is already gone */ }
-        held.peak = peak
-      }
+      if (Math.abs(held.peak - peak) > 1e-4) this.rampHeld(held, peak, ctx.currentTime)
       return true
     }
-    if (held) this.dropHeld(clip.id, at)
+    if (held) {
+      this.dropHeld(clip.id, ctx.currentTime)
+      at = Math.max(ctx.currentTime + 0.004, Math.min(at, ctx.currentTime + 0.012))
+    }
     const audio = ctx.createBuffer(buffer.numberOfChannels, safeFrames, buffer.sampleRate)
     for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
       const region = buffer.getChannelData(channel).subarray(safeStart, safeStart + safeFrames)
@@ -4101,19 +4271,33 @@ export class AudioEngine {
         } catch { /* already stopped */ }
       },
     }
+    const identity = this.project ? this.heardOwners(this.project).get(`clip:${clip.id}`) : undefined
+    entry.owner = `clip:${clip.id}`
+    entry.startAt = at
+    entry.content = identity
+    entry.epoch = this.clockEpoch(this.project)
     this.heldAudio.set(clip.id, { sig, clipId: clip.id, peak, stop: entry.stop, entry, gain: gain.gain })
     this.sources.push(entry)
     return true
   }
 
-  /** Stop a looping arrange source at `at` and let it leave the graph just after. */
+  /**
+   * Stop a looping arrange source at the audio clock.
+   * A caller that still has the old window time must not book the stop out there:
+   * the loop would keep the previous take until that window arrived.
+   */
   private dropHeld(id: string, at: number) {
     const held = this.heldAudio.get(id)
     if (!held) return
     this.heldAudio.delete(id)
-    const when = Number.isFinite(at) ? at : (this.ctx?.currentTime ?? 0)
-    try { held.stop(when) } catch { /* already stopped */ }
-    held.entry.endAt = when + 0.08
+    const now = this.ctx?.currentTime ?? 0
+    const requested = Number.isFinite(at) ? at : now
+    const cut = Math.min(requested, now + 0.005)
+    if (held.entry.release) held.entry.release(Math.max(now, cut) + 0.005)
+    else {
+      try { held.stop(Math.max(now, cut)) } catch { /* already stopped */ }
+    }
+    held.entry.endAt = Math.max(now, cut) + 0.02
   }
 
   /** A clip that left the arrangement must not keep looping on its own. */
@@ -4228,7 +4412,12 @@ export class AudioEngine {
     gain.connect(strip.input)
     src.start(at, Math.max(0, offset), playDur)
     if (live) {
+      const identity = project ? this.heardOwners(project).get(`clip:${clip.id}`) : undefined
       this.sources.push({
+        owner: `clip:${clip.id}`,
+        startAt: at,
+        content: identity,
+        epoch: this.clockEpoch(project),
         endAt: at + playDur + 0.05,
         stop: (whenStop?: number) => {
           try { src.stop(whenStop) } catch { /* already stopped */ }
@@ -5689,6 +5878,7 @@ export class AudioEngine {
 
   /** Keep a voice until `endAt`, then drop every node it created. */
   private holdVoice(endAt: number, nodes: AudioNode[], release?: (when: number) => void): Stoppable {
+    const tag = this.queueTag
     const entry: Stoppable = {
       endAt,
       stop: (when?: number) => {
@@ -5704,9 +5894,22 @@ export class AudioEngine {
         }
       },
       release,
+      owner: tag?.owner,
+      startAt: tag?.startAt,
+      content: tag?.content,
+      epoch: tag ? this.clockEpoch(this.project) : undefined,
     }
     this.sources.push(entry)
     return entry
+  }
+
+  /** Stop a voice that has not started without throwing when `when` is before its start. */
+  private cancelVoice(src: Stoppable, now: number) {
+    const start = src.startAt ?? now
+    const when = Math.max(now, start)
+    try { src.stop(when) } catch { /* a future start rejects an earlier stop */ }
+    try { src.disconnect() } catch { /* already disconnected */ }
+    src.endAt = now
   }
 
   /** Finished one-shots must not stay connected for the rest of the session. */

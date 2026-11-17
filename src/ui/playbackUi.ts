@@ -34,10 +34,11 @@ export function afterAudioFrame(fn: () => void) {
   const host = globalThis.requestAnimationFrame
   const run = () => {
     frame = 0
-    try { wake?.() } catch { /* the clock can be closed mid-gesture */ }
     const batch = [...waiters]
     waiters.clear()
     for (const item of batch) item()
+    // Sync first. Waking before it would queue another slice of the old arrangement.
+    try { wake?.() } catch { /* the clock can be closed mid-gesture */ }
   }
   frame = typeof host === 'function' ? host(run) : setTimeout(run, 16) as unknown as number
 }
