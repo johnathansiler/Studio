@@ -196,12 +196,55 @@ export function makeImpulse(ctx: BaseAudioContext, decay: number): AudioBuffer {
   return buffer
 }
 
+/**
+ * How much of the recent signal a meter keeps.
+ * A display frame is about 16 ms. Mute checks read `levels()` at 40 ms and
+ * 60 ms and keep the maximum, so the window stays under 30 ms and a short
+ * release finishes the fall before those reads.
+ */
+const METER_WINDOW_SEC = 0.03
+/** Time constant after the window drops. Full scale is under 0.01 by 60 ms. */
+export const METER_RELEASE_SEC = 0.006
+
+/** Largest power of two that still fits in the meter window. */
+export function meterFftSize(sampleRate: number) {
+  const cap = Math.floor(Math.max(8000, sampleRate) * METER_WINDOW_SEC)
+  let size = 32
+  while ((size << 1) <= cap && size < 4096) size <<= 1
+  return size
+}
+
+/** Size a level meter so one frame cannot skip a short transient. */
+export function prepareMeter(analyser: AnalyserNode, sampleRate: number) {
+  analyser.fftSize = meterFftSize(sampleRate)
+}
+
+/** Loudest sample currently in the analyser window. */
+export function analyserPeak(analyser: AnalyserNode, scratch: Float32Array) {
+  const length = Math.min(scratch.length, analyser.fftSize || scratch.length)
+  const data = scratch.subarray(0, length) as unknown as Float32Array<ArrayBuffer>
+  analyser.getFloatTimeDomainData(data)
+  let peak = 0
+  for (let i = 0; i < length; i++) {
+    const value = Math.abs(scratch[i] || 0)
+    if (value > peak) peak = value
+  }
+  return peak
+}
+
+/** Peak hold with an exponential release. A new peak replaces the hold immediately. */
+export function releasePeak(held: number, instant: number, dt: number) {
+  const decayed = (held > 0 ? held : 0) * Math.exp(-Math.max(0, dt) / METER_RELEASE_SEC)
+  return Math.max(instant > 0 ? instant : 0, decayed)
+}
+
 export function analyserRms(analyser: AnalyserNode, scratch: Float32Array): number {
-  const data = scratch as unknown as Float32Array<ArrayBuffer>
+  const length = Math.min(scratch.length, analyser.fftSize || scratch.length)
+  const data = scratch.subarray(0, length) as unknown as Float32Array<ArrayBuffer>
   analyser.getFloatTimeDomainData(data)
   let sum = 0
-  for (let i = 0; i < scratch.length; i++) sum += scratch[i] * scratch[i]
-  return Math.sqrt(sum / scratch.length)
+  for (let i = 0; i < length; i++) sum += scratch[i] * scratch[i]
+  return Math.sqrt(sum / Math.max(1, length))
 }
 
 function clamp(n: number, min: number, max: number) {

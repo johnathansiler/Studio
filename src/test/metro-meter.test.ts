@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { chromium, type Browser } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import { clickDuration, clickVoice } from '../audio/metroClick'
+import { meterFftSize, releasePeak } from '../audio/strips'
 
 async function waitForServer(url: string, child: ChildProcess) {
   const started = Date.now()
@@ -31,15 +32,45 @@ async function launch() {
 }
 
 describe('metronome click level', () => {
-  it('holds the accent and the beat at the programmed peak', () => {
+  it('keeps the original short tick instead of holding the peak', () => {
     const accent = clickVoice(true, false)
     const beat = clickVoice(false, false)
     expect(accent.peak).toBe(0.35)
     expect(beat.peak).toBe(0.18)
-    expect(accent.hold).toBeGreaterThanOrEqual(0.05)
-    expect(clickDuration(accent)).toBeGreaterThan(accent.hold)
-    expect(accent.attack).toBeGreaterThan(0)
-    expect(accent.decay).toBeGreaterThan(0)
+    expect(accent.hold).toBe(0)
+    expect(accent.attack).toBeCloseTo(0.002)
+    expect(clickDuration(accent)).toBeCloseTo(0.045)
+    expect(clickDuration(accent)).toBeLessThanOrEqual(0.05)
+    const at = (voice: typeof accent, t: number) => {
+      if (t <= 0 || t >= clickDuration(voice)) return 0.0001
+      if (t < voice.attack) return 0.0001 * (voice.peak / 0.0001) ** (t / voice.attack)
+      const fall = t - voice.attack - voice.hold
+      if (fall <= 0) return voice.peak
+      return voice.peak * (0.0001 / voice.peak) ** (fall / voice.decay)
+    }
+    expect(at(accent, 0.002)).toBeCloseTo(accent.peak, 5)
+    expect(at(accent, 0.02)).toBeLessThan(accent.peak * 0.08)
+  })
+
+  it('reads a short peak from a frame-sized window and drops before a mute check', () => {
+    for (const rate of [44100, 48000, 96000]) {
+      const size = meterFftSize(rate)
+      const span = size / rate
+      expect(span).toBeGreaterThan(1 / 70)
+      expect(span).toBeLessThan(0.032)
+      const window = new Float32Array(size)
+      const burst = Math.round(0.004 * rate)
+      for (let i = 0; i < burst; i++) window[i] = (i % 2 ? 1 : -1) * 0.14
+      let peak = 0
+      let tail = 0
+      for (let i = 0; i < window.length; i++) peak = Math.max(peak, Math.abs(window[i]))
+      for (let i = window.length - 256; i < window.length; i++) tail += window[i] * window[i]
+      expect(peak).toBeGreaterThan(0.05)
+      expect(Math.sqrt(tail / 256)).toBeLessThan(0.001)
+      const held = releasePeak(peak, 0, 0.06 - span)
+      expect(held).toBeLessThan(0.01)
+      expect(releasePeak(peak, 0, 0.04 - span)).toBeLessThan(peak * 0.25)
+    }
   })
 
   it('shows on the master meter after a sample-rate retarget and a graph rebuild', async () => {
@@ -75,33 +106,37 @@ describe('metronome click level', () => {
           osc.frequency.setValueAtTime(voice.frequency, at)
           gain.gain.setValueAtTime(floor, at)
           gain.gain.exponentialRampToValueAtTime(peak, attackAt)
-          gain.gain.linearRampToValueAtTime(peak, holdAt)
+          if (voice.hold > 0) gain.gain.linearRampToValueAtTime(peak, holdAt)
           gain.gain.exponentialRampToValueAtTime(floor, endAt)
           osc.connect(gain)
           gain.connect(metro)
           metro.connect(master)
           master.connect(ctx.destination)
           osc.start(at)
-          osc.stop(endAt + 0.008)
+          osc.stop(endAt + 0.005)
           const audio = await ctx.startRendering()
           const left = audio.getChannelData(0)
           let samplePeak = 0
-          for (let i = 0; i < left.length; i++) samplePeak = Math.max(samplePeak, Math.abs(left[i]))
-          const window = 256
-          let best = 0
-          for (let i = 0; i + window < left.length; i += 64) {
-            let sum = 0
-            for (let k = 0; k < window; k++) sum += left[i + k] * left[i + k]
-            best = Math.max(best, Math.sqrt(sum / window))
+          let lead = 0
+          let tail = 0
+          const leadEnd = Math.round(rate * 0.01)
+          const tailFrom = Math.round(rate * 0.08)
+          for (let i = 0; i < left.length; i++) {
+            const value = Math.abs(left[i])
+            samplePeak = Math.max(samplePeak, value)
+            if (i < leadEnd) lead = Math.max(lead, value)
+            if (i >= tailFrom) tail = Math.max(tail, value)
           }
-          return { samplePeak, windowRms: best }
+          return { samplePeak, lead, tail }
         }
         return { at48: await render(48000), at44: await render(44100) }
       }, accent)
       expect(offline.at48.samplePeak).toBeGreaterThan(0.11)
-      expect(offline.at48.windowRms).toBeGreaterThan(0.1)
+      expect(offline.at48.lead).toBeLessThan(0.002)
+      expect(offline.at48.tail).toBeLessThan(0.002)
       expect(offline.at44.samplePeak).toBeGreaterThan(0.11)
-      expect(offline.at44.windowRms).toBeGreaterThan(0.1)
+      expect(offline.at44.lead).toBeLessThan(0.002)
+      expect(offline.at44.tail).toBeLessThan(0.002)
 
       await page.goto(url, { waitUntil: 'domcontentloaded' })
       await page.waitForFunction(() => Boolean((window as unknown as { __cueharbor?: { engine?: unknown } }).__cueharbor?.engine), null, { timeout: 20000 })
@@ -191,10 +226,10 @@ describe('metronome click level', () => {
       })
       expect(live.retargeted.projectRate).toBe(live.native)
       expect(live.retargeted.ctxRate).toBe(live.native)
-      expect(live.retargeted.peak).toBeGreaterThan(0.08)
+      expect(live.retargeted.peak).toBeGreaterThan(0.05)
       expect(live.retargeted.gaps.length).toBeGreaterThanOrEqual(3)
       for (const gap of live.retargeted.gaps) expect(gap).toBeCloseTo(0.5, 2)
-      expect(live.rebuilt.peak).toBeGreaterThan(0.08)
+      expect(live.rebuilt.peak).toBeGreaterThan(0.05)
       expect(live.rebuilt.gaps.length).toBeGreaterThanOrEqual(3)
       for (const gap of live.rebuilt.gaps) expect(gap).toBeCloseTo(0.5, 2)
     } finally {

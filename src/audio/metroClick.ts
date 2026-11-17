@@ -10,10 +10,7 @@ export interface ClickVoice {
   lowpass: number | null
   /** Seconds from the start until the peak. */
   attack: number
-  /**
-   * Seconds the peak is held. A click that falls away in a few milliseconds
-   * is gone before the master analyser window and the next meter poll.
-   */
+  /** Seconds the peak stays flat. Zero keeps the original short tick. */
   hold: number
   /** Seconds to fall from the peak back to the floor. */
   decay: number
@@ -25,10 +22,13 @@ const COUNT_IN_GAIN = 10 ** (-9 / 20)
 const LIVE_ACCENT = 0.35
 const LIVE_BEAT = 0.18
 
-/** Long enough to fill a 256-sample master-meter window and the next display frame. */
+/**
+ * The original tick: 2 ms up, then an exponential fall that is back at the
+ * floor by 45 ms. The peak is not held. A held peak reads as a beep.
+ */
 const CLICK_ATTACK = 0.002
-const CLICK_HOLD = 0.06
-const CLICK_DECAY = 0.02
+const CLICK_HOLD = 0
+const CLICK_DECAY = 0.043
 
 export function clickVoice(accent: boolean, countIn: boolean): ClickVoice {
   const shape = { attack: CLICK_ATTACK, hold: CLICK_HOLD, decay: CLICK_DECAY }
