@@ -352,6 +352,39 @@ export function ArrangeView({
     return () => observer.disconnect()
   }, [])
   useLayoutEffect(() => {
+    const heads = headsRef.current
+    const inner = innerRef.current
+    if (!heads || !inner) return
+    let frame = 0
+    const sync = () => {
+      const gap = heads.querySelector(':scope > .ruler-gap') as HTMLElement | null
+      const laneRows = [...inner.querySelectorAll(':scope > .lane')] as HTMLElement[]
+      const headRows = [...heads.querySelectorAll(':scope > .head')] as HTMLElement[]
+      const first = laneRows[0]
+      if (gap && first) {
+        const prefix = first.offsetTop
+        if (Math.abs(gap.offsetHeight - prefix) > 0.5) gap.style.height = `${prefix}px`
+      }
+      headRows.forEach((head, index) => {
+        const lane = laneRows[index]
+        if (!lane) return
+        const height = lane.offsetHeight
+        if (Math.abs(head.offsetHeight - height) > 0.5) head.style.height = `${height}px`
+      })
+    }
+    const schedule = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(sync)
+    }
+    sync()
+    const observer = new ResizeObserver(schedule)
+    observer.observe(inner)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [laneZoom, phone, project.tracks.length])
+  useLayoutEffect(() => {
     if (!phone) return
     const heads = headsRef.current
     const arrange = heads?.closest('.arrange') as HTMLElement | null
@@ -1225,12 +1258,13 @@ export function ArrangeView({
         </>
       )}
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneScaleAttr(laneZoom)} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
-      <div className="heads-col">
       {!phone && (
         <div className="track-viewfinder-slot" ref={finderRef}>
           <TrackViewfinder store={store} playheadSample={position} />
         </div>
       )}
+      <div className="timeline-add-spacer" aria-hidden="true" />
+      <div className="heads-col">
       <div className="heads">
       <div
         className="heads-scroll"
@@ -1321,7 +1355,6 @@ export function ArrangeView({
       </div>
       </div>
       <div className="timeline-col">
-      <div className="timeline-add-spacer" aria-hidden="true" />
       <div className="timeline-stage">
       <div
         className="timeline-scroll"
