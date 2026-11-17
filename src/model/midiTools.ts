@@ -438,8 +438,14 @@ export function slotFromNode(node: LearnNode | null): LearnSlot | null {
   if (node.aria === 'BPM' || node.aria === 'Tap tempo') {
     return { target: 'transport:tempo', label: 'Tempo', min: 30, max: 300, toggle: false }
   }
-  if (node.aria === 'Loop') return toggleSlot('transport:loop', 'Loop')
-  if (node.text === 'Click' || node.aria === 'Click') return toggleSlot('transport:click', 'Click')
+  const text = (node.text || '').replace(/\s+/g, ' ').trim()
+  const aria = (node.aria || '').trim()
+  if (aria === 'Loop' || text === 'Loop' || aria.startsWith('Loop.')) return toggleSlot('transport:loop', 'Loop')
+  if (
+    text === 'Metronome' || text === 'Click' ||
+    aria === 'Metronome' || aria === 'Click' ||
+    aria.startsWith('Metronome.') || aria.startsWith('Click.')
+  ) return toggleSlot('transport:click', 'Metronome')
   return null
 }
 

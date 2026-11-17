@@ -416,7 +416,7 @@ describe('phone arrange layout', () => {
               expect(menuActions, action).not.toContain(action)
             }
             const menuRow = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
-            expect(menuRow).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
+            expect(menuRow).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome', 'loop', 'count-in'])
             await page.locator('#shell-menu [data-menu-action="save"]').click()
             await page.locator('.toast').filter({ hasText: /Saved|space|could not/i }).waitFor()
           }
@@ -455,7 +455,7 @@ describe('phone arrange layout', () => {
             const chips = await selectSheet.locator('.phone-face').allTextContents()
             expect(chips.map((chip) => chip.trim())).toEqual(['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll'])
             const toolRow = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
-            expect(toolRow).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
+            expect(toolRow).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome', 'loop', 'count-in'])
             const toolFit = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => {
               const rect = node.getBoundingClientRect()
               return {

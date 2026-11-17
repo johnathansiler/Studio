@@ -107,8 +107,17 @@
   box-shadow: var(--btn-bevel-pressed);
 }
 
-.shell.phone .phone-hit .metro-icon {
+.shell.phone .phone-hit .metro-icon,
+.shell.phone .phone-hit .loop-icon,
+.shell.phone .phone-hit .t-ico {
   display: block;
+}
+
+.shell.phone .phone-hit[data-phone-action="count-in"] .count-state {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .shell.phone .phone-hit .history-word {

@@ -35,7 +35,7 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'pause', label: 'Pause', hint: 'Pause playback. The playhead stays where it is.' },
   { id: 'stop', label: 'Stop', hint: 'Stop playback and recording. The playhead stays where it is.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
-  { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
+  { id: 'click', label: 'Metronome', hint: 'Metronome while you play and record.' },
   { id: 'count-in', label: 'Count-in', hint: 'Count one bar before recording starts.' },
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'tempo', label: 'Tempo', hint: 'Tap to set tempo. Pause after one tap to type an exact tempo. Scroll or the arrow keys nudge it.' },
@@ -71,7 +71,7 @@ export interface MenuSpec extends Copy {
  * stay off this list: Session, Roll, Keys, Beat Machine, Generate, Sounds, and Collab.
  * Launch/Timeline is the session transport, which the Session tab does not switch.
  * Capture stays on the phone because the session bar hides that button there.
- * Play, Stop, Record, Loop, Click, Count-in, and Reset stay on the transport.
+ * Play, Stop, Record, Loop, Metronome, Count-in, and Reset stay on the transport.
  * Select, Draw, Split, Trim, Zoom, Box, and Erase stay on the Tools row. Scroll stays in the Tools sheet.
  * Snap stays on the strip. Quantize stays in the piano roll and the beat pad.
  * Time signature stays in Setup. New, Open, Save, and Export live in the menu.

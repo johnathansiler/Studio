@@ -5,7 +5,7 @@ import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenE
 import { dragNumeric } from '../model/dragNumeric'
 import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
-import { quartersPerBar } from '../model/time'
+import { countInBarsOf, countInCaption, quartersPerBar } from '../model/time'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -487,30 +487,47 @@ export function TransportBar({
           <span className="tempo-figure">{formatTempo(tempo)}</span>
         </button>
   )
+  const countCaption = countInCaption(countInBarsOf(project))
   const clickButton = (
         <TipButton
           id="transport-click"
           className={`t-btn click${project.metronomeEnabled ? ' on' : ''}`}
-          label="Metronome"
+          label={transport('click').label}
           hint={transport('click').hint}
           pressed={project.metronomeEnabled}
           disabled={store.remoteFollow}
           onClick={() => store.toggle('metronomeEnabled')}
         >
-          <span className="t-word">Click</span>
+          <span className="t-word">{transport('click').label}</span>
         </TipButton>
   )
   const countButton = (
         <TipButton
           id="transport-count"
           className={`t-btn count${project.countIn ? ' on' : ''}`}
-          label="Count-in"
-          hint={transport('count-in').hint}
+          label={transport('count-in').label}
+          hint={`${transport('count-in').hint} Now ${countCaption}.`}
           pressed={project.countIn}
           disabled={store.remoteFollow}
-          onClick={() => store.toggle('countIn')}
+          onClick={() => store.cycleCountIn()}
         >
-          <span className="t-word">1-2</span>
+          <span className="count-read">
+            <span className="t-word">{transport('count-in').label}</span>
+            <span className="t-state">{countCaption}</span>
+          </span>
+        </TipButton>
+  )
+  const loopButton = (
+        <TipButton
+          id="transport-loop"
+          className={`t-btn loop${project.loopEnabled ? ' on' : ''}`}
+          label={transport('loop').label}
+          hint={transport('loop').hint}
+          pressed={project.loopEnabled}
+          disabled={store.remoteFollow}
+          onClick={() => store.toggle('loopEnabled')}
+        >
+          <span className="t-word">{transport('loop').label}</span>
         </TipButton>
   )
   const editTarget = arrangeEditTarget(store)
@@ -554,10 +571,13 @@ export function TransportBar({
         </TipButton>
   )
   const [extrasHost, setExtrasHost] = useState<HTMLElement | null>(null)
+  const [deleteHost, setDeleteHost] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
     const pick = () => {
       const node = document.getElementById('transport-extras')
       setExtrasHost(node instanceof HTMLElement ? node : null)
+      const slot = document.getElementById('contextual-delete')
+      setDeleteHost(slot instanceof HTMLElement ? slot : null)
     }
     pick()
     const observer = new MutationObserver(pick)
@@ -569,14 +589,17 @@ export function TransportBar({
     onSeek(shiftBars(project, at, bars))
   }
   const extras = (
-    <div className="transport-extras eq-grid" style={eqCols(phone ? 3 : 5)} role="group" aria-label="Delete, tempo, and duplicate">
-      {deleteButton}
+    <div className="transport-extras eq-grid" style={eqCols(phone ? 2 : 5)} role="group" aria-label={phone ? 'Tempo and duplicate' : 'Tempo, metronome, count-in, loop, and duplicate'}>
       <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
       {phone ? null : clickButton}
       {phone ? null : countButton}
+      {phone ? null : loopButton}
       {duplicateButton}
     </div>
   )
+  const contextualDelete = !phone && editTarget.kind === 'track' && deleteHost
+    ? createPortal(deleteButton, deleteHost)
+    : null
   return (
     <div className="transport simple">
       <AutomationFollow store={store} engine={engine} />
@@ -617,6 +640,7 @@ export function TransportBar({
         </button>
       </ButtonTray>
       {extrasHost ? createPortal(extras, extrasHost) : extras}
+      {contextualDelete}
       {trackDelete ? createPortal(
         <DeleteTrackConfirm
           name={trackDelete.name}

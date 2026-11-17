@@ -44,7 +44,11 @@ function dock(store: ProjectStore, menuOpen = false) {
 describe('removed duplicate controls', () => {
   it('keeps the arrange row to Setup, Snap, metronome, Undo, and Redo', () => {
     const html = dock(new ProjectStore())
-    expect(actions(html)).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
+    expect(actions(html)).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome', 'loop', 'count-in'])
+    expect(html).toContain('data-count-state="1 bar"')
+    expect(html).not.toContain('data-phone-action="delete"')
+    expect(html).not.toContain('>Click<')
+    expect(html).not.toContain('>1-2<')
     expect(html).not.toContain('data-phone-action="unstuck"')
     expect(html).not.toContain('>Unstuck<')
     expect(html).not.toContain('data-phone-action="plugins"')
@@ -56,7 +60,7 @@ describe('removed duplicate controls', () => {
   it('keeps New, Open, Save, and Export in the menu and the edit row in the dock', () => {
     const store = new ProjectStore()
     const row = dock(store, true)
-    expect(actions(row)).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
+    expect(actions(row)).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome', 'loop', 'count-in'])
     const phone = visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: true })
     const desk = visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: true })
     for (const action of ['new', 'open', 'save', 'export']) {
@@ -116,7 +120,7 @@ describe('removed duplicate controls', () => {
     expect(menu.map((item) => item.label)).not.toContain('Time')
   })
 
-  it('hides the phone transport count and lists Click and Count once', () => {
+  it('hides the phone transport count and lists Metronome and Count-in once', () => {
     const store = new ProjectStore()
     const phone = renderToStaticMarkup(createElement(TransportBar, {
       store,
