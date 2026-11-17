@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import { applyPadKitSamples, ensureDefaultKit } from '../instruments/pads/load'
@@ -111,6 +111,33 @@ export function PadsPanel({
   const [padPage, setPadPage] = useState<0 | 1>(0)
   const [chopOpen, setChopOpen] = useState(chopStartsOpen)
   const [face, setFace] = useState<'pads' | 'sound' | 'pattern'>('pads')
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const sync = () => {
+      const record = document.querySelector('[data-beat-transport] [aria-label="Record"]')
+      const tabs = document.querySelector('[data-pads="plugin"] .plugin-page-tabs')
+      const dock = document.querySelector('.shell.phone .tool-slot')
+      if (record) root.style.setProperty('--beat-record-top', `${Math.round(record.getBoundingClientRect().top)}px`)
+      if (tabs) root.style.setProperty('--beat-tabs-bottom', `${Math.round(tabs.getBoundingClientRect().bottom)}px`)
+      if (dock) {
+        const top = dock.getBoundingClientRect().top
+        if (top < window.innerHeight - 4) root.style.setProperty('--phone-chrome-bottom', `${Math.round(window.innerHeight - top)}px`)
+      }
+    }
+    sync()
+    const observer = new ResizeObserver(sync)
+    const mpc = document.querySelector('[data-pads="plugin"]')
+    const dock = document.querySelector('.shell.phone .tool-slot')
+    if (mpc) observer.observe(mpc)
+    if (dock) observer.observe(dock)
+    window.addEventListener('resize', sync)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', sync)
+      root.style.removeProperty('--beat-record-top')
+      root.style.removeProperty('--beat-tabs-bottom')
+    }
+  }, [face])
   const [kitOpen, setKitOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [snapZero, setSnapZero] = useState(true)

@@ -21,6 +21,7 @@ export function AnchoredMenu({
   className,
   fill = false,
   sheet = false,
+  tray = false,
   children,
 }: {
   open: boolean
@@ -37,13 +38,15 @@ export function AnchoredMenu({
   fill?: boolean
   /** Phone project menu: a bottom sheet above the bar, as tall as the browser sheet. */
   sheet?: boolean
+  /** Short overlay with a close button. Beat Machine presets use this so the list stays off Record and the dock. */
+  tray?: boolean
   children: ReactNode
 }) {
   useScreenOverlay(onClose, open)
   const menuRef = useRef<HTMLDivElement>(null)
   const [mode, setMode] = useState<MenuSize>(open && sheet ? 'sheet' : open && fill ? 'pending' : 'dock')
   const [style, setStyle] = useState<{ top: number; left: number; maxHeight: number; maxWidth: number; side: 'down' | 'up' } | null>(null)
-  const sizing = open && fill && !sheet
+  const sizing = open && fill && !sheet && !tray
   const [tracked, setTracked] = useState(sizing)
   if (open && sheet && mode !== 'sheet') {
     setMode('sheet')
@@ -53,11 +56,36 @@ export function AnchoredMenu({
   }
 
   useLayoutEffect(() => {
-    if (open && (mode === 'sheet' || sheet)) syncPhoneSheetFrame(document.querySelector('.shell'))
-  }, [open, mode, sheet])
+    if (!open || !tray) return
+    const root = document.documentElement
+    const sync = () => {
+      const record = document.querySelector('[data-beat-transport] [aria-label="Record"]')
+      const tabs = document.querySelector('[data-pads="plugin"] .plugin-page-tabs')
+      if (record) root.style.setProperty('--beat-record-top', `${Math.round(record.getBoundingClientRect().top)}px`)
+      if (tabs) root.style.setProperty('--beat-tabs-bottom', `${Math.round(tabs.getBoundingClientRect().bottom)}px`)
+    }
+    sync()
+    const frame = requestAnimationFrame(sync)
+    const observer = new ResizeObserver(sync)
+    for (const selector of ['.shell', '.views', '.phone-top', '[data-pads="plugin"]', '.tool-slot']) {
+      const node = document.querySelector(selector)
+      if (node) observer.observe(node)
+    }
+    window.addEventListener('resize', sync)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', sync)
+    }
+  }, [open, tray])
 
   useLayoutEffect(() => {
-    if (!open || !fill || mode !== 'pending') return
+    if (tray) return
+    if (open && (mode === 'sheet' || sheet)) syncPhoneSheetFrame(document.querySelector('.shell'))
+  }, [open, mode, sheet, tray])
+
+  useLayoutEffect(() => {
+    if (tray || !open || !fill || mode !== 'pending') return
     const node = menuRef.current
     if (!node) return
     const clearTop = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-tabs-bottom')) || 0
@@ -68,13 +96,13 @@ export function AnchoredMenu({
     )
     const phone = !!document.querySelector('.shell.phone')
     setMode(fills ? (phone ? 'sheet' : 'fill') : 'dock')
-  }, [open, fill, mode, children])
+  }, [open, fill, mode, children, tray])
 
   const filling = open && (mode === 'fill' || mode === 'sheet')
   const measuring = open && fill && !sheet && mode === 'pending'
 
   useLayoutEffect(() => {
-    if (!open || filling || measuring) {
+    if (tray || !open || filling || measuring) {
       if (!open) setStyle(null)
       return
     }
@@ -110,7 +138,7 @@ export function AnchoredMenu({
       live?.classList.remove('anchored-trigger')
       live?.removeAttribute('data-anchor-side')
     }
-  }, [open, anchor, prefer, trigger, triggerRef, filling, measuring])
+  }, [open, anchor, prefer, trigger, triggerRef, filling, measuring, tray])
 
   useEffect(() => {
     if (!open) return
@@ -139,8 +167,22 @@ export function AnchoredMenu({
   if (!open && typeof document !== 'undefined') return null
 
   const showClose = Boolean(fill && open && !measuring)
-  const phoneSheet = open && fill && mode === 'sheet'
-  const menu = phoneSheet ? (
+  const phoneSheet = open && fill && mode === 'sheet' && !tray
+  const menu = tray && open ? (
+    <div
+      ref={menuRef}
+      id={id}
+      className={['anchored-menu', 'screen-overlay', 'preset-tray', className].filter(Boolean).join(' ')}
+      role="dialog"
+      aria-label={label}
+      data-screen-overlay=""
+      data-open="true"
+      data-menu-size="tray"
+    >
+      <SheetClose onClick={onClose} />
+      <div className="tray-body">{children}</div>
+    </div>
+  ) : phoneSheet ? (
     <div
       ref={menuRef}
       id={id}

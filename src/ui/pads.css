@@ -643,13 +643,17 @@
   touch-action: none;
 }
 
-/* The phone dock paints at 400. The Beat Machine lives in the workspace, whose
-   overflow traps that z-index, so the workspace itself has to sit above the dock
-   while the face is open. A menu opened from the face is portaled to the body
-   and paints above both. View tabs stay at 480. */
+/* The phone dock paints at 400. The face itself stops above that dock, so
+   Sampler and Presets are not trapped under Menu, Browse, or Tools. View tabs
+   stay at 480. The preset tray is portaled and paints above the face. */
 .shell.phone:not(.land):has([data-pads='plugin'][data-screen-overlay]) .workspace {
   position: relative;
   z-index: 410;
+}
+
+/* Phone chrome includes the small-button row and Menu / Browse / Tools. */
+body:has(.shell.phone) [data-pads='plugin'][data-screen-overlay] {
+  bottom: var(--phone-chrome-bottom, 0px) !important;
 }
 
 body:has(.shell.phone:not(.land) [data-pads='plugin']) .anchored-menu {
@@ -661,38 +665,61 @@ body:has([data-pads='plugin']) .anchored-menu.preset-menu:not([data-screen-overl
   overflow: auto !important;
 }
 
-body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] {
-  top: auto !important;
-  left: auto !important;
+/* Short tray under the Pads / Sound / Pattern tabs and above Record.
+   It grows down from the tabs and stops before the take row, the dock, and the view tabs. */
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-menu-size='tray'] {
+  position: fixed !important;
+  z-index: 450 !important;
+  top: calc(var(--beat-tabs-bottom, calc(var(--view-tabs-bottom, 48px) + 88px)) + 2px) !important;
+  bottom: calc(100dvh - var(--beat-record-top, 100dvh) + 2px) !important;
+  left: 8px !important;
   right: 8px !important;
-  bottom: calc(var(--phone-chrome-bottom, 0px) + 16px) !important;
-  width: min(360px, calc(100vw - 16px)) !important;
-  max-width: min(360px, calc(100vw - 16px)) !important;
+  width: auto !important;
+  max-width: none !important;
   height: auto !important;
-  max-height: min(232px, calc(100dvh - var(--phone-chrome-bottom, 0px) - 148px)) !important;
+  max-height: 220px !important;
   min-height: 0 !important;
   margin: 0 !important;
   border-radius: 14px !important;
   overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-menu-size='tray'] > .tray-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px 8px;
+}
+
+/* The X sits in the corner. Inset the rows so Save and the names stay clear of it. */
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-menu-size='tray'] .preset-actions,
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-menu-size='tray'] .preset-list {
+  padding-right: 44px;
+  box-sizing: border-box;
 }
 
 body:has([data-pads='plugin']) .anchored-menu.preset-menu > button.sheet-close.overlay-close {
-  position: relative !important;
-  top: auto !important;
-  right: auto !important;
+  position: absolute !important;
+  top: 4px !important;
+  right: 4px !important;
   left: auto !important;
   align-self: flex-end !important;
-  flex: 0 0 28px !important;
-  width: 28px !important;
-  min-width: 28px !important;
-  max-width: 28px !important;
-  height: 28px !important;
-  min-height: 28px !important;
-  max-height: 28px !important;
-  margin: 6px 6px 0 auto !important;
+  flex: 0 0 40px !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  margin: 0 !important;
   padding: 0 !important;
   border-radius: 8px !important;
-  z-index: 2 !important;
+  z-index: 3 !important;
 }
 
 body:has([data-pads='plugin']) .anchored-menu.preset-menu > button.sheet-close.overlay-close svg {
@@ -714,16 +741,17 @@ body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] .
   max-height: 40px !important;
 }
 
-body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] {
-  bottom: 96px !important;
-  height: auto !important;
-  max-height: 360px !important;
+/* Keep the names in the tray. The list keeps at least one row and scrolls;
+   Save and the other actions follow and scroll with the tray. */
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-menu-size='tray'] .preset-list {
+  order: -1;
+  flex: 1 1 auto !important;
+  min-height: 40px !important;
   overflow: auto !important;
 }
 
-body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] .preset-list {
-  flex: 0 0 auto !important;
-  overflow: visible !important;
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-menu-size='tray'] .preset-actions {
+  flex: 0 0 auto;
 }
 
 .hw-transport .rec,
@@ -804,6 +832,7 @@ body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-men
 
 .hw-lip {
   display: flex;
+  flex: 0 0 auto;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
@@ -852,9 +881,10 @@ body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-men
   overflow: hidden;
 }
 
-/* The page scrolls. Record, Stop, and Play stay on screen on every Beat Machine tab. */
+/* The page scrolls. Record, Stop, and Play stay on screen on every Beat Machine tab.
+   Basis 0 lets a short phone give the leftover height to Sampler and the take row. */
 .mpc [data-plugin-page]:not([hidden]) {
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   min-height: 0;
   min-width: 0;
   overflow: auto;
@@ -867,21 +897,33 @@ body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-men
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  /* Sampler row plus the Record row. Extra take rows scroll inside the transport. */
+  min-height: 108px;
   position: relative;
   z-index: 2;
   margin-top: 6px;
+  overflow: hidden;
 }
 
 .mpc-perform .hw-transport {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   flex-wrap: nowrap;
   gap: 4px;
+  min-height: 48px;
   padding: 4px;
+  overflow: auto;
   border-radius: 8px;
   background: #1c1c1c;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05), inset 0 2px 5px rgba(0, 0, 0, 0.35);
+}
+
+.mpc-perform .hw-slider {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .pad-actions {
@@ -1132,19 +1174,69 @@ body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-men
 
 .mpc-perform .hw-slider {
   width: auto;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: min(100%, 160px);
   max-height: 40px;
   flex-direction: row;
   align-items: center;
   height: 40px;
-  min-height: 40px;
+  min-height: 0;
   gap: 8px;
 }
 
 .mpc-perform .hw-slider input {
   height: 40px;
   min-height: 40px;
+}
+
+/* Landscape phones are short once the dock is clear. Share the top row with
+   Keyboard and Close, and keep the page as the band between those tabs and
+   Record. That band is the preset tray: tall enough for a name, and it stops
+   before Record. Extra take rows scroll inside the transport. */
+@container (max-height: 400px) {
+  .hw-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 2px;
+    padding: 2px 4px;
+  }
+  .mpc-brand {
+    grid-column: 2;
+    grid-row: 1;
+    height: 40px;
+    min-height: 40px;
+    max-height: 40px;
+    width: auto;
+    padding: 0 0 0 4px;
+  }
+  .mpc-title { display: none; }
+  .mpc-brand > .mpc-close {
+    position: static !important;
+    inset: auto !important;
+    right: auto !important;
+    left: auto !important;
+    top: auto !important;
+  }
+  .plugin-page-tabs { grid-column: 1; grid-row: 1; min-width: 0; }
+  .mpc [data-plugin-page]:not([hidden]) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+  .mpc-perform {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    gap: 2px;
+    margin-top: 0;
+    min-height: 0;
+  }
+  .mpc-perform .hw-transport { min-height: 44px; max-height: 48px; padding: 2px; gap: 2px; }
+  .mpc-perform .hw-slider { display: none; }
+  .hw-lip { min-height: 40px; padding: 0 6px; }
+  .pad-screen-stack { display: none; }
 }
 
 /* Narrow phones keep the whole playing face, including presets, inside the viewport. */
