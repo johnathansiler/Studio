@@ -913,7 +913,7 @@ export function SoundBrowser({
         />
       </div>
       {type === 'drum' && (
-        <p className="sound-status" role="status">These are drum one-shots. Loops stay under Loops. A pad with no downloaded one-shot keeps its built-in voice.</p>
+        <p className="sound-status" role="status">These are drum one-shots. Loops stay under Loops. A factory pad that cannot load its sample stays quiet. The license and credit are on each row.</p>
       )}
       {!lockType && (
         <div className="sound-chips sound-kind-row" role="group" aria-label="Kind">
@@ -983,9 +983,9 @@ export function SoundBrowser({
         {shownSounds.map((entry) => {
           const on = playing === entry.id
           const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
-          const credit = `${entry.license} · ${entry.source || 'Source not listed'}${entry.tags.length ? ` · ${entry.tags.join(', ')}` : ''}`
+          const credit = [entry.license, entry.attributionText, entry.source || 'Source not listed', entry.licenseUrl, entry.tags.length ? entry.tags.join(', ') : ''].filter(Boolean).join(' · ')
           const hosted = entry.origin === 'private' ? 'On this device. Not uploaded.' : 'Hugging Face.'
-          const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [entry.origin === 'private' ? 'Private' : '', KIND_LABEL[entry.type], entry.publisher, entry.pack ? packLabel(entry.pack) : '', entry.category && entry.category !== entry.type ? entry.category : '', entry.role ? roleLabel(entry.role) : ''].filter(Boolean).join(' · ')
+          const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [entry.origin === 'private' ? 'Private' : '', KIND_LABEL[entry.type], entry.publisher, entry.pack ? packLabel(entry.pack) : '', entry.license, entry.attributionText, entry.category && entry.category !== entry.type ? entry.category : '', entry.role ? roleLabel(entry.role) : ''].filter(Boolean).join(' · ')
           return (
             <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
               <button

@@ -556,7 +556,7 @@ export function PadsPanel({
               const index = pageStart + offset
               const pitch = levels && source ? source.pitch : pad.pitch
               const label = levels ? levelLabel(index, levels) : padFaceName(pad)
-              const sampleTitle = pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
+              const sampleTitle = pad.sampleError || pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
               const velocity = meters[index] ?? 0
               const held = litPads.includes(index)
               const lit = held || litNotes.includes(pitch) || velocity > 0.08
@@ -569,7 +569,7 @@ export function PadsPanel({
                   data-pitch={pitch}
                   aria-pressed={held}
                   style={{ ['--vel' as string]: String(velocity) }}
-                  title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}. Drag a sound here.`}
+                  title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}${pad.sampleCredit ? `. ${pad.sampleCredit}` : ''}. Drag a sound here.`}
                   onDragOver={(event) => {
                     if ([...event.dataTransfer.types].includes(SOUND_MIME) || event.dataTransfer.types.includes('text/plain')) event.preventDefault()
                   }}
@@ -697,7 +697,10 @@ export function PadsPanel({
           </div>
           {source && (
             <aside className="mpc-params" aria-label="Pad settings">
-              <h3 title={source.sampleName || source.name}>{padFaceName(source)}</h3>
+              <h3 title={[source.sampleError, source.sampleName, source.sampleCredit].filter(Boolean).join('. ') || source.name}>{padFaceName(source)}</h3>
+              {(source.sampleError || source.sampleCredit) && (
+                <p className="mpc-kit-credit" role="status">{source.sampleError || source.sampleCredit}</p>
+              )}
               <div className="mpc-side-meter" aria-label="Pad meter" style={{ ['--vel' as string]: String(meters[selected] ?? 0) }}>
                 <i style={{ height: `${Math.round((meters[selected] ?? 0) * 100)}%` }} />
               </div>

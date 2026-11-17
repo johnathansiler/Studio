@@ -21,7 +21,7 @@ import { pickDefaultKit } from '../instruments/pads/record'
 import { ProjectStore } from '../state/store'
 import { SoundBrowser } from '../ui/SoundBrowser'
 
-const rawText = readFileSync(new URL('./fixtures/soundscout-2026-11-09.json', import.meta.url), 'utf8')
+const rawText = readFileSync(new URL('../../catalogs/soundscout-2026-11-17-4.json', import.meta.url), 'utf8')
 const document = JSON.parse(rawText) as {
   version: string
   counts: { entries: number; uniqueWav: number; byLicense: Record<string, number>; byPack: Record<string, number>; byType: Record<string, number> }
@@ -32,23 +32,33 @@ const document = JSON.parse(rawText) as {
 const catalog = parseSoundScoutCatalog(document)
 
 describe('SoundScout catalog', () => {
-  it('keeps the prepared 813-row document exact, including the informal grant', () => {
+  it('keeps the prepared 1208-row document exact, including the informal grant', () => {
     expect(document.version).toBe('soundscout-2026-11-09')
     expect(SOUNDSCOUT_VERSION).toBe('soundscout-2026-11-09')
     expect(SOUND_VERSION_PREFIX).toBe('soundscout-2026-11-09/')
-    expect(SOUND_CATALOG_FILE).toBe('soundscout-2026-11-10')
+    expect(SOUND_CATALOG_FILE).toBe('soundscout-2026-11-17-4')
     expect(SOUND_CATALOG_URL).toBe(`${SOUND_DATASET_BASE}/catalogs/${SOUND_CATALOG_FILE}.json`)
-    expect(SOUND_DATASET_COMMIT).toBe('ab0c3259dbd20c344efc9f8db5bc0d2206e0d2f8')
-    expect(catalog).toHaveLength(813)
-    expect(new Set(catalog.map((entry) => entry.sha256)).size).toBe(807)
-    expect(catalog.filter((entry) => entry.license === 'CC0-1.0')).toHaveLength(322)
+    expect(SOUND_DATASET_COMMIT).toBe('0f06ae2f33f14b48bb1a549a16046c16aa47ffd2')
+    expect(catalog).toHaveLength(1208)
+    expect(new Set(catalog.map((entry) => entry.sha256)).size).toBe(1202)
+    expect(catalog.filter((entry) => entry.license === 'CC0-1.0')).toHaveLength(376)
     expect(catalog.filter((entry) => entry.license === 'Informal-creator-grant')).toHaveLength(491)
+    expect(catalog.filter((entry) => entry.license === 'Free-creator-kit')).toHaveLength(259)
+    expect(catalog.filter((entry) => entry.license === 'Free-noncommercial-unaltered')).toHaveLength(15)
+    expect(catalog.filter((entry) => entry.license === 'CC-BY-4.0')).toHaveLength(31)
+    expect(catalog.filter((entry) => entry.license === 'CC-BY-SA-3.0')).toHaveLength(21)
+    expect(catalog.filter((entry) => entry.attributionRequired).every((entry) => entry.attributionText && entry.licenseUrl)).toBe(true)
     expect(catalog.filter((entry) => entry.isContentAlias)).toHaveLength(6)
     expect(catalog.filter((entry) => entry.licenseClass === 'INFORMAL_CREATOR_GRANT_NOT_CC0')).toHaveLength(491)
     expect(catalog.some((entry) => entry.pack?.startsWith('ORG-') && entry.license === 'CC0-1.0')).toBe(false)
     expect(licenseAllowed('Informal-creator-grant')).toBe(true)
     expect(licenseAllowed('Informal-creator-grant', true)).toBe(false)
     expect(licenseAllowed('CC-BY-4.0')).toBe(false)
+    expect(licenseAllowed('CC-BY-4.0', true)).toBe(true)
+    expect(licenseAllowed('CC-BY-SA-3.0', true)).toBe(true)
+    expect(licenseAllowed('CC0-1.0', true)).toBe(false)
+    expect(licenseAllowed('Free-creator-kit')).toBe(true)
+    expect(licenseAllowed('Free-noncommercial-unaltered')).toBe(true)
     expect(licenseAllowed('unlicensed')).toBe(false)
 
     for (const raw of document.entries) {
@@ -73,10 +83,17 @@ describe('SoundScout catalog', () => {
     expect(document.counts.byPack['FS-HOLIZNA-LOFI']).toBe(1)
     expect(document.counts.byPack['FS-DEADROBOTMUSIC']).toBe(1)
     expect(document.counts.byPack['FS-JOSEFPRES-PIANO']).toBe(21)
-    expect(document.counts.entries).toBe(813)
-    expect(document.counts.uniqueWav).toBe(807)
-    expect(document.counts.byLicense['CC0-1.0']).toBe(322)
+    expect(document.counts.entries).toBe(1208)
+    expect(document.counts.uniqueWav).toBe(1202)
+    expect(document.counts.byLicense['CC0-1.0']).toBe(376)
+    expect(document.counts.byLicense['Free-creator-kit']).toBe(259)
+    expect(document.counts.byLicense['CC-BY-4.0']).toBe(31)
     expect(document.counts.byType.loop).toBe(563)
+    expect(document.counts.byType['one-shot']).toBe(645)
+    expect(document.counts.byPack['AC-MULDJORD']).toBe(17)
+    expect(document.counts.byPack['AC-DRSKIT']).toBe(14)
+    expect(document.counts.byPack['AC-AVL-BLONDEBOP']).toBe(21)
+    expect(document.counts.byPack['EL-BAKER-909']).toBe(15)
     const openQuery = { text: '', type: 'loop' as const, bpm: 'any' as const, key: '', favoritesOnly: false, projectBpm: 120, favorites: [] as string[] }
     const piano = filterSounds(catalog, { ...openQuery, text: 'piano loops' })
     expect(piano).toHaveLength(21)
@@ -139,7 +156,7 @@ describe('SoundScout catalog', () => {
       return new Response(rawText)
     })
     expect(requested).toEqual([SOUND_CATALOG_URL])
-    expect(loaded.entries).toHaveLength(813)
+    expect(loaded.entries).toHaveLength(1208)
 
     const legacy = await loadSoundCatalog(async (url) => {
       requested.push(String(url))
@@ -157,7 +174,7 @@ describe('SoundScout catalog', () => {
     const versioned = new TextEncoder().encode(rawText)
     await cache.put(SOUND_CATALOG_URL, versioned.buffer.slice(versioned.byteOffset, versioned.byteOffset + versioned.byteLength))
     const restored = await loadSoundCatalog(async () => { throw new Error('offline') }, cache)
-    expect(restored.entries).toHaveLength(813)
+    expect(restored.entries).toHaveLength(1208)
     expect(restored.entries.some((entry) => entry.id === 'dust' || entry.name === 'Dusty loop')).toBe(false)
 
     const previousCatalogUrl = 'https://huggingface.co/datasets/cueharbor/sound-library/resolve/7a1ea9faef7f7813fff02c0a3b84910438949596/catalogs/soundscout-2026-11-09.json'
@@ -180,11 +197,11 @@ describe('SoundScout catalog', () => {
       return new Response(rawText)
     }, cache)
     expect(freshRequests).toEqual([SOUND_CATALOG_URL])
-    expect(fresh.entries).toHaveLength(813)
+    expect(fresh.entries).toHaveLength(1208)
     expect(fresh.entries.some((entry) => entry.id === 'stale-previous')).toBe(false)
     const offlineNew = await loadSoundCatalog(async () => { throw new Error('offline') }, cache)
     expect(offlineNew.entries.some((entry) => entry.id === 'stale-previous')).toBe(false)
-    expect(offlineNew.entries).toHaveLength(813)
+    expect(offlineNew.entries).toHaveLength(1208)
   })
 
   it('feeds the same rows to browse, loops, chop, and drum defaults without the wrong kind', () => {
@@ -192,7 +209,7 @@ describe('SoundScout catalog', () => {
     expect(soundsForRole(catalog, 'chop').map((entry) => entry.id)).toEqual(soundsForRole(catalog, 'loop').map((entry) => entry.id))
     const steps = soundsForRole(catalog, 'step')
     expect(steps.length).toBeGreaterThan(0)
-    expect(steps.every((entry) => entry.type === 'one-shot' && entry.category === 'kick')).toBe(true)
+    expect(steps.every((entry) => entry.type === 'one-shot' && entry.category !== 'percussion')).toBe(true)
     const percussion = catalog.find((entry) => entry.category === 'percussion')!
     expect(soundsForRole([percussion], 'step')).toEqual([])
     expect(libraryMatchesCategory(percussion, 'Kicks')).toBe(false)
@@ -202,8 +219,8 @@ describe('SoundScout catalog', () => {
     expect(picks.map((pick) => pick.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
     expect(new Set(picks.map((pick) => pick.id)).size).toBe(16)
     expect(catalog.find((entry) => entry.id === picks[0].id)?.type).toBe('one-shot')
-    expect(picks[0].name).toMatch(/808/)
-    expect(picks.find((pick) => pick.index === 2)?.name).toMatch(/rim|grime/i)
+    expect(picks[0].name).toMatch(/Kick/)
+    expect(picks.find((pick) => pick.index === 2)?.name).toMatch(/Snare/i)
 
     const loop = catalog.find((entry) => entry.pack === 'LEN-ZIP')!
     const nature = catalog.find((entry) => entry.pack === 'ORG-MEAD-NATURE')!
@@ -260,10 +277,10 @@ describe('SoundScout catalog', () => {
     expect(soundsForRole([grime], 'step').map((entry) => entry.id)).toEqual([grime.id])
     expect(percussion.role).toBe('loop')
     const open = { text: '', type: 'all' as const, bpm: 'any' as const, key: '', favoritesOnly: false, projectBpm: 120, favorites: [] as string[] }
-    expect(filterSounds(catalog, { ...open, role: 'drum_one_shot' }).every((entry) => entry.type === 'one-shot' && entry.category === 'kick')).toBe(true)
+    expect(filterSounds(catalog, { ...open, role: 'drum_one_shot' }).every((entry) => entry.type === 'one-shot')).toBe(true)
     expect(filterSounds(catalog, { ...open, role: 'loop' }).every((entry) => entry.type === 'loop')).toBe(true)
     expect(filterSounds(catalog, { ...open, text: 'mbase' }).every((entry) => entry.pack === 'HW-MBASE')).toBe(true)
-    expect(browserSounds(catalog, { ...open, type: 'instrument' })).toHaveLength(813)
+    expect(browserSounds(catalog, { ...open, type: 'instrument' })).toHaveLength(1208)
     expect(browserSounds(catalog, { ...open, type: 'instrument' }).some((entry) => /xylophone|upright piano|nylon/i.test(entry.name))).toBe(false)
     const chopList = soundsForRole(catalog, 'chop')
     expect(chopList.length).toBeGreaterThan(40)

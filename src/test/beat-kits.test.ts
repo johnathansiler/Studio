@@ -5,18 +5,21 @@ import { factoryPresets } from '../presets/factory'
 import { INIT_NAME } from '../presets/types'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
+import { planPads } from '../audio/voices/program'
+import { residentDrums } from '../model/drums'
+import { createKit, padAllowsResidentDrum } from '../model/padMachine'
 import {
   BEAT_KITS,
+  DEFAULT_BEAT_PRESET,
   beatKitByPreset,
-  dedicatedRoleEntries,
+  factoryKitSampleIssues,
   resolveBeatKit,
   voiceDecay,
   voiceLevel,
-  voiceMatchesRole,
 } from '../instruments/pads/kits'
 import { pickDefaultKit } from '../instruments/pads/record'
 
-const catalog = parseSoundScoutCatalog(JSON.parse(readFileSync(new URL('./fixtures/soundscout-2026-11-09.json', import.meta.url), 'utf8')))
+const catalog = parseSoundScoutCatalog(JSON.parse(readFileSync(new URL('../../catalogs/soundscout-2026-11-17-4.json', import.meta.url), 'utf8')))
 const byId = new Map(catalog.map((entry) => [entry.id, entry]))
 
 describe('beat machine kits', () => {
@@ -28,38 +31,9 @@ describe('beat machine kits', () => {
     expect(voiceDecay(0.45, 0.2)).toBeLessThan(0.45)
   })
 
-  it('gives every factory preset a unique, catalog-backed, role-matched kit', () => {
+  it('gives every factory preset a unique catalog drum and never a synthesized voice', () => {
     const factoryNames = factoryPresets('pads').map((preset) => preset.name)
-    expect(factoryNames.length).toBeGreaterThan(0)
-    for (const name of [INIT_NAME, ...factoryNames]) {
-      const kit = beatKitByPreset(name)
-      expect(kit, name).toBeTruthy()
-      const voices = resolveBeatKit(kit!, catalog)
-      expect(voices, name).toBeTruthy()
-      expect(voices).toHaveLength(16)
-      expect(new Set(voices!.map((voice) => voice.id)).size).toBe(16)
-      const shas = voices!.map((voice) => byId.get(voice.id)?.sha256)
-      expect(shas.every(Boolean)).toBe(true)
-      expect(new Set(shas).size).toBe(16)
-      for (const voice of voices!) {
-        const entry = byId.get(voice.id)
-        expect(entry, voice.id).toBeTruthy()
-        expect(entry!.type).toBe('one-shot')
-        expect(entry!.license).toBe('CC0-1.0')
-        expect(entry!.origin).not.toBe('private')
-        expect(`${entry!.name} ${entry!.path} ${entry!.pack ?? ''} ${entry!.source}`).not.toMatch(/goldbaby|sampleradar/i)
-        expect(entry!.durationSec).toBeGreaterThan(0)
-        expect(entry!.durationSec).toBeLessThan(2.5)
-        const dedicated = dedicatedRoleEntries(catalog, voice.role)
-        if (voice.role !== 'kick' && voice.role !== 'rim') expect(dedicated).toEqual([])
-        expect(voiceMatchesRole(voice.role, entry!, dedicated)).toBe(true)
-      }
-      expect(voices![0].role).toBe('kick')
-      expect(voices!.find((voice) => voice.role === 'rim')).toBeTruthy()
-    }
-    expect(beatKitByPreset('Init')?.id).toBe('808')
-    expect(BEAT_KITS.map((kit) => kit.preset)).toEqual([
-      'Init',
+    expect(factoryNames).toEqual([
       'Tight Kit',
       'Room Kit',
       'Boom Bap',
@@ -68,15 +42,82 @@ describe('beat machine kits', () => {
       'Lo-fi',
       'Rock',
       'Dry Close',
+      'Boom Bap Trap',
+      'Classic 909',
+      'Jazz Kit',
     ])
+    expect(BEAT_KITS.map((kit) => kit.preset)).toEqual([INIT_NAME, ...factoryNames])
+    expect(DEFAULT_BEAT_PRESET).toBe('Boom Bap Trap')
+    expect(factoryKitSampleIssues(BEAT_KITS, catalog)).toEqual([])
+    const loader = readFileSync(new URL('../instruments/pads/load.ts', import.meta.url), 'utf8')
+    const data = readFileSync(new URL('../instruments/pads/kitData.ts', import.meta.url), 'utf8')
+    expect(loader).not.toContain('renderDrum')
+    expect(data).not.toContain('renderDrum')
+    for (const name of [INIT_NAME, ...factoryNames]) {
+      const kit = beatKitByPreset(name)
+      expect(kit, name).toBeTruthy()
+      const voices = resolveBeatKit(kit!, catalog)
+      expect(voices, name).toHaveLength(16)
+      expect(new Set(voices!.map((voice) => voice.id)).size).toBe(16)
+      expect(voices![0].role.toLowerCase()).toContain('kick')
+      expect(voices![0].levelScale).toBe(1)
+      for (const voice of voices!) {
+        const entry = byId.get(voice.id)
+        expect(entry, voice.id).toBeTruthy()
+        expect(entry!.type).toBe('one-shot')
+        expect(entry!.origin).not.toBe('private')
+        expect(`${entry!.name} ${entry!.path} ${entry!.pack ?? ''} ${entry!.source}`).not.toMatch(/goldbaby|sampleradar/i)
+        expect(entry!.drumRole?.replace(/_/g, '-')).toBe(voice.role.replace(/_/g, '-'))
+        if (entry!.attributionRequired) expect(entry!.attributionText).toBeTruthy()
+      }
+    }
+    expect(beatKitByPreset('Init')?.id).toBe('classic-808')
+    expect(beatKitByPreset('Rock')?.family).toMatch(/Muldjord/i)
+    expect(beatKitByPreset('Room Kit')?.family).toMatch(/DRS/i)
+    expect(beatKitByPreset('Jazz Kit')?.family).toMatch(/AVL/i)
+    expect(beatKitByPreset('Classic 909')?.family).toMatch(/Baker/i)
+    const resident = residentDrums(48000).map((drum) => ({ pitch: drum.pitch, samples: drum.samples, sampleRate: 48000 }))
+    const fresh = createKit().banks[0][1]
+    expect(fresh.catalogPad).toBe(true)
+    expect(padAllowsResidentDrum(fresh)).toBe(false)
+    expect(planPads({ pads: [fresh], buffers: [], sampleRate: 48000, tempo: 120, resident }).slots).toHaveLength(0)
+    const legacy = { ...fresh, catalogPad: false }
+    expect(padAllowsResidentDrum(legacy)).toBe(true)
+    expect(planPads({ pads: [legacy], buffers: [], sampleRate: 48000, tempo: 120, resident }).slots).toHaveLength(1)
   })
 
-  it('loads the 808 set as the default kit', () => {
+  it('loads Boom Bap Trap as the default kit and keeps Init on the classic 808', () => {
     const picks = pickDefaultKit(catalog)
-    expect(picks.map((pick) => pick.id)).toEqual(resolveBeatKit(beatKitByPreset('Init')!, catalog)!.map((voice) => voice.id))
-    expect(picks[0].name).toBe('01 808 - C1')
-    expect(byId.get(picks[0].id)?.tags).toContain('808')
-    expect(byId.get(picks.find((pick) => pick.index === 2)!.id)?.tags).toContain('rim')
+    expect(picks.map((pick) => pick.id)).toEqual(resolveBeatKit(beatKitByPreset(DEFAULT_BEAT_PRESET)!, catalog)!.map((voice) => voice.id))
+    expect(picks[0].name).toBe('Boombap Fuego 2 Kick 03')
+    expect(byId.get(picks[0].id)?.drumRole).toBe('kick')
+    expect(beatKitByPreset('Init')?.voices[0].soundId).toMatch(/fischer|808/i)
+    const baker = byId.get(beatKitByPreset('Classic 909')!.voices[0].soundId)!
+    expect(baker.unaltered).toBe(true)
+    expect(baker.leadSilenceMs).toBeGreaterThan(0)
+  })
+
+  it('keeps an unaltered file intact and skips its lead-in at the pad start', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.insertPads(id)
+    const samples = new Float32Array([0, 0, 0.4, -0.2])
+    store.placePadKit(id, 0, [{
+      index: 0,
+      name: 'Baker kick',
+      samples,
+      sampleRate: 44100,
+      preserve: true,
+      catalog: true,
+      start: 0.00029,
+      credit: 'Jason Baker credit',
+    }])
+    const pad = store.trackKit(id).banks[0][0]
+    expect(pad.region?.start).toBeGreaterThan(0)
+    expect(pad.sampleCredit).toContain('Baker')
+    expect(pad.catalogPad).toBe(true)
+    const stored = store.buffers.get(pad.layers[0].bufferId!)!.channels[0]
+    expect(Array.from(stored)).toEqual(Array.from(samples))
   })
 
   it('places a kit in one step without moving pad pitches', () => {

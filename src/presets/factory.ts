@@ -191,6 +191,7 @@ const FACTORY_DRAFTS: Record<PresetPluginId, Draft[]> = {
     groove('Reggae', 0, [4, 12], [4, 12], [0, 2, 4, 6, 8, 10, 12, 14]),
     groove('Funk', 0.2, [0, 3, 6, 10], [4, 12], [0, 2, 4, 6, 8, 10, 12, 14]),
   ],
+  // Append Beat Machine presets. The names above and their order are the stored preset numbers.
   pads: [
     { name: 'Tight Kit', params: { tune: 2, decay: 0.45, attack: 0, swing: 50, humanize: 0, level: 0.85 } },
     { name: 'Room Kit', params: { tune: -2, decay: 1, attack: 0.02, swing: 54, humanize: 0.02, level: 0.8 } },
@@ -200,6 +201,9 @@ const FACTORY_DRAFTS: Record<PresetPluginId, Draft[]> = {
     { name: 'Lo-fi', params: { tune: -6, decay: 0.75, attack: 0.04, swing: 60, humanize: 0.08, level: 0.7 } },
     { name: 'Rock', params: { tune: 0, decay: 0.7, attack: 0, swing: 50, humanize: 0.01, level: 0.9 } },
     { name: 'Dry Close', params: { tune: 1, decay: 0.35, attack: 0, swing: 50, humanize: 0, level: 0.78 } },
+    { name: 'Boom Bap Trap', params: { tune: -1, decay: 0.68, attack: 0.01, swing: 64, humanize: 0.06, level: 0.84 } },
+    { name: 'Classic 909', params: { tune: 2, decay: 0.58, attack: 0, swing: 51, humanize: 0.015, level: 0.87 } },
+    { name: 'Jazz Kit', params: { tune: -3, decay: 0.72, attack: 0.03, swing: 56, humanize: 0.05, level: 0.76 } },
   ],
   master: [
     { name: 'Streaming -14', params: { kind: 2, ceiling: -1, target: -14, release: 140, lookahead: 5, width: 1 } },

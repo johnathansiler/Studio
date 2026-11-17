@@ -1114,11 +1114,26 @@ export class ProjectStore {
   }
 
   /** Put a whole bank of library hits on the kit in one undo step. */
-  placePadKit(trackId: string, bank: number, pads: { index: number; name: string; samples?: Float32Array; sampleRate?: number; level?: number; tune?: number; decay?: number }[]) {
+  placePadKit(trackId: string, bank: number, pads: {
+    index: number
+    name: string
+    samples?: Float32Array
+    sampleRate?: number
+    level?: number
+    tune?: number
+    decay?: number
+    catalog?: boolean
+    error?: string
+    credit?: string
+    /** Fraction of the file to skip. Used for unaltered files with a short lead-in. */
+    start?: number
+    /** Keep the decoded samples as they are. Factory kits and Baker 909 files set this. */
+    preserve?: boolean
+  }[]) {
     const prepared = pads.map((pad) => {
       if (!pad.samples || !pad.sampleRate) return { ...pad, bufferId: undefined as string | undefined }
       const bufferId = uid('smp')
-      const samples = normalizeChannel(pad.samples)
+      const samples = pad.preserve ? pad.samples : normalizeChannel(pad.samples)
       this.buffers.set(bufferId, { id: bufferId, name: pad.name, sampleRate: pad.sampleRate, channels: [samples] })
       return { ...pad, bufferId }
     })
@@ -1131,7 +1146,22 @@ export class ProjectStore {
       for (const pad of prepared) {
         const current = row[pad.index]
         if (!current) continue
-        const next = pad.bufferId ? assignPad(current, { name: pad.name, bufferId: pad.bufferId }) : { ...current }
+        let next = pad.bufferId
+          ? assignPad(current, { name: pad.name, bufferId: pad.bufferId, credit: pad.credit })
+          : { ...current }
+        if (pad.catalog || pad.error) next.catalogPad = true
+        if (pad.error) {
+          next.sampleError = pad.error
+          next.sampleName = pad.error
+          next.sampleCredit = pad.credit
+          next.layers = [{ velocityLo: 0, velocityHi: 1, tune: 0 }]
+        } else if (pad.credit) {
+          next.sampleCredit = pad.credit
+        }
+        if (pad.start != null && pad.start > 0) {
+          const region = padRegion(next)
+          next.region = { ...region, start: Math.min(0.25, pad.start) }
+        }
         if (pad.level != null) next.level = pad.level
         if (pad.tune != null) next.tune = pad.tune
         if (pad.decay != null) next.decay = pad.decay
@@ -4135,6 +4165,7 @@ export class ProjectStore {
     const pad = kit.banks[bank][index]
     const asset = pad.layers[0]?.bufferId ? this.buffers.get(pad.layers[0].bufferId) : undefined
     const known = DRUM_PADS.find((item) => item.pitch === pad.pitch)
+    if (!asset?.channels[0] && pad.catalogPad) return
     const samples = asset?.channels[0] ?? renderDrum(known?.kind ?? 'perc', this.project.sampleRate, pad.pitch)
     const sampleRate = asset?.sampleRate ?? this.project.sampleRate
     const pieces = chopsToPads(chopSample(samples, sampleRate, mode, opts), pad.name)
@@ -4159,6 +4190,7 @@ export class ProjectStore {
     const pad = kit.banks[bank][index]
     const asset = pad.layers[0]?.bufferId ? this.buffers.get(pad.layers[0].bufferId) : undefined
     const known = DRUM_PADS.find((item) => item.pitch === pad.pitch)
+    if (!asset?.channels[0] && pad.catalogPad) return
     const samples = asset?.channels[0] ?? renderDrum(known?.kind ?? 'perc', this.project.sampleRate, pad.pitch)
     const sampleRate = asset?.sampleRate ?? this.project.sampleRate
     const id = uid('smp')
