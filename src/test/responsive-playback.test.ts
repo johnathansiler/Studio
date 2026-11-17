@@ -3,6 +3,7 @@ import { AudioEngine } from '../audio/engine'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { resetTicker, subscribeFrame } from '../audio/ticker'
+import { PREVIEW_RAMP_SEC } from '../audio/paramCurve'
 import { gainFromDb } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
 import { createMixDrag, settleMixFollow } from '../ui/liveMix'
@@ -20,6 +21,7 @@ interface AudioParamMock {
   value: number
   events: Recorded[]
   cancelScheduledValues(time: number): void
+  cancelAndHoldAtTime(time: number): void
   setValueAtTime(value: number, time: number): void
   setTargetAtTime(value: number, time: number, tau: number): void
   linearRampToValueAtTime(value: number, time: number): void
@@ -32,9 +34,12 @@ function audioParam(initial = 0): AudioParamMock {
     value: initial,
     events,
     cancelScheduledValues() {},
-    setValueAtTime(value) {
+    cancelAndHoldAtTime(time) {
+      events.push({ method: 'hold', value: param.value, time })
+    },
+    setValueAtTime(value, time) {
       param.value = value
-      events.push({ method: 'set', value, time: 0 })
+      events.push({ method: 'set', value, time })
     },
     setTargetAtTime(value, time, tau) {
       events.push({ method: 'target', value, time, tau })
@@ -163,6 +168,10 @@ function sets(param: AudioParamMock) {
   return param.events.filter((event) => event.method === 'set')
 }
 
+function lines(param: AudioParamMock) {
+  return param.events.filter((event) => event.method === 'linear')
+}
+
 describe('shared animation frame', () => {
   const queue: FrameRequestCallback[] = []
   const previous = globalThis.requestAnimationFrame
@@ -284,6 +293,7 @@ describe('fader drag', () => {
     const strip = live.strips.get(track.id)!
     const beforeTargets = targets(strip.fader.gain).length
     const beforeSets = sets(strip.fader.gain).length
+    const beforeLines = lines(strip.fader.gain).length
     const origin = track.volume
     let screens = 0
     const frameCommits: number[] = []
@@ -309,8 +319,12 @@ describe('fader drag', () => {
     expect(screens).toBe(0)
     expect(store.version).toBe(version)
     expect(targets(strip.fader.gain).length).toBe(beforeTargets)
-    expect(sets(strip.fader.gain).length - beforeSets).toBe(moves)
-    expect(strip.fader.gain.value).toBeCloseTo(origin * (1 - moves / (moves + 2)), 6)
+    expect(sets(strip.fader.gain).length).toBe(beforeSets)
+    const drawn = lines(strip.fader.gain)
+    expect(drawn.length - beforeLines).toBe(moves)
+    const last = drawn[drawn.length - 1]
+    expect(last?.value).toBeCloseTo(origin * (1 - moves / (moves + 2)), 6)
+    expect((last?.time ?? 0) - ctx.currentTime).toBeCloseTo(PREVIEW_RAMP_SEC, 6)
     expect(engine.graphRebuilds).toBe(built)
 
     expect(store.project.tracks[0].volume).not.toBeCloseTo(origin)
@@ -379,7 +393,7 @@ describe('fader drag', () => {
     expect(revised.channel.solo).toBe(updated.channel.solo)
   })
 
-  it('writes the fader onto the AudioParam immediately at a tenth of a decibel', () => {
+  it('draws the fader to a tenth of a decibel within one frame', () => {
     const ctx = installAudioMocks()
     const store = new ProjectStore(createEmptyProject(48000))
     const engine = new AudioEngine()
@@ -391,13 +405,18 @@ describe('fader drag', () => {
     const quiet = gainFromDb(-6.3)
     engine.previewMix('volume', track.id, quiet)
     const added = gain.events.slice(before)
-    expect(added.map((event) => event.method)).toEqual(['set'])
-    expect(added[0]?.tau).toBeUndefined()
-    expect(gain.value).toBeCloseTo(quiet, 8)
-    expect(gainToDb(gain.value)).toBe('-6.3 dB')
+    expect(added.map((event) => event.method)).toEqual(['hold', 'linear'])
+    expect(added[0]?.value).toBeCloseTo(gain.value, 8)
+    expect(added[1]?.value).toBeCloseTo(quiet, 8)
+    expect((added[1]?.time ?? 0) - (added[0]?.time ?? 0)).toBeCloseTo(PREVIEW_RAMP_SEC, 6)
+    expect(added.every((event) => event.tau == null)).toBe(true)
+    expect(gainToDb(added[1]?.value ?? 0)).toBe('-6.3 dB')
     const nudged = gainFromDb(-6.2)
+    const mid = gain.events.length
     engine.previewMix('volume', track.id, nudged)
-    expect(gain.value).toBeCloseTo(nudged, 8)
-    expect(gainToDb(gain.value)).toBe('-6.2 dB')
+    const next = gain.events.slice(mid)
+    expect(next.map((event) => event.method)).toEqual(['hold', 'linear'])
+    expect(next[1]?.value).toBeCloseTo(nudged, 8)
+    expect(gainToDb(next[1]?.value ?? 0)).toBe('-6.2 dB')
   })
 })

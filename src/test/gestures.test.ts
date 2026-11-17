@@ -230,6 +230,9 @@ describe('knob gestures', () => {
       },
     }))
     pan.dispatch('pointerdown', { clientX: 10, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    expect(panned).toBe(-1)
+    pan.dispatch('pointermove', { clientX: 12, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    expect(panned).toBe(-1)
     pan.dispatch('pointermove', { clientX: 10 + width, clientY: 40, pointerType: 'mouse', pointerId: 1 })
     expect(panned).toBeCloseTo(1, 5)
     pan.dispatch('pointerup', { clientX: 10 + width, clientY: 40, pointerType: 'mouse', pointerId: 1 })

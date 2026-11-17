@@ -1306,8 +1306,8 @@ export class AudioEngine {
   }
 
   /**
-   * Hear a fader or pan on this move. The value is written onto the AudioParam
-   * that already exists. A 10 ms approach would still be arriving about 50 ms later.
+   * Hear a fader or pan on this move. The AudioParam that already exists
+   * draws a 4 ms line to the finger, so the sample does not step.
    */
   previewMix(target: 'volume' | 'pan', id: string, value: number) {
     const ctx = this.ctx

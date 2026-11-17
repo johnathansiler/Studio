@@ -1,6 +1,7 @@
 export interface RampParam {
   value?: number
   cancelScheduledValues(time: number): void
+  cancelAndHoldAtTime?(time: number): void
   setValueAtTime(value: number, time: number): void
   linearRampToValueAtTime(value: number, time: number): void
   setTargetAtTime?(value: number, time: number, timeConstant: number): void
@@ -26,15 +27,27 @@ export function smoothParam(param: RampParam, value: number, now: number, second
 }
 
 /**
- * Put an AudioParam on `value` at `now`.
- * The shared smoother approaches over about five time constants (~50 ms). A fader
- * must not wait for that: the finger writes the parameter itself.
+ * A fader or pan reaches the finger inside one frame.
+ * Long enough that a step is a line, short enough that the value is there in a few milliseconds.
+ */
+export const PREVIEW_RAMP_SEC = 0.004
+
+/**
+ * Move an existing AudioParam onto `value` for a fader or pan drag.
+ * `setValueAtTime` steps the sample and clicks. A 10 ms approach is still
+ * short of the finger about 50 ms later. A 4 ms line lands inside one frame.
  */
 export function writeParamNow(param: RampParam, value: number, now: number) {
   const target = Number.isFinite(value) ? value : 0
   const time = Number.isFinite(now) ? now : 0
-  param.cancelScheduledValues(time)
-  param.setValueAtTime(target, time)
+  const current = typeof param.value === 'number' && Number.isFinite(param.value) ? param.value : target
+  if (param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(time)
+  else {
+    param.cancelScheduledValues(time)
+    param.setValueAtTime(current, time)
+  }
+  if (Math.abs(current - target) < 1e-5) return
+  param.linearRampToValueAtTime(target, time + PREVIEW_RAMP_SEC)
 }
 
 /**
