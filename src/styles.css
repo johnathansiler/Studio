@@ -1299,6 +1299,10 @@ body:has(.unstuck-sheet) .toasts { z-index: 90; top: 64px; bottom: auto; }
   justify-content: flex-end;
   pointer-events: none;
 }
+/* Desk and fold docks are taller than the old 68px bar. Keep the hint above that tray. */
+body:has(.shell.studio:not(.phone)) .select-hint-host {
+  bottom: calc(var(--phone-chrome-bottom, 68px) + 8px + env(safe-area-inset-bottom));
+}
 .select-hint-host .toast.select-hint {
   display: flex;
   align-items: center;
