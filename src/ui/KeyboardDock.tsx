@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useProjectVersion } from './playbackUi'
 import type { AudioEngine } from '../audio/engine'
 import { performanceOwnsMidi, stepOwnsMidi } from '../midi/remember'
 import { heardBeat } from '../model/midiClock'
@@ -137,7 +138,7 @@ function beatAt(store: ProjectStore, engine: AudioEngine, eventMs: number) {
 }
 
 export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectStore; engine: AudioEngine; onEditNotes?: () => void }) {
-  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useProjectVersion(store)
   useScreenOverlay(() => { store.setKeyboardMidi(false); notifyKeyboard(false) }, store.keyboardMidi)
   const route = noteTarget(store.project.tracks, store.selectedTrackId)
   const editor = store.midiEditor()

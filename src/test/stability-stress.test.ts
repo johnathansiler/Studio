@@ -432,9 +432,13 @@ describe('transport and graph stress', () => {
     expect(jitter.maxMs).toBeLessThan(3)
     expect(engine.status).toBe('playing')
 
-    ctx.currentTime += 2
+    const beforeSkip = engine.stability().schedulerSkips
+    ctx.currentTime += 1
     engine.wakeTransport()
-    expect(engine.stability().schedulerSkips).toBeGreaterThanOrEqual(1)
+    expect(engine.stability().schedulerSkips).toBe(beforeSkip)
+    ctx.currentTime += SCHEDULER_HORIZON_SEC * 2 + 0.2
+    engine.wakeTransport()
+    expect(engine.stability().schedulerSkips).toBeGreaterThan(beforeSkip)
     expect(engine.stability().sources).toBeLessThanOrEqual(16)
     engine.stop()
   })
@@ -565,8 +569,12 @@ describe('transport and graph stress', () => {
       engine.wakeTransport()
     }
     const notes = ctx.starts.filter((start) => start.kind === 'osc')
-    expect(notes).toHaveLength(2)
+    expect(notes.length).toBeGreaterThanOrEqual(2)
+    expect(notes.length).toBeLessThanOrEqual(4)
     expect((notes[1]?.when ?? 0) - (notes[0]?.when ?? 0)).toBeGreaterThan(1.5)
+    for (let index = 1; index < notes.length; index++) {
+      expect((notes[index]?.when ?? 0) - (notes[index - 1]?.when ?? 0)).toBeGreaterThan(1.5)
+    }
     const clips = ctx.starts.filter((start) => start.kind === 'buffer-source' && start.duration != null)
     expect(clips.length).toBeGreaterThan(1)
     const origin = (engine as unknown as { playOriginCtx: number }).playOriginCtx

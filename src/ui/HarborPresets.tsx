@@ -1,4 +1,5 @@
 import { useRef, useState, useSyncExternalStore } from 'react'
+import { useProjectVersion } from './playbackUi'
 import { sampleLoadState, subscribeSampleLoad } from '../audio/sampleLoadBus'
 import { factoryHarborPresets, harborPluginId, harborPresetChoices, presetParams, type HarborPreset } from '../harbor/presets'
 import { articulationsIn } from '../harbor/program'
@@ -18,7 +19,7 @@ export function HarborProgress({ label = 'Loading zones' }: { label?: string }) 
 }
 
 export function HarborPresetBar({ store, trackId }: { store: ProjectStore; trackId: string }) {
-  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useProjectVersion(store)
   const program = store.track(trackId)?.library
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')

@@ -1,5 +1,5 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
-import { bodyLength, clipHasWaveBody, type WaveEdit } from './wave/edit'
+import { bodyLength, clipHasWaveBody, fadeCurve, type WaveEdit } from './wave/edit'
 import { cachedWaveBody, renderWaveRange } from './wave/render'
 import { assembleTimedChunks } from './capture'
 import { bakeLoopSeam, nativeLoopRange } from './loopSeam'
@@ -54,7 +54,7 @@ import { publishNotice } from './core/notice'
 import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGesture, routeChangePlan, routeOf, type RouteSnapshot } from './core/driver'
 import { bufferHintOf, formatLatencyReadout, writeBufferHint, type BufferHint } from './core/buffer'
 import { contextAttempts } from './core/contextOptions'
-import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, clipSliceEnvelope, drumLevel, liveWhen, nextTimelineSample, placeNoteTime, scheduleDelaySeconds } from './liveStage'
+import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_CHUNK_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, clipSliceEnvelope, drumLevel, liveWhen, nextTimelineSample, placeNoteTime, scheduleDelaySeconds } from './liveStage'
 import { safetyCurve } from './level'
 import { fileDither } from './master/ditherPlan'
 import { holdFullScale, SAFETY_LOOK } from './master/safety'
@@ -232,6 +232,10 @@ export class AudioEngine {
   private scalerMidi: { pitch: number; onAt: number }[] = []
   private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
+  /** Audio-thread wake. Timers stall while a button render owns the main thread. */
+  private transportNode: AudioWorkletNode | null = null
+  /** Routing signature. Unchanged UI edits skip the graph rebuild. */
+  private graphSig = ''
   /** Bumped by play, seek, and stop so a late async start cannot revive transport. */
   private commandEpoch = 0
   /** Non-zero while play() or beginRecord() is waiting on the device. */
@@ -619,6 +623,12 @@ export class AudioEngine {
         await this.ctx.audioWorklet.addModule('/worklets/pcm-player.js')
         await this.ctx.audioWorklet.addModule('/worklets/keys.js')
         this.attachKeys()
+        try {
+          await this.ctx.audioWorklet.addModule('/worklets/transport.js')
+          this.attachTransportClock()
+        } catch {
+          /* The interval backup still refills the look-ahead. */
+        }
         this.workletsReady = true
         this.workletError = ''
       } catch (error) {
@@ -751,59 +761,23 @@ export class AudioEngine {
       this.applyMixerAutomation()
       return
     }
-    for (const track of project.tracks) {
-      if (!this.strips.has(track.id)) {
-        const strip = createStrip(this.ctx)
-        prepareMeter(strip.analyser, this.ctx.sampleRate)
-        this.strips.set(track.id, strip)
+    const graph = this.graphSignature(project)
+    if (graph === this.graphSig && this.strips.size === project.tracks.length) {
+      this.applyMasterGain()
+      this.applyMixerAutomation()
+      for (const track of project.tracks) {
+        const strip = this.strips.get(track.id)
+        if (strip) applyInserts(this.ctx, strip, track.inserts)
       }
+      applyInserts(this.ctx, this.masterStrip, project.masterInserts)
+      this.rack.assetOf = assetOf
+      this.rack.clock = () => this.currentTimelineSample()
+      this.rack.route(this.ctx, project, this.strips, this.masterStrip, this.localBus, this.remoteBus)
+      this.pushInstrumentHosts(project, assetOf)
+    } else {
+      this.graphSig = graph
+      this.rebuildGraph(project, assetOf)
     }
-    for (const id of [...this.strips.keys()]) {
-      if (!project.tracks.some((t) => t.id === id)) {
-        const strip = this.strips.get(id)
-        if (strip) releaseStrip(strip)
-        this.strips.delete(id)
-      }
-    }
-    for (const id of [...this.chains.keys()]) {
-      if (project.tracks.some((track) => track.id === id)) continue
-      this.chains.get(id)?.panic()
-      this.chains.delete(id)
-    }
-    for (const track of project.tracks) {
-      const strip = this.strips.get(track.id)!
-      applyInserts(this.ctx, strip, track.inserts)
-    }
-    applyInserts(this.ctx, this.masterStrip, project.masterInserts)
-    this.applyMasterGain()
-    this.rack.assetOf = assetOf
-    this.rack.clock = () => this.currentTimelineSample()
-    this.rack.route(this.ctx, project, this.strips, this.masterStrip, this.localBus, this.remoteBus)
-    this.routeLocalMic()
-    this.routeRemotes()
-    const buffers = new Map<string, AudioAsset>()
-    for (const track of project.tracks) {
-      for (const device of track.rack?.devices ?? []) {
-        for (const zone of device.zones) {
-          const asset = assetOf(zone.bufferId)
-          if (asset) buffers.set(asset.id, asset)
-        }
-        for (const pad of device.pads ?? []) {
-          const asset = pad.bufferId ? assetOf(pad.bufferId) : undefined
-          if (asset) buffers.set(asset.id, asset)
-        }
-      }
-    }
-    this.rackHost.sync(this.ctx, project, this.strips, buffers)
-    this.libraryHost.sync(this.ctx, project, this.strips, assetOf)
-    this.padHost.sync(this.ctx, project, this.strips, assetOf)
-    this.patchHost.sync(this.ctx, project.tracks, this.strips, (id) => {
-      const asset = this.assetOf(id)
-      const channel = asset?.channels[0]
-      if (!asset || !channel?.length) return null
-      return { sampleRate: asset.sampleRate, channel }
-    })
-    this.applyMixerAutomation()
     const pattern = project.beats?.patterns.find((item) => item.id === project.beats?.activeId)
     const token = `${rackPlayMode(project)}:${pattern?.id ?? ''}:${pattern?.steps ?? 0}:${pattern?.swing ?? 0}`
     const rackChanged = this.rackToken !== '' && this.rackToken !== token
@@ -844,6 +818,90 @@ export class AudioEngine {
     if (this.followReady && follow !== this.followClock && this.playing && this.status !== 'recording') this.queueFollowRearm()
     this.followClock = follow
     this.followReady = true
+  }
+
+  /** Tracks, routing, and instruments. Selection, tools, and clip notes are not part of it. */
+  private graphSignature(project: Project) {
+    const plugs = (plugins: { id: string; pluginId: string; enabled: boolean; wet: number; sidechain?: string }[]) =>
+      plugins.map((plugin) => `${plugin.id}:${plugin.pluginId}:${plugin.enabled ? 1 : 0}:${plugin.wet > 0.0001 ? 1 : 0}:${plugin.sidechain || ''}`).join(',')
+    const inserts = (list: { type: string; enabled: boolean }[]) => list.map((insert) => `${insert.type}:${insert.enabled ? 1 : 0}`).join(',')
+    let sig = ''
+    for (const track of project.tracks) {
+      const sends = track.sends.map((send) => `${send.id}:${send.busId}:${send.enabled ? 1 : 0}:${send.preFader ? 1 : 0}`).join(',')
+      const rack = track.rack?.devices.map((device) => `${device.id}:${device.kind}`).join('.') ?? ''
+      const bank = track.padKit ? `${track.padKit.activeBank ?? 0}` : ''
+      sig += `${track.id}:${track.type}:${track.instrument || ''}:${track.output || ''}:${track.groupId || ''}:${track.input}:${plugs(track.plugins)}:${inserts(track.inserts)}:${sends}:${rack}:${bank};`
+    }
+    return `${sig}|${plugs(project.masterPlugins)}|${inserts(project.masterInserts)}`
+  }
+
+  /** Build strips and instrument hosts. Skipped when `graphSignature` has not changed. */
+  private rebuildGraph(project: Project, assetOf: (id: string) => AudioAsset | undefined) {
+    const ctx = this.ctx
+    const localBus = this.localBus
+    const remoteBus = this.remoteBus
+    const master = this.masterStrip
+    if (!ctx || !localBus || !remoteBus || !master) return
+    for (const track of project.tracks) {
+      if (!this.strips.has(track.id)) {
+        const strip = createStrip(ctx)
+        prepareMeter(strip.analyser, ctx.sampleRate)
+        this.strips.set(track.id, strip)
+      }
+    }
+    for (const id of [...this.strips.keys()]) {
+      if (!project.tracks.some((track) => track.id === id)) {
+        const strip = this.strips.get(id)
+        if (strip) releaseStrip(strip)
+        this.strips.delete(id)
+      }
+    }
+    for (const id of [...this.chains.keys()]) {
+      if (project.tracks.some((track) => track.id === id)) continue
+      this.chains.get(id)?.panic()
+      this.chains.delete(id)
+    }
+    for (const track of project.tracks) {
+      const strip = this.strips.get(track.id)
+      if (strip) applyInserts(ctx, strip, track.inserts)
+    }
+    applyInserts(ctx, master, project.masterInserts)
+    this.applyMasterGain()
+    this.rack.assetOf = assetOf
+    this.rack.clock = () => this.currentTimelineSample()
+    this.rack.route(ctx, project, this.strips, master, localBus, remoteBus)
+    this.routeLocalMic()
+    this.routeRemotes()
+    this.pushInstrumentHosts(project, assetOf)
+    this.applyMixerAutomation()
+  }
+
+  /** Push instrument state. Parameter edits stay on the existing nodes. */
+  private pushInstrumentHosts(project: Project, assetOf: (id: string) => AudioAsset | undefined) {
+    const ctx = this.ctx
+    if (!ctx) return
+    const buffers = new Map<string, AudioAsset>()
+    for (const track of project.tracks) {
+      for (const device of track.rack?.devices ?? []) {
+        for (const zone of device.zones) {
+          const asset = assetOf(zone.bufferId)
+          if (asset) buffers.set(asset.id, asset)
+        }
+        for (const pad of device.pads ?? []) {
+          const asset = pad.bufferId ? assetOf(pad.bufferId) : undefined
+          if (asset) buffers.set(asset.id, asset)
+        }
+      }
+    }
+    this.rackHost.sync(ctx, project, this.strips, buffers)
+    this.libraryHost.sync(ctx, project, this.strips, assetOf)
+    this.padHost.sync(ctx, project, this.strips, assetOf)
+    this.patchHost.sync(ctx, project.tracks, this.strips, (id) => {
+      const asset = this.assetOf(id)
+      const channel = asset?.channels[0]
+      if (!asset || !channel?.length) return null
+      return { sampleRate: asset.sampleRate, channel }
+    })
   }
 
   /** Collapse a tempo drag into one reschedule. The latest project is what plays. */
@@ -2166,6 +2224,8 @@ export class AudioEngine {
     this.warmVoices = []
     this.keysNode = null
     this.keysSab = null
+    this.transportNode = null
+    this.graphSig = ''
     this.workletsReady = false
     this.stretchReady = false
     this.pcmTap = null
@@ -2724,21 +2784,53 @@ export class AudioEngine {
     this.applyMixerAutomation()
   }
 
-  /** The interval only wakes the scheduler. Notes are placed on the audio clock inside the horizon. */
-  private ensureScheduler() {
-    if (this.scheduler) return
-    this.scheduler = window.setInterval(() => {
-      this.wakeTransport()
-      const now = performance.now()
-      if (now - this.lastUiEmit > 50) {
-        this.lastUiEmit = now
-        this.emit()
-      }
-      if (!this.playing && !this.repeatWatch && this.scheduler) {
+  /**
+   * The audio thread asks for the next window. A timer remains for browsers
+   * without a worklet. UI subscribers are not notified here: a React render
+   * in this callback is what used to starve the next refill.
+   */
+  private onClockWake = () => {
+    if (!this.playing && !this.repeatWatch) {
+      if (this.scheduler) {
         window.clearInterval(this.scheduler)
         this.scheduler = 0
       }
-    }, 25)
+      return
+    }
+    const now = this.ctx?.currentTime
+    if (now != null && this.lastWakeCtx > 0 && now - this.lastWakeCtx < 0.03) return
+    this.wakeTransport()
+    if (!this.playing && this.repeatWatch) {
+      const perf = performance.now()
+      if (perf - this.lastUiEmit > 50) {
+        this.lastUiEmit = perf
+        this.emit()
+      }
+    }
+  }
+
+  private ensureScheduler() {
+    this.attachTransportClock()
+    if (this.scheduler) return
+    this.scheduler = window.setInterval(this.onClockWake, 40)
+  }
+
+  /** Silent worklet so the audio thread, not a main-thread timer, drives the refill. */
+  private attachTransportClock() {
+    const ctx = this.ctx
+    if (!ctx || this.transportNode) return
+    if (typeof AudioWorkletNode !== 'function') return
+    try {
+      const node = new AudioWorkletNode(ctx, 'cueharbor-transport', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] })
+      const gain = ctx.createGain()
+      gain.gain.value = 0
+      node.connect(gain)
+      gain.connect(ctx.destination)
+      node.port.onmessage = () => this.onClockWake()
+      this.transportNode = node
+    } catch {
+      this.transportNode = null
+    }
   }
 
   /**
@@ -2809,6 +2901,8 @@ export class AudioEngine {
 
   private tick = () => {
     if (this.playing && this.ctx) {
+      // Scroll runs animation frames and defers timers. Refill before the playhead paint.
+      if (!(this.lastWakeCtx > 0) || this.ctx.currentTime - this.lastWakeCtx > 0.08) this.wakeTransport()
       const linear = this.sampleAt(this.ctx.currentTime)
       const sample = this.heardSample(linear)
       const project = this.project
@@ -3041,9 +3135,9 @@ export class AudioEngine {
     this.pendingSchedule = true
   }
 
-  /** Samples to schedule on this pass. Never more than the horizon, and never past `remain`. */
+  /** Samples to schedule on this pass. One chunk, never past `remain`. The horizon is how far the queue stays ahead. */
   private horizonSamples(remain: number) {
-    const cap = Math.max(1, Math.ceil(SCHEDULER_HORIZON_SEC * this.sampleRate))
+    const cap = Math.max(1, Math.ceil(SCHEDULER_CHUNK_SEC * this.sampleRate))
     if (!(remain > 0)) return 0
     return Math.min(remain, cap)
   }
@@ -3854,6 +3948,58 @@ export class AudioEngine {
   }
 
   /**
+   * A clip with an audible fade cannot use a raw buffer loop: the fade would be
+   * skipped on the wrap, or the slice scheduler would have to wake for every window.
+   * The fade is written into one cycle so the audio thread loops it alone.
+   */
+  private fadeLoopStandIn(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip): { buffer: AudioBuffer; clip: AudioClip } | null {
+    const loop = this.transportLoopSpan()
+    if (!loop || ctx !== this.ctx || buffer.sampleRate !== ctx.sampleRate) return null
+    if (clip.startSample > loop.start + 8) return null
+    if (clip.startSample + clip.durationSamples < loop.end - 8) return null
+    const frames = loop.end - loop.start
+    if (frames < 32) return null
+    const regionStart = clip.offsetSamples + (loop.start - clip.startSample)
+    if (regionStart < -2 || regionStart + frames > buffer.length + 8) return null
+    const safeStart = Math.max(0, regionStart)
+    const safeFrames = Math.min(frames, buffer.length - safeStart)
+    if (safeFrames < 32 || Math.abs(safeFrames - frames) > 8) return null
+    const audio = ctx.createBuffer(buffer.numberOfChannels, safeFrames, buffer.sampleRate)
+    const fadeIn = clip.fadeInSamples
+    const fadeOut = clip.fadeOutSamples
+    const clipDur = clip.durationSamples
+    const inShape = clip.wave?.fadeInShape
+    const outShape = clip.wave?.fadeOutShape
+    const origin = loop.start - clip.startSample
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+      const region = buffer.getChannelData(channel).subarray(safeStart, safeStart + safeFrames)
+      const data = new Float32Array(safeFrames)
+      data.set(region)
+      if (fadeIn > 0 || fadeOut > 0) {
+        for (let i = 0; i < safeFrames; i++) {
+          const pos = origin + i
+          let gain = 1
+          if (fadeIn > 0 && pos < fadeIn) gain *= fadeCurve(Math.max(0, pos) / fadeIn, inShape)
+          if (fadeOut > 0 && pos > clipDur - fadeOut) gain *= fadeCurve(Math.max(0, (clipDur - pos) / fadeOut), outShape)
+          data[i] *= gain
+        }
+      }
+      audio.copyToChannel(data as unknown as Float32Array<ArrayBuffer>, channel)
+    }
+    return {
+      buffer: audio,
+      clip: {
+        ...clip,
+        offsetSamples: 0,
+        startSample: loop.start,
+        durationSamples: safeFrames,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+      },
+    }
+  }
+
+  /**
    * One looping source for a clip that fills the cycle.
    * The wrap stays on the audio thread. Safari counts that wrap in whole frames
    * when the loop end is left at 0; a seconds value is interpolated and can hiccup.
@@ -4037,6 +4183,16 @@ export class AudioEngine {
     const live = ctx === this.ctx
     const slip = live ? Math.max(0, ctx.currentTime - when) : 0
     const at = Math.max(0, when + slip)
+    if (live && (clip.fadeOutSamples > 8 || clip.fadeInSamples > 8)) {
+      const faded = this.fadeLoopStandIn(ctx, buffer, clip)
+      if (faded) {
+        const fromFade = Math.max(faded.clip.startSample, timelineStart)
+        const whenFade = ctxTime + (fromFade - timelineStart) / sr
+        const slipFade = Math.max(0, ctx.currentTime - whenFade)
+        const atFade = Math.max(0, whenFade + slipFade)
+        if (this.startFillingLoop(ctx, strip, faded.buffer, faded.clip, atFade, fromFade, slipFade)) return
+      }
+    }
     if (live && this.startFillingLoop(ctx, strip, buffer, clip, at, from, slip)) return
     if (live && when < ctx.currentTime - LATE_SLIP_SEC) return
     const dur = (to - from) / sr
