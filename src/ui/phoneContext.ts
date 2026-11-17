@@ -34,3 +34,5 @@ export function phoneContextKind(input: {
 
 export const BROWSER_TAB_EVENT = 'cueharbor-browser-tab'
 export const CLOSE_ARRANGE_SHEETS = 'cueharbor-close-arrange-sheets'
+/** A bottom sheet is opening under the top menu. The menu closes so the two do not stack. */
+export const BOTTOM_COVER_EVENT = 'cueharbor-bottom-cover'
