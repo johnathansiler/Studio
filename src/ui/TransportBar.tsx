@@ -5,7 +5,7 @@ import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenE
 import { dragNumeric } from '../model/dragNumeric'
 import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
-import { countInBarsOf, countInCaption, quartersPerBar } from '../model/time'
+import { quartersPerBar } from '../model/time'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -15,7 +15,7 @@ import { AutomationFollow } from './AutomationLane'
 import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
 import { ButtonTray } from './ButtonTray'
-import { DeleteTrackConfirm, applyTrackDelete, arrangeEditTarget, eqCols } from './equalGrid'
+import { DeleteTrackConfirm, applyTrackDelete, arrangeEditTarget } from './equalGrid'
 import { TipButton } from './Hint'
 import { armFinePress, markIntegerLand } from './integerTick'
 import './loopRegion.css'
@@ -93,8 +93,6 @@ export function TransportBar({
   onReset,
   onQuickPunch,
   onMidi,
-  onIdeas,
-  bulbOn = false,
   session,
   roomRole,
   simple = false,
@@ -113,8 +111,6 @@ export function TransportBar({
   onReset?: () => void
   onQuickPunch?: () => void
   onMidi?: () => void
-  onIdeas?: () => void
-  bulbOn?: boolean
   session?: SessionClient
   /** Solo and host can reset. A guest sees a disabled Host only control. */
   roomRole?: 'host' | 'guest'
@@ -422,10 +418,10 @@ export function TransportBar({
     if (!shouldOpenExactTempo(result) || store.remoteFollow) return
     editTimer.current = window.setTimeout(() => setEditingTempo(true), 1500)
   }
-  const tempoLabel = `${tempoCopy.label}. Tap to set tempo. Drag up or down to change the tempo. ${tempoCopy.hint}`
+  const tempoLabel = `Tap Tempo. ${formatTempo(tempo)} BPM. Tap to set tempo. Drag up or down to change the tempo. Pause after one tap to type an exact tempo.`
   const tempoField = editingTempo ? (
         <label className="t-btn bpm-readout tempo-edit">
-          <span className="tempo-kicker">{phone ? 'Tap' : 'Tempo'}</span>
+          <span className="tempo-kicker">Tap</span>
           <input
           ref={fieldRef}
           className="tempo-figure"
@@ -483,52 +479,9 @@ export function TransportBar({
           }}
           onPointerDown={(event) => onTempoDown(event, true)}
         >
-          <span className="tempo-kicker">{phone ? 'Tap' : 'Tempo'}</span>
+          <span className="tempo-kicker">Tap</span>
           <span className="tempo-figure">{formatTempo(tempo)}</span>
         </button>
-  )
-  const countCaption = countInCaption(countInBarsOf(project))
-  const clickButton = (
-        <TipButton
-          id="transport-click"
-          className={`t-btn click${project.metronomeEnabled ? ' on' : ''}`}
-          label={transport('click').label}
-          hint={transport('click').hint}
-          pressed={project.metronomeEnabled}
-          disabled={store.remoteFollow}
-          onClick={() => store.toggle('metronomeEnabled')}
-        >
-          <span className="t-word">{transport('click').label}</span>
-        </TipButton>
-  )
-  const countButton = (
-        <TipButton
-          id="transport-count"
-          className={`t-btn count${project.countIn ? ' on' : ''}`}
-          label={transport('count-in').label}
-          hint={`${transport('count-in').hint} Now ${countCaption}.`}
-          pressed={project.countIn}
-          disabled={store.remoteFollow}
-          onClick={() => store.cycleCountIn()}
-        >
-          <span className="count-read">
-            <span className="t-word">{transport('count-in').label}</span>
-            <span className="t-state">{countCaption}</span>
-          </span>
-        </TipButton>
-  )
-  const loopButton = (
-        <TipButton
-          id="transport-loop"
-          className={`t-btn loop${project.loopEnabled ? ' on' : ''}`}
-          label={transport('loop').label}
-          hint={transport('loop').hint}
-          pressed={project.loopEnabled}
-          disabled={store.remoteFollow}
-          onClick={() => store.toggle('loopEnabled')}
-        >
-          <span className="t-word">{transport('loop').label}</span>
-        </TipButton>
   )
   const editTarget = arrangeEditTarget(store)
   const [trackDelete, setTrackDelete] = useState<{ id: string; name: string } | null>(null)
@@ -589,11 +542,7 @@ export function TransportBar({
     onSeek(shiftBars(project, at, bars))
   }
   const extras = (
-    <div className="transport-extras eq-grid" style={eqCols(phone ? 2 : 5)} role="group" aria-label={phone ? 'Tempo and duplicate' : 'Tempo, metronome, count-in, loop, and duplicate'}>
-      <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
-      {phone ? null : clickButton}
-      {phone ? null : countButton}
-      {phone ? null : loopButton}
+    <div className="transport-extras" role="group" aria-label="Duplicate">
       {duplicateButton}
     </div>
   )
@@ -627,17 +576,7 @@ export function TransportBar({
         <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
           {phone ? <TransportGlyph id="record" /> : <span className="t-word">Record</span>}
         </TipButton>
-        <button
-          type="button"
-          className={`t-btn ideas-bulb${bulbOn ? ' on' : ''}`}
-          aria-label="Ideas"
-          title="Ideas"
-          aria-pressed={bulbOn}
-          disabled={!onIdeas || store.remoteFollow}
-          onClick={() => onIdeas?.()}
-        >
-          <IdeasBulbIcon />
-        </button>
+        <div className="tempo-cluster" role="group" aria-label="Tap Tempo" ref={tempoWrap}>{tempoField}</div>
       </ButtonTray>
       {extrasHost ? createPortal(extras, extrasHost) : extras}
       {contextualDelete}

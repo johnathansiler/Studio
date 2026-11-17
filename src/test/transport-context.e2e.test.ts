@@ -128,33 +128,35 @@ describe('loop, count-in, and contextual delete', () => {
       const desk = await browser.newContext({ viewport: { width: 1440, height: 900 } })
       const deskPage = await desk.newPage()
       await arrange(deskPage)
-      await deskPage.locator('#transport-loop').waitFor()
+      await deskPage.locator('[data-phone-action="loop"]').waitFor()
       const deskState = await deskPage.evaluate(() => {
-        const loop = document.querySelector('#transport-loop')
+        const loop = document.querySelector('[data-phone-action="loop"]')
         const extras = document.querySelector('.transport-extras')
         const contextual = document.querySelector('#contextual-delete')
         const words = [...document.querySelectorAll('.t-word')].map((node) => (node.textContent || '').trim())
+        const tabs = [...document.querySelectorAll('.views button, .phone-tabs button')].map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
         return {
-          loop: loop?.textContent?.trim(),
           pressed: loop?.getAttribute('aria-pressed'),
           words,
+          tabs,
           deleteInExtras: Boolean(extras?.querySelector('#transport-delete')),
           deleteInContext: Boolean(contextual?.querySelector('#transport-delete')),
-          count: document.querySelector('#transport-count .t-state')?.textContent?.trim(),
+          count: document.querySelector('[data-phone-action="count-in"] .count-state')?.textContent?.trim(),
+          tap: document.querySelector('.tempo-cluster')?.getAttribute('aria-label') || '',
         }
       })
-      expect(deskState.loop).toBe('Loop')
-      expect(deskState.words).toContain('Metronome')
-      expect(deskState.words).toContain('Count-in')
+      expect(deskState.tabs).toEqual(expect.arrayContaining(['Menu', 'Arrange', 'Mix', 'Browse', 'Tools', 'Ideas']))
+      expect(deskState.tabs).not.toContain('Collab')
       expect(deskState.words).not.toContain('Click')
       expect(deskState.words).not.toContain('1-2')
       expect(deskState.count).toBe('1 bar')
+      expect(deskState.tap).toBe('Tap Tempo')
       expect(deskState.deleteInExtras).toBe(false)
       expect(deskState.deleteInContext).toBe(true)
-      await deskPage.locator('#transport-loop').click()
-      await expect.poll(async () => deskPage.locator('#transport-loop').getAttribute('aria-pressed')).toBe('true')
-      await deskPage.locator('#transport-count').click()
-      await expect.poll(async () => deskPage.locator('#transport-count .t-state').innerText()).toBe('2 bars')
+      await deskPage.locator('[data-phone-action="loop"]').click()
+      await expect.poll(async () => deskPage.locator('[data-phone-action="loop"]').getAttribute('aria-pressed')).toBe('true')
+      await deskPage.locator('[data-phone-action="count-in"]').click()
+      await expect.poll(async () => deskPage.locator('[data-phone-action="count-in"] .count-state').innerText()).toBe('2 bars')
       await deskPage.screenshot({ path: '/opt/cursor/artifacts/desktop-1440-transport.png', fullPage: true })
       await deskPage.locator('#transport-delete').click()
       const deskConfirm = deskPage.getByRole('dialog', { name: /Delete track/ })

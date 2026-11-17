@@ -68,7 +68,13 @@
 }
 
 /* Phone sheets rise from the bottom bar. Tabs, transport, and the bar stay visible.
-   The menu matches the browser sheet and scrolls inside that height. */
+   The menu matches the browser sheet and scrolls inside that height.
+   Desk and fold sheets stop at the same bottom bar. */
+body:has(.shell.studio:not(.phone)) [data-screen-overlay].guide-sheet,
+body:has(.shell.studio:not(.phone)) [data-screen-overlay].phone-sheet,
+body:has(.shell.studio:not(.phone)) [data-screen-overlay].anchored-menu {
+  bottom: var(--phone-chrome-bottom, 0px) !important;
+}
 body:has(.shell.phone) [data-screen-overlay].phone-sheet,
 body:has(.shell.phone) [data-screen-overlay].guide-sheet {
   top: auto !important;

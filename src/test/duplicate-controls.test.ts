@@ -29,9 +29,10 @@ function dock(store: ProjectStore, menuOpen = false) {
     place: 'arrange',
     menuOpen,
     browseOpen: false,
-    menuRef: { current: null },
+    ideasOpen: false,
     onMenu() {},
     onBrowse() {},
+    onIdeas() {},
     onMenuAction() {},
     onUndo() {},
     onRedo() {},
@@ -52,9 +53,13 @@ describe('removed duplicate controls', () => {
     expect(html).not.toContain('data-phone-action="unstuck"')
     expect(html).not.toContain('>Unstuck<')
     expect(html).not.toContain('data-phone-action="plugins"')
-    expect(html).toContain('data-phone-tab="menu"')
+    expect(html).not.toContain('data-phone-tab="menu"')
+    expect(html).toContain('data-phone-tab="browse"')
+    expect(html).toContain('data-phone-tab="tools"')
+    expect(html).toContain('data-phone-tab="ideas"')
     expect(html).toContain('>Browse<')
     expect(html).toContain('>Tools<')
+    expect(html).toContain('>Ideas<')
   })
 
   it('keeps New, Open, Save, and Export in the menu and the edit row in the dock', () => {
@@ -141,7 +146,11 @@ describe('removed duplicate controls', () => {
       onSeek() {},
     }))
     expect(phone).not.toContain('id="transport-count"')
-    expect(desk).toContain('id="transport-count"')
+    expect(desk).not.toContain('id="transport-count"')
+    expect(phone).toContain('Tap Tempo')
+    expect(desk).toContain('Tap Tempo')
+    expect(phone).not.toContain('ideas-bulb')
+    expect(desk).not.toContain('ideas-bulb')
     expect(TRANSPORT_COPY.filter((item) => item.id === 'click')).toHaveLength(1)
     expect(TRANSPORT_COPY.filter((item) => item.id === 'count-in')).toHaveLength(1)
     const before = store.project.countInBars

@@ -102,7 +102,8 @@ describe('scaler in the app shell', () => {
           }
         })
         const where = `${shot.width}x${shot.height}`
-        expect(box.tabs, where).toContain('Collab')
+        expect(box.tabs, where).toContain('Menu')
+        expect(box.tabs, where).not.toContain('Collab')
         expect(box.tabs, where).toContain('Arrange')
         expect(box.tabs, where).toContain('Mix')
         expect(box.panelTop, where).toBeGreaterThanOrEqual(box.viewsBottom - 1)

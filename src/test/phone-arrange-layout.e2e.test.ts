@@ -122,7 +122,9 @@ async function measure(page: Page) {
       topIdeas: !!document.querySelector('.topbar .unstuck-btn'),
       addUndo: !!document.querySelector('.arrange-add [data-history="undo"]'),
       addRedo: !!document.querySelector('.arrange-add [data-history="redo"]'),
-      bulb: document.querySelector('.transport .ideas-bulb')?.getAttribute('aria-label') ?? '',
+      bulb: document.querySelector('.transport .tempo-cluster .bpm-readout, .transport .tempo-cluster .tempo-tap')?.getAttribute('aria-label') ?? '',
+      viewTabs: [...document.querySelectorAll('.views button')].map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim()),
+      bottomTabs: [...document.querySelectorAll('.phone-tabs button')].map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim()),
       addOrder: [...document.querySelectorAll('.arrange-add .add-track-btn, .arrange-add [data-history], .arrange-add .ideas-bulb')].map((node) => {
         const rect = node.getBoundingClientRect()
         return { label: (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim(), left: rect.left }
@@ -194,35 +196,39 @@ describe('phone arrange layout', () => {
             expect(layout.face, viewport.name).toBeLessThanOrEqual(layout.ruler)
             expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(40)
             expect(layout.addBtnHeight, viewport.name).toBeLessThanOrEqual(44)
-            expect(layout.topMenu, viewport.name).toBe(false)
+            expect(layout.topMenu, viewport.name).toBe(true)
             expect(layout.topName, viewport.name).toBe(false)
             expect(layout.topUndo, viewport.name).toBe(false)
             expect(layout.topIdeas, viewport.name).toBe(false)
             expect(layout.addUndo, viewport.name).toBe(false)
             expect(layout.addRedo, viewport.name).toBe(false)
-            expect(layout.bulb, viewport.name).toBe('Ideas')
+            expect(layout.viewTabs, viewport.name).toEqual(['Menu', 'Arrange', 'Mix'])
+            expect(layout.bottomTabs, viewport.name).toEqual(['Browse', 'Tools', 'Ideas'])
+            expect(layout.bulb, viewport.name).toMatch(/^Tap Tempo/)
             expect(layout.pluginsInBar, viewport.name).toBe(false)
             expect(Math.abs(layout.laneLeft - layout.headRight), viewport.name).toBeLessThanOrEqual(2)
             expect(layout.laneWidth, viewport.name).toBeGreaterThan(viewport.width * 0.4)
             const labels = layout.barButtons.map((button) => button.label)
-            expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(false)
             expect(labels.some((label) => label === 'Browse'), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
+            expect(labels.some((label) => label === 'Ideas'), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Setup')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Snap')), viewport.name).toBe(true)
-            expect(labels.some((label) => label.startsWith('Unstuck') || label === 'Ideas'), viewport.name).toBe(false)
+            expect(labels.some((label) => label.startsWith('Unstuck')), viewport.name).toBe(false)
             expect(labels.some((label) => label.startsWith('Metronome')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Undo')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Redo')), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Click'), viewport.name).toBe(false)
+            expect(labels.some((label) => label.startsWith('Tap Tempo') || label.startsWith('Tempo')), viewport.name).toBe(false)
             expect(layout.transportClick, viewport.name).toBe(false)
             expect(layout.metroButtons, viewport.name).toBe(1)
-            const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
             const browserBtn = layout.barButtons.find((button) => button.label === 'Browse')!
             const toolsBtn = layout.barButtons.find((button) => button.label === 'Tools')!
-            expect(menu.left, viewport.name).toBeLessThan(browserBtn.left)
+            const ideasBtn = layout.barButtons.find((button) => button.label === 'Ideas')!
             expect(browserBtn.left, viewport.name).toBeLessThan(toolsBtn.left)
-            expect(menu.top, viewport.name).toBeGreaterThanOrEqual(browserBtn.top - 2)
+            expect(toolsBtn.left, viewport.name).toBeLessThan(ideasBtn.left)
+            expect(browserBtn.top, viewport.name).toBeGreaterThanOrEqual(toolsBtn.top - 2)
             for (const button of layout.barButtons) {
               expect(button.clipped, `${viewport.name} ${button.label}`).toBe(false)
               expect(button.height, `${viewport.name} ${button.label}`).toBeGreaterThanOrEqual(40)
@@ -232,7 +238,7 @@ describe('phone arrange layout', () => {
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(20)
             expect(layout.ruler, viewport.name).toBeLessThanOrEqual(24)
             expect(layout.face, viewport.name).toBeLessThanOrEqual(layout.ruler + 1)
-            expect(layout.topMenu, viewport.name).toBe(false)
+            expect(layout.topMenu, viewport.name).toBe(true)
             expect(layout.topName, viewport.name).toBe(false)
             expect(layout.topUndo, viewport.name).toBe(false)
             expect(layout.topIdeas, viewport.name).toBe(false)
@@ -242,24 +248,28 @@ describe('phone arrange layout', () => {
             expect(layout.strip, viewport.name).toBeGreaterThanOrEqual(28)
             expect(layout.gripHit, viewport.name).toBeLessThanOrEqual(layout.ruler + 1)
             const labels = layout.barButtons.map((button) => button.label)
-            expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(false)
             expect(labels.some((label) => label === 'Browse'), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
-            expect(labels.some((label) => label.startsWith('Unstuck') || label === 'Ideas'), viewport.name).toBe(false)
+            expect(labels.some((label) => label === 'Ideas'), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Unstuck')), viewport.name).toBe(false)
             expect(labels.some((label) => label.startsWith('Setup')), viewport.name).toBe(true)
             expect(layout.transportClick, viewport.name).toBe(false)
             expect(layout.metroButtons, viewport.name).toBe(1)
-            const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
             const browserBtn = layout.barButtons.find((button) => button.label === 'Browse')!
-            expect(menu.left, viewport.name).toBeLessThan(browserBtn.left)
-            expect(layout.bulb, viewport.name).toBe('Ideas')
+            const ideasBtn = layout.barButtons.find((button) => button.label === 'Ideas')!
+            expect(browserBtn.left, viewport.name).toBeLessThan(ideasBtn.left)
+            expect(layout.viewTabs, viewport.name).toEqual(['Menu', 'Arrange', 'Mix'])
+            expect(layout.bulb, viewport.name).toMatch(/^Tap Tempo/)
           } else {
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(36)
             expect(layout.topMenu, viewport.name).toBe(true)
             expect(layout.topName, viewport.name).toBe(true)
             expect(layout.topUndo, viewport.name).toBe(true)
             expect(layout.topIdeas, viewport.name).toBe(false)
-            expect(layout.bulb, viewport.name).toBe('Ideas')
+            expect(layout.viewTabs, viewport.name).toEqual(['Menu', 'Arrange', 'Mix'])
+            expect(layout.bottomTabs, viewport.name).toEqual(['Browse', 'Tools', 'Ideas'])
+            expect(layout.bulb, viewport.name).toMatch(/^Tap Tempo/)
             expect(layout.addUndo, viewport.name).toBe(false)
             expect(layout.pluginsInBar, viewport.name).toBe(true)
             expect(await page.locator('#arrange-plugins').count(), viewport.name).toBe(0)
@@ -494,22 +504,28 @@ describe('phone arrange layout', () => {
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-snap.png` })
           await snapSheet.getByRole('button', { name: 'Close', exact: true }).click()
 
-          await page.getByRole('button', { name: /^Collab/ }).first().click()
-          await page.locator('[data-collab-panel="open"]').waitFor()
-          const collab = await page.evaluate(() => ({
+          await page.getByRole('button', { name: 'Ideas', exact: true }).click()
+          await page.locator('[data-unstuck="open"]').waitFor()
+          const ideas = await page.evaluate(() => ({
             topMenu: !!document.querySelector('.topbar .menu-btn'),
             topName: !!document.querySelector('.topbar .project-name'),
             tabsTop: document.querySelector('.views')?.getBoundingClientRect().top ?? 99,
-            labels: [...document.querySelectorAll('.tool-slot button')].map((node) => (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim()),
+            tabsVisible: (() => {
+              const node = document.querySelector('.phone-tabs')
+              if (!node) return false
+              const box = node.getBoundingClientRect()
+              return box.height > 8 && box.bottom <= window.innerHeight + 1
+            })(),
+            collab: document.body.innerText.includes('Host a Collab') || document.body.innerText.includes('Join a Collab'),
           }))
-          expect(collab.topMenu, shot.name).toBe(false)
-          expect(collab.topName, shot.name).toBe(false)
-          expect(collab.tabsTop, shot.name).toBeLessThanOrEqual(8)
-          expect(collab.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
-          expect(collab.labels.some((label) => label === 'Browse'), shot.name).toBe(true)
-          expect(collab.labels.some((label) => label === 'Tools'), shot.name).toBe(true)
-          expect(collab.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(collab.labels.findIndex((label) => label === 'Browse'))
-          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-collab.png` })
+          expect(ideas.topMenu, shot.name).toBe(true)
+          expect(ideas.topName, shot.name).toBe(false)
+          expect(ideas.tabsTop, shot.name).toBeLessThanOrEqual(8)
+          expect(ideas.tabsVisible, shot.name).toBe(true)
+          expect(ideas.collab, shot.name).toBe(false)
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-ideas.png` })
+          await page.getByRole('button', { name: 'Ideas', exact: true }).click()
+          await page.locator('[data-unstuck="open"]').waitFor({ state: 'detached' })
 
           await page.getByRole('button', { name: /^Mix/ }).first().click()
           await page.locator('.mixer').first().waitFor()
@@ -528,15 +544,16 @@ describe('phone arrange layout', () => {
               barBottom: bar?.bottom ?? null,
             }
           })
-          expect(mix.topMenu, shot.name).toBe(false)
+          expect(mix.topMenu, shot.name).toBe(true)
           expect(mix.topName, shot.name).toBe(false)
           expect(mix.topUndo, shot.name).toBe(false)
           expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(8)
-          expect(mix.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
+          expect(mix.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(false)
           expect(mix.labels.some((label) => label === 'Browse'), shot.name).toBe(true)
           expect(mix.labels.some((label) => label === 'Tools'), shot.name).toBe(true)
+          expect(mix.labels.some((label) => label === 'Ideas'), shot.name).toBe(true)
           expect(mix.labels.some((label) => label.startsWith('Vocal')), shot.name).toBe(false)
-          expect(mix.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(mix.labels.findIndex((label) => label === 'Browse'))
+          expect(mix.labels.findIndex((label) => label === 'Browse')).toBeLessThan(mix.labels.findIndex((label) => label === 'Ideas'))
           expect(await page.locator('#transport-count').count(), shot.name).toBe(0)
           expect(mix.moreHeight, shot.name).toBeGreaterThanOrEqual(40)
           expect(mix.moreBottom, shot.name).toBeLessThanOrEqual((mix.barBottom ?? 0) + 1)
@@ -547,7 +564,8 @@ describe('phone arrange layout', () => {
             const mixActions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
             expect(mixActions).toContain('new')
             expect(mixActions).not.toContain('ideas')
-            expect(await page.locator('.transport .ideas-bulb').count()).toBeGreaterThan(0)
+            expect(await page.locator('.transport .tempo-cluster').count()).toBeGreaterThan(0)
+            expect(await page.locator('.transport .ideas-bulb').count()).toBe(0)
           }
           const mixMenu = await sheetClearance('.anchored-menu.phone-sheet', 'Menu')
           expect(mixMenu!.coversTabs, shot.name).toBe(false)

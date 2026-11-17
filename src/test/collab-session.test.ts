@@ -30,14 +30,14 @@ describe('collab tab and setup copy', () => {
   it('draws Collab as the first tab', () => {
     const html = renderToStaticMarkup(createElement(ViewSwitcher, {
       active: 'arrange',
-      collabShown: false,
       phonePane: 'edit',
-      collabBadge: false,
+      menuOpen: false,
       onView: () => undefined,
-      onCollab: () => undefined,
+      onMenu: () => undefined,
     }))
-    expect(html.indexOf('Collab')).toBeGreaterThan(-1)
-    expect(html.indexOf('Collab')).toBeLessThan(html.indexOf('Arrange'))
+    expect(html.indexOf('Menu')).toBeGreaterThan(-1)
+    expect(html.indexOf('Menu')).toBeLessThan(html.indexOf('Arrange'))
+    expect(html).not.toContain('Collab')
     expect(html.indexOf('Arrange')).toBeLessThan(html.indexOf('Mix'))
   })
 

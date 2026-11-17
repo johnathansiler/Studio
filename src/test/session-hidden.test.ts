@@ -16,11 +16,10 @@ function shell() {
   return renderToStaticMarkup(createElement('div', null,
     createElement(ViewSwitcher, {
       active: 'arrange',
-      collabShown: false,
       phonePane: 'edit',
-      collabBadge: false,
+      menuOpen: false,
       onView: () => undefined,
-      onCollab: () => undefined,
+      onMenu: () => undefined,
     }),
     createElement(MainMenu, {
       items: visibleMenu({ phone: false, session: true, dockBottom: false, hardwareMidi: true }),
@@ -50,9 +49,10 @@ describe('session launcher hidden', () => {
     expect(FEATURES.session).toBe(false)
     expect(__CUEHARBOR_SESSION__).toBe(false)
     const html = shell()
+    expect(html).toContain('Menu')
     expect(html).toContain('Arrange')
     expect(html).toContain('Mix')
-    expect(html).toContain('Collab')
+    expect(html).not.toContain('Collab')
     expect(html).not.toContain('>Beats<')
     expect(html).not.toContain('>Session<')
     expect(html).not.toContain('Session. Launch clips')

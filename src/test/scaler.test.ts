@@ -152,7 +152,7 @@ describe('scaler instrument', () => {
   it('is not its own view tab', () => {
     expect(SESSION_VIEW.id).toBe('session')
     expect(VIEW_COPY.map((item) => item.id)).toEqual(FEATURES.session
-      ? ['arrange', 'mix', 'session', 'collab']
-      : ['arrange', 'mix', 'collab'])
+      ? ['arrange', 'mix', 'session']
+      : ['arrange', 'mix'])
   })
 })
