@@ -111,6 +111,7 @@ export function ToolBar({
           <ToolIcon id={value} />
           <span className="tool-label">{current.label}</span>
         </button>
+        <div id="contextual-delete" className="contextual-delete" />
         {extra}
         {clipOn && (
           <>

@@ -7,7 +7,7 @@ import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../stat
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { SnapChoices } from './UtilitySheets'
-import { eqCols } from './equalGrid'
+import { DeleteTrackConfirm, applyTrackDelete, eqCols } from './equalGrid'
 import { useScreenOverlay } from './screenOverlay'
 import {
   phoneContextKind,
@@ -30,6 +30,23 @@ function MetronomeIcon() {
     <svg className="metro-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4.2 14.2h7.6L8.4 2.4 4.2 14.2z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
       <path d="M8 12.6V6.2L11.2 8.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function LoopIcon() {
+  return (
+    <svg className="loop-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.4 6.1a4.4 4.4 0 0 1 7.7-1.5M12.6 9.9a4.4 4.4 0 0 1-7.7 1.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M10.2 2.8 12.2 4.6 10.1 6.4M5.8 13.2 3.8 11.4 5.9 9.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function DeleteIcon() {
+  return (
+    <svg className="t-ico" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.2 4.2h9.6M6.2 4.1V3h3.6v1.1M4.4 4.2l.6 8.2h5.9l.6-8.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -108,8 +125,8 @@ function TransportMoreSheet({ store, onClose }: { store: ProjectStore; onClose: 
   const project = store.project
   const count = countInCaption(countInBarsOf(project))
   return (
-    <ArrangeBottomSheet id="phone-transport-more" label="More" title="More" detail="Loop, metronome, and count." onClose={onClose}>
-      <div className="phone-more-rows" role="group" aria-label="Loop, metronome, and count">
+    <ArrangeBottomSheet id="phone-transport-more" label="More" title="More" detail="Loop, metronome, and count-in." onClose={onClose}>
+      <div className="phone-more-rows" role="group" aria-label="Loop, metronome, and count-in">
         <button type="button" aria-pressed={project.loopEnabled} onClick={() => store.toggle('loopEnabled')}>
           <strong>Loop</strong>
           <span>{project.loopEnabled ? 'On' : 'Off'}</span>
@@ -119,7 +136,7 @@ function TransportMoreSheet({ store, onClose }: { store: ProjectStore; onClose: 
           <span>{project.metronomeEnabled ? 'On' : 'Off'}</span>
         </button>
         <button type="button" aria-pressed={project.countIn} onClick={() => store.cycleCountIn()}>
-          <strong>Count</strong>
+          <strong>Count-in</strong>
           <span>{count}</span>
         </button>
       </div>
@@ -184,6 +201,7 @@ export function PhoneDock({
   const focus = useSyncExternalStore(subscribePhoneFocus, phoneFocus, () => 'none' as const)
   const [offstage, setOffstage] = useState<'tools' | 'snap' | null>(null)
   const [transportMore, setTransportMore] = useState(false)
+  const [trackDelete, setTrackDelete] = useState<{ id: string; name: string } | null>(null)
   const [host, setHost] = useState<HTMLElement | null>(null)
   const arrangeLive = place === 'arrange'
   const toolsOpen = (arrangeLive && utility === 'tools') || offstage === 'tools'
@@ -244,6 +262,18 @@ export function PhoneDock({
     store.splitAt(clip.trackId, clip.clipId, playheadSample())
   }
 
+  const countBars = countInBarsOf(store.project)
+  const countCaption = countInCaption(countBars)
+  const trackArmed = focus === 'track' && Boolean(track)
+  const showArrangeDelete = Boolean(clip || notes || trackArmed)
+  function deleteArrangeSelection() {
+    if (clip || notes) {
+      store.deleteSelectedClip()
+      return
+    }
+    if (trackArmed && track) setTrackDelete({ id: track.id, name: track.name })
+  }
+
   function closeTools() {
     if (arrangeLive) {
       if (utility === 'tools') toggleArrangeSheet('tools')
@@ -268,9 +298,19 @@ export function PhoneDock({
   return (
     <>
       {host && sheet ? createPortal(sheet, host) : null}
+      {trackDelete ? createPortal(
+        <DeleteTrackConfirm
+          name={trackDelete.name}
+          onChoose={(choice) => {
+            applyTrackDelete(store, trackDelete.id, choice)
+            setTrackDelete(null)
+          }}
+        />,
+        document.body,
+      ) : null}
       {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
       {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
-      <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}${kind === 'mix' ? ' eq-grid phone-mix-row' : ''}`} style={kind === 'mix' ? eqCols(4) : undefined} role="toolbar" aria-label="Actions" data-phone-context={kind}>
+      <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}${kind === 'mix' ? ' eq-grid phone-mix-row' : ''}`} style={kind === 'mix' ? eqCols(3) : kind === 'arrange' ? { ['--arrange-cols' as string]: String(9 + (showArrangeDelete ? 1 : 0)) } : undefined} role="toolbar" aria-label="Actions" data-phone-context={kind}>
         {kind === 'clip' && clip && (
           <>
             {clip.kind !== 'pattern' && (
@@ -299,6 +339,9 @@ export function PhoneDock({
           <>
             <Hit action="mute" label="Mute" title="Silence this track." pressed={track.mute} onClick={() => store.toggleTrack(track.id, 'mute')} />
             <Hit action="solo" label="Solo" title="Hear only this track." pressed={track.solo} onClick={() => store.toggleTrack(track.id, 'solo')} />
+            <Hit action="delete" label="Delete" title={`Delete track ${track.name}.`} onClick={() => setTrackDelete({ id: track.id, name: track.name })}>
+              <DeleteIcon />
+            </Hit>
           </>
         )}
         {kind === 'notes' && (
@@ -313,7 +356,7 @@ export function PhoneDock({
             <Hit
               action="more"
               label="More"
-              title="Loop, metronome, and count."
+              title="Loop, metronome, and count-in."
               pressed={transportMore}
               onClick={() => setTransportMore((open) => !open)}
             />
@@ -345,7 +388,35 @@ export function PhoneDock({
             <Hit action="metronome" label="Metronome" title="Metronome while you play and record." pressed={store.project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
               <MetronomeIcon />
             </Hit>
+            <Hit
+              action="loop"
+              label={`Loop. ${store.project.loopEnabled ? 'On' : 'Off'}`}
+              title="Repeat the highlighted region. Drag its edges to change the length."
+              pressed={store.project.loopEnabled}
+              onClick={() => store.toggle('loopEnabled')}
+            >
+              <LoopIcon />
+            </Hit>
+            <Hit
+              action="count-in"
+              label={`Count-in. ${countCaption}`}
+              title={`Count-in is ${countCaption}. Tap for off, one bar, or two bars.`}
+              pressed={countBars > 0}
+              onClick={() => store.cycleCountIn()}
+            >
+              <span className="count-state" data-count-state={countCaption}>{countCaption}</span>
+            </Hit>
             <div id="transport-extras" className="transport-extras-slot" />
+            {showArrangeDelete && (
+              <Hit
+                action="delete"
+                label="Delete"
+                title={clip || notes ? 'Remove the selection.' : `Delete track ${track?.name ?? ''}.`}
+                onClick={deleteArrangeSelection}
+              >
+                <DeleteIcon />
+              </Hit>
+            )}
           </>
         )}
       </div>

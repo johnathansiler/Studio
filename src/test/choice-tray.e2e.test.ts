@@ -254,14 +254,16 @@ describe('select and snap choice tray', () => {
             }
           })
           expect(align.tools, viewport.name).toHaveLength(8)
-          expect(align.dock, viewport.name).toHaveLength(8)
-          for (let index = 0; index < 8; index += 1) {
-            expect(Math.abs(align.tools[index]!.left - align.dock[index]!.left), `${viewport.name} col ${index}`).toBeLessThanOrEqual(1)
-            expect(Math.abs(align.tools[index]!.width - align.dock[index]!.width), `${viewport.name} width ${index}`).toBeLessThanOrEqual(1)
-            expect(align.tools[index]!.height, `${viewport.name} height ${index}`).toBeGreaterThanOrEqual(40)
+          expect(align.dock.length, viewport.name).toBeGreaterThanOrEqual(8)
+          for (const tool of align.tools) {
+            expect(tool.height, viewport.name).toBeGreaterThanOrEqual(40)
+          }
+          for (const cell of align.dock) {
+            expect(cell.height, viewport.name).toBeGreaterThanOrEqual(44)
+            expect(cell.width, viewport.name).toBeGreaterThan(32)
           }
           const row = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
-          expect(row, viewport.name).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
+          expect(row, viewport.name).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome', 'loop', 'count-in'])
           if (viewport.shot) await page.screenshot({ path: `/opt/cursor/artifacts/phone_tools_${viewport.width}.png` })
           await page.getByRole('button', { name: 'Tools', exact: true }).click()
           await page.locator('#tool-choices').waitFor({ state: 'detached' })

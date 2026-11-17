@@ -62,11 +62,24 @@ describe('track view layout', () => {
         expect(words(main)).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
       }
       const extras = html.slice(html.indexOf('transport-extras'))
-      expect(extras).toContain('>Delete<')
+      expect(extras).not.toContain('>Delete<')
+      expect(extras).not.toContain('id="transport-delete"')
       expect(extras).toContain(phone ? '>Tap<' : '>Tempo<')
       expect(extras).toContain('>Duplicate<')
       expect(extras).not.toContain('>Punch<')
       expect(extras).not.toContain('>Reset<')
+      expect(extras).not.toContain('>Click<')
+      expect(extras).not.toContain('>1-2<')
+      if (phone) {
+        expect(extras).not.toContain('id="transport-loop"')
+        expect(extras).not.toContain('>Metronome<')
+        expect(extras).not.toContain('>Count-in<')
+      } else {
+        expect(extras).toContain('id="transport-loop"')
+        expect(extras).toContain('>Loop<')
+        expect(extras).toContain('>Metronome<')
+        expect(extras).toContain('>Count-in<')
+      }
     }
   })
 

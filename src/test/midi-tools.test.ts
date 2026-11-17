@@ -85,6 +85,9 @@ describe('MIDI learn', () => {
     expect(applyMapped(entry, cc, 0)).toBeCloseTo(1.25)
     expect(applyMapped(entry, { ...cc, value: 0 }, 0)).toBe(0)
     const mute = slotFromNode({ trackId: 'keys', text: 'M' })!
+    expect(slotFromNode({ text: 'Metronome', aria: 'Metronome. Metronome while you play and record.' })).toMatchObject({ target: 'transport:click', label: 'Metronome' })
+    expect(slotFromNode({ text: 'Click', aria: 'Click' })).toMatchObject({ target: 'transport:click', label: 'Metronome' })
+    expect(slotFromNode({ text: 'Loop', aria: 'Loop. Repeat the highlighted region. Drag its edges to change the length.' })).toMatchObject({ target: 'transport:loop', label: 'Loop' })
     const noteOn = parseMidi([0x90, 36, 100])!
     const toggle = bindingFromMessage(mute, noteOn, 'map2')
     expect(applyMapped(toggle, noteOn, 0)).toBe(1)

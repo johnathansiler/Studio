@@ -42,7 +42,7 @@ const VIEWPORTS = [
   { name: '1440x900', width: 1440, height: 900 },
 ]
 
-const TAKE = ['Record', 'Overdub', 'Replace', 'Stop', 'Play', 'Play start', 'Erase', 'Arm pad', 'Count in', 'Metronome', 'Trim', 'Auto chop', 'More']
+const TAKE = ['Record', 'Overdub', 'Replace', 'Stop', 'Play', 'Play start', 'Erase', 'Arm pad', 'Count-in', 'Metronome', 'Trim', 'Auto chop', 'More']
 
 describe('beat machine face fits the phone', () => {
   it('keeps the sampler row and the take transport on screen', async () => {
