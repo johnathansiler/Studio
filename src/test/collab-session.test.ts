@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -21,8 +22,9 @@ import { collabChoosing, connectionLine, personConnection, selfConnection, worst
 import { copyOf, CALL_COPY } from '../ui/chrome'
 import { withoutInviteParams } from '../storage/identity'
 import { shareSessionLink } from '../ui/share'
-import { SETUP_PLAIN } from '../ui/collabCopy'
+import { COLLAB_START_LINE, SETUP_PLAIN } from '../ui/collabCopy'
 import { ViewSwitcher } from '../ui/ViewSwitcher'
+import { VideoDock } from '../ui/VideoDock'
 
 describe('collab tab and setup copy', () => {
   it('draws Collab as the first tab', () => {
@@ -125,6 +127,7 @@ describe('auto-join', () => {
   it('starts on Host and Join until a session is open', () => {
     expect(copyOf(CALL_COPY, 'create').label).toBe('Host a Collab')
     expect(copyOf(CALL_COPY, 'join').label).toBe('Join a Collab')
+    expect(COLLAB_START_LINE).toBe('Call, video, and record together.')
     expect(collabChoosing('idle')).toBe(true)
     expect(collabChoosing('error')).toBe(true)
     expect(collabChoosing('rejected')).toBe(true)
@@ -133,6 +136,89 @@ describe('auto-join', () => {
     expect(collabChoosing('waiting')).toBe(false)
     expect(collabChoosing('live')).toBe(false)
     expect(collabChoosing('reconnecting')).toBe(false)
+  })
+})
+
+describe('collab start sheet', () => {
+  function startMarkup(status: 'idle' | 'rejected' | 'removed' | 'error' = 'idle') {
+    const session = {
+      state: {
+        status,
+        error: status === 'error' ? 'The room did not open.' : '',
+        name: 'Engineer',
+        participants: [],
+        chat: [],
+        reactions: {},
+        media: {},
+        devices: [],
+        usageNotice: '',
+        hostLeft: false,
+        turn: 'none',
+        selfId: '',
+        code: '',
+        talkOn: false,
+        camOn: false,
+        hand: false,
+        musicOn: true,
+        activeSpeakerId: null,
+        micId: '',
+        camId: '',
+        outId: '',
+        takeProgress: null,
+        latency: {},
+        mediaTick: 0,
+        screenOn: false,
+      },
+      primaryOneWay: () => null,
+      setIncomingVideo: () => undefined,
+      subscribe: () => () => undefined,
+    }
+    return renderToStaticMarkup(createElement(VideoDock, {
+      session: session as never,
+      engine: { levels: () => ({ input: 0, talk: 0 }) } as never,
+      store: { project: { id: 'p' } } as never,
+      versionTick: 0,
+      onCreate: () => undefined,
+      onJoinInvite: () => undefined,
+      onSaveVersion: () => undefined,
+    }))
+  }
+
+  it('puts a one-line description above Host and Join in a session tray', () => {
+    const html = startMarkup()
+    expect(html).toContain('data-collab-phase="start"')
+    expect(html).toContain('data-collab-start="open"')
+    expect(html).toContain(`>${COLLAB_START_LINE}<`)
+    const lede = html.indexOf('collab-lede')
+    const actions = html.indexOf('collab-actions')
+    const host = html.indexOf('Host a Collab')
+    const join = html.indexOf('Join a Collab')
+    expect(lede).toBeGreaterThan(-1)
+    expect(lede).toBeLessThan(actions)
+    expect(actions).toBeLessThan(host)
+    expect(host).toBeLessThan(join)
+    expect(html).toContain('aria-label="Session"')
+    expect(html).toContain('btn-tray')
+    expect(html).not.toContain('>Mic<')
+    expect(html).not.toContain('Copy Link')
+    const css = readFileSync(new URL('../ui/collab.css', import.meta.url), 'utf8')
+    expect(css).toContain('.collab-start-sheet')
+    expect(css).toContain('var(--tray-bg')
+    expect(css).toContain(':has(.dock[data-collab-phase="start"])')
+    expect(css).toMatch(/:has\(\.dock\[data-collab-phase="start"\]\)[\s\S]*display:\s*flex/)
+  })
+
+  it('keeps Host and Join next to the note when a session was declined or removed', () => {
+    for (const status of ['rejected', 'removed', 'error'] as const) {
+      const html = startMarkup(status)
+      expect(html).toContain(COLLAB_START_LINE)
+      expect(html).toContain('Host a Collab')
+      expect(html).toContain('Join a Collab')
+      expect(html).toContain('role="status"')
+    }
+    expect(startMarkup('rejected')).toContain('The host declined this session.')
+    expect(startMarkup('removed')).toContain('You were removed from this session.')
+    expect(startMarkup('error')).toContain('The room did not open.')
   })
 })
 
