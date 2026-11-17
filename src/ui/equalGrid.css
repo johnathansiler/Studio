@@ -211,10 +211,11 @@
   flex-flow: row nowrap;
 }
 
-/* Arrange dock: nine equal cells on one row. Height is 44px. A selected Delete is the tenth cell. */
+/* Arrange dock: each cell is at least 44px. A narrow phone scrolls the row
+   instead of shrinking a hit under 44. A selected Delete is an extra cell. */
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] {
   display: grid;
-  grid-template-columns: repeat(var(--arrange-cols, 9), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--arrange-cols, 9), minmax(44px, 1fr));
   grid-auto-rows: 44px;
   align-items: stretch;
   justify-content: stretch;
@@ -223,8 +224,24 @@
   max-width: 100%;
   min-height: 44px;
   height: auto;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"]::-webkit-scrollbar { display: none; }
+/* Tempo stays inside the first seven 44px cells, so a 344px phone can hit it
+   without scrolling. Count-in and Duplicate follow and can scroll. */
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="undo"] { order: 1; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="redo"] { order: 2; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="snap"] { order: 3; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="setup"] { order: 4; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="metronome"] { order: 5; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="loop"] { order: 6; }
+.shell.phone .phone-context[data-phone-context="arrange"] .bpm-readout { order: 7; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="count-in"] { order: 8; }
+.shell.phone .phone-context[data-phone-context="arrange"] .t-btn.duplicate { order: 9; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="delete"] { order: 10; }
 
 /* The shared tray pad is 5px. On a short landscape that extra 10px drops the
    first track's Mute row just under the header scroller. Keep the 44px hits
@@ -237,7 +254,7 @@
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .bpm-readout {
   width: 100%;
-  min-width: 0;
+  min-width: 44px;
   height: 44px;
   min-height: 44px;
   max-height: 44px;
@@ -283,7 +300,7 @@
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .transport-extras .bpm-readout,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit {
   width: 100% !important;
-  min-width: 0 !important;
+  min-width: 44px !important;
   max-width: none !important;
   flex: none !important;
   height: 44px !important;
@@ -524,4 +541,86 @@
 .unstuck-grid button[data-unstuck-action='next-section'] {
   grid-column: 1 / -1;
   min-height: 40px;
+}
+
+/* Phone hits are 44px. Default lanes keep the old row height: the border box
+   grows by 2px each way and the layout size stays put. Zoomed-out lanes are
+   left alone so a 40px lane can still hold its menu. */
+.shell.phone .bpm-readout,
+.shell.phone .bpm-readout.tempo-tap,
+.shell.phone .bpm-readout.tempo-edit,
+.shell.phone .tap-tempo {
+  min-width: 44px !important;
+  min-height: 44px !important;
+  height: 44px !important;
+  max-height: 44px !important;
+}
+
+.shell.phone .arrange:not([data-lane-scale="min"]):not([data-lane-scale="tight"]) .pl-head .track-controls > .mini {
+  box-sizing: border-box !important;
+  min-width: 44px !important;
+  min-height: 44px !important;
+  height: 44px !important;
+  max-height: 44px !important;
+  margin-top: -2px !important;
+  margin-bottom: -2px !important;
+}
+
+.shell.phone:not(.land) .arrange:not([data-lane-scale="min"]):not([data-lane-scale="tight"]) .pl-head .track-controls > .mini {
+  width: 44px !important;
+  max-width: 44px !important;
+}
+
+.shell.phone:not(.land) .arrange:not([data-lane-scale="min"]):not([data-lane-scale="tight"]) .track-controls {
+  gap: 0 !important;
+}
+
+/* The 44px pills are wider than the old 186px column. Let the header grow
+   with them so Mute, Solo, Arm, and the menu stay inside the row. */
+.shell.phone:not(.land) .arrange:not([data-lane-scale="min"]):not([data-lane-scale="tight"]) .heads {
+  width: max-content !important;
+  min-width: max-content !important;
+  max-width: max-content !important;
+}
+
+.shell.phone.land .arrange:not([data-lane-scale="min"]):not([data-lane-scale="tight"]) .pl-head .track-controls > .mini {
+  width: max-content !important;
+  max-width: none !important;
+}
+
+.shell.phone .arrange:not([data-lane-scale="min"]):not([data-lane-scale="tight"]) .head button.track-title,
+.shell.phone .arrange:not([data-lane-scale="min"]):not([data-lane-scale="tight"]) .head input.track-title {
+  box-sizing: border-box !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  margin-top: -2px !important;
+  margin-bottom: -2px !important;
+  padding: 10px 6px !important;
+  line-height: 24px !important;
+  position: relative;
+  z-index: 2;
+}
+
+.shell.phone .pan-knob,
+.shell.phone .pan-knob-wrap,
+.shell.phone .mixer-view .pan-knob,
+.shell.phone .mixer-view .pan-knob-wrap,
+.shell.phone .mixer-view .strip-pan .pan-knob,
+.shell.phone .mixer-view .strip-pan .pan-knob-wrap {
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  min-height: 44px !important;
+  max-width: 44px !important;
+  max-height: 44px !important;
+}
+
+.shell.phone .mixer-view .strip-pan,
+.shell.phone .mixer-view.mixer-console .strip-pan {
+  flex-basis: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  overflow: visible !important;
 }

@@ -147,6 +147,116 @@
   padding: 8px;
 }
 .me-staff svg { display: block; min-width: 100%; }
+
+/* Roll, Step, Drums, and Score stay whole words. The row wraps onto its own line
+   when Close and the other tools leave too little room, and it can scroll if a
+   label is still wider than the screen. */
+.roll-head .mode-tabs {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: 4px;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  min-width: max-content;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 0;
+  background: transparent;
+  scrollbar-width: none;
+}
+/* Wide headers keep Roll/Step/Drums/Score beside the tool row. A flex-basis of
+   auto made that row wrap away and leave only a sliver of the piano. */
+@media (min-width: 561px) {
+  .shell .piano .roll-head .scale-bar,
+  .shell .midi-dock .roll-head .scale-bar {
+    flex: 1 1 0%;
+    min-width: 0;
+    width: auto;
+  }
+}
+/* Portrait phones have no room beside Close. The four labels take the whole row. */
+@media (max-width: 560px) {
+  .roll-head .mode-tabs {
+    flex: 1 0 100%;
+    width: 100%;
+    min-width: 0;
+  }
+}
+.roll-head .mode-tabs::-webkit-scrollbar { display: none; }
+.shell .roll-head .mode-tabs,
+.shell .midi-dock .roll-head .mode-tabs,
+.shell .piano .roll-head .mode-tabs {
+  flex-wrap: wrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: auto;
+}
+.shell .mode-tabs button.mode-tab,
+.mode-tabs button.mode-tab {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(40px, max-content);
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 10px;
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+.shell.phone .mode-tabs button.mode-tab,
+.shell.fold .mode-tabs button.mode-tab {
+  height: 44px;
+  min-height: 44px;
+}
+
+/* The phone dock sits on top of the editor. Pad the drum grid and the score
+   by its measured height so the last lane and the staff stay above it.
+   The plugin transport already lives in that dock band, so it must not also
+   take a row out of the grid. */
+.shell.phone .midi-dock > .plugin-transport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+.shell.phone .midi-dock .me-drums,
+.shell.phone .midi-dock .me-score {
+  padding-bottom: var(--phone-chrome-bottom, 0px);
+  box-sizing: border-box;
+}
+.shell.phone .midi-dock .me-lanes {
+  padding-bottom: 12px;
+  scroll-padding-bottom: 12px;
+}
+
+/* One staff used to sit at the top of a tall page. Stretch it to the room under the toolbar. */
+.me-staff {
+  container-type: size;
+  container-name: score-staff;
+}
+.me-staff .score-sheet {
+  height: 100%;
+  min-height: 0;
+  width: max-content;
+  min-width: 100%;
+}
+.me-staff svg.score-svg {
+  display: block;
+  width: auto;
+  max-width: none;
+  height: 100cqh;
+  min-height: 100cqh;
+  min-width: 0;
+}
 .shell.phone .midi-dock { height: 100%; min-height: 0; }
 .shell.phone .midi-dock > .piano,
 .shell.fold .midi-dock > .piano {
@@ -186,6 +296,11 @@
   }
   body.printing-score .me-bar { display: none !important; }
   body.printing-score .me-staff { overflow: visible; background: white; }
+  body.printing-score .me-staff svg.score-svg {
+    height: auto;
+    min-height: 0;
+    width: 100%;
+  }
 }
 
 .roll-playhead {

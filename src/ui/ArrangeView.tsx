@@ -356,13 +356,19 @@ export function ArrangeView({
     const heads = headsRef.current
     const arrange = heads?.closest('.arrange') as HTMLElement | null
     if (!heads || !arrange) return
+    const closest = heads.closest('.heads')
+    const column = closest instanceof HTMLElement ? closest : heads
     const apply = () => {
-      const width = Math.round(heads.getBoundingClientRect().width)
-      if (width > 0) arrange.style.setProperty('--track-head-w', `${width}px`)
+      const width = Math.round(column.getBoundingClientRect().width)
+      if (width > 0) {
+        arrange.style.setProperty('--track-head-w', `${width}px`)
+        const shell = arrange.closest('.shell')
+        if (shell instanceof HTMLElement) shell.style.setProperty('--track-head-w', `${width}px`)
+      }
     }
     apply()
     const observer = new ResizeObserver(apply)
-    observer.observe(heads)
+    observer.observe(column)
     return () => observer.disconnect()
   }, [phone, project.tracks.length])
   const innerRef = useRef<HTMLDivElement>(null)
