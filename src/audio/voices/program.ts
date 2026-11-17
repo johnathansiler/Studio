@@ -1,6 +1,6 @@
 /** Map a Beat Machine pad onto the sample pool. The same calls run in Rust and TypeScript. */
 
-import { padRegion, swingDelay, type PadVoice } from '../../model/padMachine'
+import { padAllowsResidentDrum, padRegion, swingDelay, type PadVoice } from '../../model/padMachine'
 import { scaleVintage, type ChopSetup, type ScaledVintage, type VintageState } from '../../model/padChop'
 import type { PitchMode, VintageStage } from './engine'
 
@@ -233,7 +233,7 @@ export function planPads(input: {
     if (slots.length >= 16 || pad.muted) continue
     const layer = pad.layers.find((item) => item.bufferId) ?? pad.layers[0]
     const asset = layer?.bufferId ? byId.get(layer.bufferId) : undefined
-    const drum = !asset ? resident.get(pad.pitch) : undefined
+    const drum = !asset && padAllowsResidentDrum(pad) ? resident.get(pad.pitch) : undefined
     const data = asset?.samples ?? drum?.samples
     if (!data || data.length < 2) continue
     const key = asset ? asset.id : `resident:${pad.pitch}`

@@ -27,6 +27,18 @@ export interface SoundEntry {
   licenseNote?: string
   creator?: string
   attributionRequired?: boolean
+  /** Required credit for CC BY and CC BY-SA rows. Empty when the license does not require it. */
+  attributionText?: string
+  /** Link to the license deed. */
+  licenseUrl?: string
+  /** Drum role from the catalog, such as kick, closed-hat, or closed_hat. */
+  drumRole?: string
+  peakDb?: number
+  rmsDb?: number
+  /** Leading silence on an unaltered file, in milliseconds. Playback skips it. The file is not rewritten. */
+  leadSilenceMs?: number
+  /** The file must be played as stored. Baker 909 rows set this. */
+  unaltered?: boolean
   isContentAlias?: boolean
   /** `private` files live in this browser. They are not factory URLs. */
   origin?: 'library' | 'private'

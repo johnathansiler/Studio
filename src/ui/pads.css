@@ -1289,3 +1289,12 @@ body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-men
 .vintage-menu label { display: flex; flex-direction: column; gap: 4px; min-height: 44px; font-size: 13px; }
 .vintage-menu label span { color: #c8c8c8; font-size: 12px; }
 .chop-sense { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.mpc-kit-credit {
+  flex: 1 1 100%;
+  margin: 0;
+  max-width: 100%;
+  color: #c8c8c8;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+}

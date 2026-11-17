@@ -100,6 +100,7 @@ export interface PadAssignment {
   name: string
   bufferId?: string
   choke?: number
+  credit?: string
 }
 
 /** The face stays Kick, Hat, Snare. The library name is the tooltip. */
@@ -116,6 +117,8 @@ export function assignPad(pad: PadVoice, assignment: PadAssignment): PadVoice {
     ...pad,
     name: padFaceName(pad),
     sampleName: sampleName || pad.sampleName,
+    sampleError: undefined,
+    sampleCredit: assignment.credit,
     choke: assignment.choke ?? pad.choke,
     layers: [{
       velocityLo: 0,

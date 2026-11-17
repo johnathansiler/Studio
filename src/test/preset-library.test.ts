@@ -27,12 +27,12 @@ const PLUGIN_IDS = [...PRESET_PLUGINS, ...DEVICE_PRESET_IDS]
 describe('shared plugin presets', () => {
   it('loads every factory preset inside its parameter range', () => {
     const all = allFactoryPresets()
-    expect(all.length).toBe(PLUGIN_IDS.length * 8)
+    expect(all.length).toBe(PLUGIN_IDS.length * 8 + 3)
     const names = ['Vocal Presence', 'Kick Punch', 'Low Cut 80 Hz', 'Telephone', 'Vocal Leveling', 'Drum Bus Glue', 'Parallel Smash', 'Bass Control', 'Small Room', 'Plate Vocal', 'Large Hall', 'Slapback', '1/4 Ping-Pong', 'Dub Throw', 'Studio Clean', 'Tight Kit']
     for (const name of names) expect(all.some((item) => item.name === name)).toBe(true)
     for (const pluginId of PLUGIN_IDS) {
       const presets = factoryPresets(pluginId)
-      expect(presets.length).toBe(8)
+      expect(presets.length).toBe(pluginId === 'pads' ? 11 : 8)
       const seen = new Set(presets.map((item) => item.name))
       expect(seen.size).toBe(presets.length)
       const init = resolveParams(pluginId, {})

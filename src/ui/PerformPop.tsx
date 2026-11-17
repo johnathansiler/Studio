@@ -777,7 +777,8 @@ function PadWave({ pad, samples }: { pad: PadVoice; samples?: Float32Array }) {
     const canvas = ref.current
     if (!canvas) return
     const kind = DRUM_PADS.find((item) => item.pitch === pad.pitch)?.kind ?? 'perc'
-    const data = samples ?? renderDrum(kind, 8000, pad.pitch)
+    const data = samples ?? (pad.catalogPad ? new Float32Array(8) : renderDrum(kind, 8000, pad.pitch))
+    canvas.title = pad.sampleError || pad.sampleCredit || ''
     const cssW = Math.max(1, canvas.clientWidth || 320)
     const cssH = Math.max(1, canvas.clientHeight || 72)
     const dpr = Math.min(3, window.devicePixelRatio || 1)

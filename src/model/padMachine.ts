@@ -48,8 +48,17 @@ export interface PadLayer {
 export interface PadVoice {
   pitch: number
   name: string
-  /** Full library name. The pad face keeps the short role name. */
+  /** Full library name. The pad face keeps the short role name. A catalog load error is stored here too so the existing pad tooltip shows it. */
   sampleName?: string
+  /**
+   * This pad is filled from a catalog kit. A missing sample stays quiet.
+   * Older projects omit this and can still play the built-in drum voice.
+   */
+  catalogPad?: boolean
+  /** Why the catalog sample is not on this pad. Empty once a sample is loaded. */
+  sampleError?: string
+  /** Required license credit for this pad's sample. */
+  sampleCredit?: string
   level: number
   pan: number
   send: number
@@ -161,6 +170,16 @@ export interface PadProgram {
   chop?: ChopSetup
   /** Vintage macro and the depths it scales. Saved with the project. */
   vintage?: VintageState
+  /**
+   * New kits load catalog drums and do not fall back to a synthesized burst.
+   * Saved projects from before this flag keep the built-in voices when a pad has no sample.
+   */
+  catalogDrums?: boolean
+}
+
+/** Built-in drum voices play only for pads that were not claimed by a catalog kit. */
+export function padAllowsResidentDrum(pad: { catalogPad?: boolean } | null | undefined): boolean {
+  return pad?.catalogPad !== true
 }
 
 const FREE_PITCHES: number[] = []
@@ -422,8 +441,10 @@ export function kitPreset(id: 'room' | 'tight'): { name: string; tune: number; d
 }
 
 export function createKit(): PadProgram {
+  const banks = BANKS.map((_, bank) => Array.from({ length: 16 }, (_, index) => makePad(bank, index)))
+  for (const pad of banks[0]) pad.catalogPad = true
   return {
-    banks: BANKS.map((_, bank) => Array.from({ length: 16 }, (_, index) => makePad(bank, index))),
+    banks,
     swing: 50,
     trackSwing: 50,
     activeBank: 0,
@@ -455,6 +476,7 @@ export function createKit(): PadProgram {
     recordThreshold: 0.08,
     recordTrim: true,
     recordChop: false,
+    catalogDrums: true,
   }
 }
 
@@ -463,10 +485,13 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
   if (!value) return base
   const banks = base.banks.map((row, bank) => row.map((pad, index) => {
     const incoming = value.banks?.[bank]?.[index]
-    if (!incoming) return pad
+    if (!incoming) return value.catalogDrums === true ? pad : { ...pad, catalogPad: false }
     return {
       ...pad,
       ...incoming,
+      catalogPad: incoming.catalogPad === true,
+      sampleError: typeof incoming.sampleError === 'string' && incoming.sampleError.trim() ? incoming.sampleError.trim() : undefined,
+      sampleCredit: typeof incoming.sampleCredit === 'string' && incoming.sampleCredit.trim() ? incoming.sampleCredit.trim() : undefined,
       pitch: Number.isFinite(incoming.pitch) ? clamp(Math.round(incoming.pitch), 0, 127) : pad.pitch,
       name: incoming.name || pad.name,
       level: clamp(incoming.level ?? pad.level, 0, 1),
@@ -533,6 +558,7 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
     name: value.name,
     chop: normalizeChop(value.chop),
     vintage: normalizeVintage(value.vintage),
+    catalogDrums: value.catalogDrums === true,
     banks,
   }
 }

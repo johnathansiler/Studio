@@ -1,7 +1,7 @@
 import type { SoundCache } from './cache'
 import { fetchSoundBytes, soundCache, type FetchSoundOptions } from './cache'
 import { packLabel, SOUNDSCOUT_VERSION, SOUND_VERSION_PREFIX } from './contract'
-import { licenseAllowed } from './license'
+import { licenseAllowed, licenseKeptWhenNotCc0 } from './license'
 import { presentSoundEntries } from './noteGroups'
 import { readPrivateCatalog, readPrivateFile } from './private'
 import { soundCatalogUrl, soundFileUrl } from './source'
@@ -65,7 +65,7 @@ const DRUM_WORD = /\b(drum|drums|kit|kick|snare|hi-?hat|hat|clap|tom|cymbal|rims
 /** One-shots and loops that are drum samples or kits. Percussion that is not a drum stays out. */
 export function isDrumSound(entry: Pick<SoundEntry, 'name' | 'path' | 'tags' | 'category' | 'role'>) {
   const category = (entry.category ?? '').toLowerCase()
-  if (category === 'kick' || category === 'drums' || category === 'percussion' || category === 'perc' || category === 'snare' || category === 'hat' || category === 'clap' || category === 'tom' || category === 'cymbal') return true
+  if (category === 'kick' || category === 'drums' || category === 'percussion' || category === 'perc' || category === 'snare' || category === 'hat' || category === 'hat-closed' || category === 'hat-open' || category === 'hi-hat' || category === 'clap' || category === 'tom' || category === 'cymbal' || category === 'crash' || category === 'ride' || category === 'rim' || category === '808' || category === 'shaker' || category === 'cowbell' || category === 'tambourine') return true
   if ((entry.role ?? '').toLowerCase() === 'drum_one_shot') return true
   const path = entry.path.toLowerCase()
   if (path.startsWith('drums/') || path.includes('/drums/')) return true
@@ -88,7 +88,7 @@ export function filterSounds(entries: SoundEntry[], query: SoundQuery): SoundEnt
       if (key && !soundKeyMatches(key, entry.key)) return false
       if (query.bpm === 'project' && (entry.bpm == null || !bpmMatchesProject(entry.bpm, query.projectBpm))) return false
       if (!tokens.length) return true
-      const hay = `${entry.name} ${entry.collection ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.publisher ?? ''} ${entry.pack ?? ''} ${entry.pack ? packLabel(entry.pack) : ''} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.pitch ?? ''} ${entry.bpm ?? ''} ${entry.origin === 'private' ? 'private' : ''} ${entry.type} ${entry.source}`.toLowerCase()
+      const hay = `${entry.name} ${entry.collection ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.drumRole ?? ''} ${entry.publisher ?? ''} ${entry.pack ?? ''} ${entry.pack ? packLabel(entry.pack) : ''} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.pitch ?? ''} ${entry.bpm ?? ''} ${entry.origin === 'private' ? 'private' : ''} ${entry.type} ${entry.source} ${entry.attributionText ?? ''} ${entry.license}`.toLowerCase()
       return tokens.every((token) => hay.includes(token))
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
@@ -159,7 +159,7 @@ export function browserSounds(entries: SoundEntry[], query: SoundQuery) {
 function derivedRole(type: SoundKind, category: string | undefined, tags: string[]) {
   if (type === 'loop') return 'loop'
   const cat = (category ?? '').toLowerCase()
-  if (cat === 'kick' || cat === 'snare' || cat === 'clap' || cat === 'hat' || cat === 'hi-hat' || cat === 'tom' || cat === 'drums') return 'drum_one_shot'
+  if (cat === 'kick' || cat === 'snare' || cat === 'clap' || cat === 'hat' || cat === 'hat-closed' || cat === 'hat-open' || cat === 'hi-hat' || cat === 'tom' || cat === 'crash' || cat === 'ride' || cat === 'rim' || cat === 'perc' || cat === 'cymbal' || cat === 'drums' || cat === '808' || cat === 'shaker' || cat === 'cowbell' || cat === 'tambourine') return 'drum_one_shot'
   if (tags.some((tag) => /^(kick|snare|clap|hat|drums)$/i.test(tag))) return 'drum_one_shot'
   return 'one_shot'
 }
@@ -191,7 +191,7 @@ export function parseScoutEntry(input: unknown): SoundEntry | null {
   if (!path.startsWith(SOUND_VERSION_PREFIX) || path.includes('..')) return null
   const license = typeof raw.license === 'string' ? raw.license.trim() : ''
   const licenseClass = typeof raw.licenseClass === 'string' ? raw.licenseClass.trim() : ''
-  if (/NOT_CC0/.test(licenseClass) && license !== 'Informal-creator-grant') return null
+  if (/NOT_CC0/.test(licenseClass) && !licenseKeptWhenNotCc0(license)) return null
   const attributionRequired = raw.attributionRequired === true
   if (!licenseAllowed(license, attributionRequired)) return null
   const tags = Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).map((tag) => tag.trim()) : []
@@ -229,6 +229,13 @@ export function parseScoutEntry(input: unknown): SoundEntry | null {
     licenseNote: typeof raw.licenseNote === 'string' && raw.licenseNote.trim() ? raw.licenseNote.trim() : undefined,
     creator: typeof raw.creator === 'string' && raw.creator.trim() ? raw.creator.trim() : undefined,
     attributionRequired,
+    attributionText: typeof raw.attributionText === 'string' && raw.attributionText.trim() ? raw.attributionText.trim() : undefined,
+    licenseUrl: typeof raw.licenseUrl === 'string' && raw.licenseUrl.trim() ? raw.licenseUrl.trim() : undefined,
+    drumRole: typeof raw.drumRole === 'string' && raw.drumRole.trim() ? raw.drumRole.trim() : undefined,
+    peakDb: typeof raw.peakDb === 'number' && Number.isFinite(raw.peakDb) ? raw.peakDb : undefined,
+    rmsDb: typeof raw.rmsDb === 'number' && Number.isFinite(raw.rmsDb) ? raw.rmsDb : undefined,
+    leadSilenceMs: typeof raw.leadSilenceMs === 'number' && raw.leadSilenceMs > 0 ? raw.leadSilenceMs : undefined,
+    unaltered: raw.unaltered === true,
     isContentAlias: raw.isContentAlias === true,
   }
 }
