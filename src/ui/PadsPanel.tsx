@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import { applyPadKitSamples, ensureDefaultKit } from '../instruments/pads/load'
@@ -111,6 +111,33 @@ export function PadsPanel({
   const [padPage, setPadPage] = useState<0 | 1>(0)
   const [chopOpen, setChopOpen] = useState(chopStartsOpen)
   const [face, setFace] = useState<'pads' | 'sound' | 'pattern'>('pads')
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const sync = () => {
+      const record = document.querySelector('[data-beat-transport] [aria-label="Record"]')
+      const tabs = document.querySelector('[data-pads="plugin"] .plugin-page-tabs')
+      const dock = document.querySelector('.shell.phone .tool-slot')
+      if (record) root.style.setProperty('--beat-record-top', `${Math.round(record.getBoundingClientRect().top)}px`)
+      if (tabs) root.style.setProperty('--beat-tabs-bottom', `${Math.round(tabs.getBoundingClientRect().bottom)}px`)
+      if (dock) {
+        const top = dock.getBoundingClientRect().top
+        if (top < window.innerHeight - 4) root.style.setProperty('--phone-chrome-bottom', `${Math.round(window.innerHeight - top)}px`)
+      }
+    }
+    sync()
+    const observer = new ResizeObserver(sync)
+    const mpc = document.querySelector('[data-pads="plugin"]')
+    const dock = document.querySelector('.shell.phone .tool-slot')
+    if (mpc) observer.observe(mpc)
+    if (dock) observer.observe(dock)
+    window.addEventListener('resize', sync)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', sync)
+      root.style.removeProperty('--beat-record-top')
+      root.style.removeProperty('--beat-tabs-bottom')
+    }
+  }, [face])
   const [kitOpen, setKitOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [snapZero, setSnapZero] = useState(true)
@@ -556,7 +583,7 @@ export function PadsPanel({
               const index = pageStart + offset
               const pitch = levels && source ? source.pitch : pad.pitch
               const label = levels ? levelLabel(index, levels) : padFaceName(pad)
-              const sampleTitle = pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
+              const sampleTitle = pad.sampleError || pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
               const velocity = meters[index] ?? 0
               const held = litPads.includes(index)
               const lit = held || litNotes.includes(pitch) || velocity > 0.08
@@ -569,7 +596,7 @@ export function PadsPanel({
                   data-pitch={pitch}
                   aria-pressed={held}
                   style={{ ['--vel' as string]: String(velocity) }}
-                  title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}. Drag a sound here.`}
+                  title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}${pad.sampleCredit ? `. ${pad.sampleCredit}` : ''}. Drag a sound here.`}
                   onDragOver={(event) => {
                     if ([...event.dataTransfer.types].includes(SOUND_MIME) || event.dataTransfer.types.includes('text/plain')) event.preventDefault()
                   }}
@@ -697,7 +724,10 @@ export function PadsPanel({
           </div>
           {source && (
             <aside className="mpc-params" aria-label="Pad settings">
-              <h3 title={source.sampleName || source.name}>{padFaceName(source)}</h3>
+              <h3 title={[source.sampleError, source.sampleName, source.sampleCredit].filter(Boolean).join('. ') || source.name}>{padFaceName(source)}</h3>
+              {(source.sampleError || source.sampleCredit) && (
+                <p className="mpc-kit-credit" role="status">{source.sampleError || source.sampleCredit}</p>
+              )}
               <div className="mpc-side-meter" aria-label="Pad meter" style={{ ['--vel' as string]: String(meters[selected] ?? 0) }}>
                 <i style={{ height: `${Math.round((meters[selected] ?? 0) * 100)}%` }} />
               </div>

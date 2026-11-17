@@ -164,6 +164,7 @@ async function assertOverlay(page: Page) {
         right: box.right,
         bottom: box.bottom,
         phoneSheet: node.classList.contains('phone-sheet') || node.classList.contains('guide-sheet'),
+        pads: node.getAttribute('data-pads') === 'plugin',
       }
     })
     const y = Math.min(vh - 4, (view.bottom + vh) / 2)
@@ -200,8 +201,13 @@ async function assertOverlay(page: Page) {
   for (const box of full) {
     expect(box.left).toBeLessThanOrEqual(1)
     expect(box.right).toBeGreaterThanOrEqual(result.vw - 1)
-    expect(box.bottom).toBeGreaterThanOrEqual(result.vh - 1)
     expect(Math.abs(box.top - result.viewBottom)).toBeLessThanOrEqual(3)
+    if (box.pads && result.phone && result.barTop != null) {
+      expect(box.bottom).toBeLessThanOrEqual(result.barTop + 1)
+      expect(box.bottom).toBeGreaterThan(result.viewBottom + 80)
+      continue
+    }
+    expect(box.bottom).toBeGreaterThanOrEqual(result.vh - 1)
   }
   if (full.length) expect(result.covered).toBe(true)
   expect(result.pills.length).toBeGreaterThan(0)

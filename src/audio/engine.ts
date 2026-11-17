@@ -4204,13 +4204,14 @@ export class AudioEngine {
         vintage: kit.vintage,
         chop: kit.chop,
         velocity: 1,
-        resident: (this.drumTable.length ? this.drumTable : residentDrums(ctx.sampleRate)).map((drum) => ({
+        resident: pad?.catalogPad ? [] : (this.drumTable.length ? this.drumTable : residentDrums(ctx.sampleRate)).map((drum) => ({
           pitch: drum.pitch,
           samples: drum.samples,
           sampleRate: ctx.sampleRate,
         })),
       }).left
       : null
+    if (pad?.catalogPad && !(baked && baked.length > 32)) return
     const region = padRegion(pad)
     const buffer = voiced && baked?.length
       ? this.cachedPadBuffer(ctx, bakedKey(voiced, kit), baked, ctx.sampleRate)

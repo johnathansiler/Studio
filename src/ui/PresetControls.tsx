@@ -116,6 +116,7 @@ export function PresetControls({
           triggerRef={menuButton}
           prefer="down"
           fill
+          tray={pluginId === 'pads'}
         >
           <div className="preset-actions">
             <button type="button" className="btn-quiet" title="Save over this preset. Factory presets ask for a new name." onClick={() => {
