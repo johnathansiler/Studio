@@ -1,4 +1,5 @@
 import { soundingNotes } from './drumLanes'
+import { TEMPO_MAX, TEMPO_MIN } from './tap'
 import { hardwareReaches, noteTarget } from './noteTarget'
 import { noteForPlayback } from './padMachine'
 import { SCALES, snapPitch, type ScaleId } from './scale'
@@ -436,7 +437,7 @@ export function slotFromNode(node: LearnNode | null): LearnSlot | null {
   }
   if (node.inMaster && node.range) return { target: 'master:volume', label: 'Master', min: 0, max: 1.25, toggle: false }
   if (node.aria === 'BPM' || node.aria === 'Tap tempo') {
-    return { target: 'transport:tempo', label: 'Tempo', min: 30, max: 300, toggle: false }
+    return { target: 'transport:tempo', label: 'Tempo', min: TEMPO_MIN, max: TEMPO_MAX, toggle: false }
   }
   const text = (node.text || '').replace(/\s+/g, ' ').trim()
   const aria = (node.aria || '').trim()

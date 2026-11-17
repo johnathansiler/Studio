@@ -182,10 +182,11 @@ describe('tap tempo', () => {
     expect(store.project.tempo).toBe(120)
   })
 
-  it('rounds to a tenth or a whole number inside 30–300 and undoes the group once', () => {
+  it('rounds to a tenth or a whole number inside 20–300 and undoes the group once', () => {
     expect(roundTempo(119.64, false)).toBe(119.6)
     expect(roundTempo(119.64, true)).toBe(120)
-    expect(scaleTempo(20, 0.5, false)).toBe(30)
+    expect(roundTempo(10, false)).toBe(20)
+    expect(scaleTempo(20, 0.5, false)).toBe(20)
     expect(scaleTempo(200, 2, true)).toBe(300)
     const store = new ProjectStore(createEmptyProject())
     store.setTempo(100, true)
