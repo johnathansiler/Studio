@@ -4,11 +4,17 @@ import { describe, expect, it } from 'vitest'
 import { displayedPlayhead, transportSample } from '../model/transportSync'
 import {
   formatLoopReadout,
+  loopBeatComfortPx,
+  loopCaptureBeats,
+  loopDragLabel,
   loopGridBeats,
   loopLabelCenter,
   loopMinSamples,
+  loopSnapSpec,
+  magneticSnapBeat,
   planLoopAudio,
   resolveLoopDrag,
+  resolveStickyLoopDrag,
   snapLoopSample,
   type LoopDrag,
 } from '../model/loopEdit'
@@ -84,6 +90,154 @@ describe('loop handle drag', () => {
     expect(sixteenth.end).toBe(4.25 * min)
     expect(loopGridBeats({ ...project, snap: false }, 0.25)).toBe(0)
     expect(loopGridBeats(project, 0)).toBe(0)
+  })
+})
+
+describe('magnetic bar snap', () => {
+  it('uses bars at phone zoom, beats once a beat is wide enough, and free movement when Snap is off', () => {
+    const phone = loopSnapSpec({ snap: true, barBeats: 4, beatBeats: 1, pxPerQuarter: 45 })
+    expect(phone.unit).toBe('bar')
+    expect(phone.gridBeats).toBe(4)
+    expect(phone.captureBeats / 4).toBeCloseTo(0.36, 2)
+    expect(45).toBeLessThan(loopBeatComfortPx())
+    const zoomed = loopSnapSpec({ snap: true, barBeats: 4, beatBeats: 1, pxPerQuarter: 80 })
+    expect(zoomed.unit).toBe('beat')
+    expect(zoomed.gridBeats).toBe(1)
+    expect(zoomed.captureBeats).toBeCloseTo(0.36, 2)
+    const six = loopSnapSpec({ snap: true, barBeats: 3, beatBeats: 0.5, pxPerQuarter: 45 })
+    expect(six.unit).toBe('bar')
+    expect(six.gridBeats).toBe(3)
+    expect(loopSnapSpec({ snap: false, barBeats: 4, beatBeats: 1, pxPerQuarter: 45 }).unit).toBe('free')
+    const far = loopSnapSpec({ snap: true, barBeats: 4, beatBeats: 1, pxPerQuarter: 8 })
+    expect(far.captureBeats).toBeCloseTo(loopCaptureBeats(4, 8), 5)
+    expect(far.captureBeats).toBeCloseTo(0.45 * 4, 5)
+    expect(loopCaptureBeats(4, 45)).toBeCloseTo(0.36 * 4, 5)
+  })
+
+  it('sticks to a bar until the finger enters the next capture zone, and keeps the grab offset', () => {
+    const project = song()
+    const beat = loopMinSamples(project)
+    const spec = loopSnapSpec({ snap: true, barBeats: 4, beatBeats: 1, pxPerQuarter: 45 })
+    let held: number | null = 0
+    const landed = [0, 0.5, 1, 2, 2.5, 2.7].map((raw) => {
+      held = magneticSnapBeat(raw, spec.gridBeats, spec.captureBeats, held)
+      return held
+    })
+    expect(landed.slice(0, 5)).toEqual([0, 0, 0, 0, 0])
+    expect(landed[5]).toBe(4)
+    const originEnd = 16 * beat
+    const stay = resolveStickyLoopDrag(
+      { mode: 'end', anchor: originEnd, originStart: 0, originEnd, heldBeat: 16 },
+      originEnd + 2 * beat,
+      project,
+      spec,
+      4 * beat,
+    )
+    expect(stay).toMatchObject({ start: 0, end: originEnd })
+    const crossed = resolveStickyLoopDrag(
+      { mode: 'end', anchor: originEnd, originStart: 0, originEnd, heldBeat: 16 },
+      originEnd + 3.2 * beat,
+      project,
+      spec,
+      4 * beat,
+    )
+    expect(crossed.start).toBe(0)
+    expect(crossed.end).toBe(originEnd + 4 * beat)
+    const jumped = resolveStickyLoopDrag(
+      { mode: 'end', anchor: originEnd, originStart: 0, originEnd, heldBeat: null },
+      originEnd + 3.2 * beat,
+      project,
+      spec,
+      4 * beat,
+    )
+    expect(jumped.end).toBe(originEnd + 4 * beat)
+  })
+
+  it('keeps at least one bar, refuses crossing handles, and snaps a move onto the next bar', () => {
+    const project = song()
+    const beat = loopMinSamples(project)
+    const spec = loopSnapSpec({ snap: true, barBeats: 4, beatBeats: 1, pxPerQuarter: 45 })
+    const shrunk = resolveStickyLoopDrag(
+      { mode: 'end', anchor: 4 * beat, originStart: 0, originEnd: 4 * beat, heldBeat: 4 },
+      0,
+      project,
+      spec,
+      4 * beat,
+    )
+    expect(shrunk.start).toBe(0)
+    expect(shrunk.end - shrunk.start).toBeGreaterThanOrEqual(4 * beat)
+    const blocked = resolveStickyLoopDrag(
+      { mode: 'start', anchor: 0, originStart: 0, originEnd: 8 * beat, heldBeat: 0 },
+      20 * beat,
+      project,
+      spec,
+      4 * beat,
+    )
+    expect(blocked.end).toBe(8 * beat)
+    expect(blocked.start).toBeLessThanOrEqual(blocked.end - 4 * beat)
+    expect(blocked.end - blocked.start).toBeGreaterThanOrEqual(4 * beat)
+    const moved = resolveStickyLoopDrag(
+      { mode: 'move', anchor: 0, originStart: 0, originEnd: 16 * beat, heldBeat: 0 },
+      3.2 * beat,
+      project,
+      spec,
+      4 * beat,
+    )
+    expect(moved.start).toBe(4 * beat)
+    expect(moved.end - moved.start).toBe(16 * beat)
+    const beats = loopSnapSpec({ snap: true, barBeats: 4, beatBeats: 1, pxPerQuarter: 90 })
+    let held: number | null = 4
+    const steps = [4, 4.3, 4.7].map((raw) => {
+      held = magneticSnapBeat(raw, beats.gridBeats, beats.captureBeats, held)
+      return held
+    })
+    expect(steps).toEqual([4, 4, 5])
+    const loose = loopSnapSpec({ snap: false, barBeats: 4, beatBeats: 1, pxPerQuarter: 45 })
+    const free = resolveStickyLoopDrag(
+      { mode: 'end', anchor: 16 * beat, originStart: 0, originEnd: 16 * beat, heldBeat: 16 },
+      16 * beat + Math.round(1.2 * beat),
+      project,
+      loose,
+      1,
+    )
+    expect(free.start).toBe(0)
+    expect(free.end).toBe(16 * beat + Math.round(1.2 * beat))
+    const crossed = resolveStickyLoopDrag(
+      { mode: 'end', anchor: 1000, originStart: 0, originEnd: 1000, heldBeat: 0 },
+      10,
+      project,
+      loose,
+      1,
+    )
+    expect(crossed.end).toBeGreaterThan(crossed.start)
+  })
+
+  it('labels the length and the start bar', () => {
+    const project = song()
+    const beat = loopMinSamples(project)
+    const label = loopDragLabel(project, 0, 8 * beat)
+    expect(label.length).toBe('2 bars')
+    expect(label.bar).toBe('1')
+    expect(label.text).toBe('2 bars / 1')
+    const later = loopDragLabel(project, 4 * beat, 16 * beat)
+    expect(later.text).toBe('3 bars / 2')
+  })
+
+  it('extends a playing loop by a bar without restarting audio that is still inside it', () => {
+    const project = song()
+    project.loopEnabled = true
+    project.loopStartSample = 0
+    project.loopEndSample = 8 * 24000
+    const extended = planLoopAudio(
+      { ...project, loopEndSample: 16 * 24000 },
+      { nowLinear: 4 * 24000, scheduledUntil: 8 * 24000, wrapQueued: false },
+    )
+    expect(extended).toEqual({ action: 'extend', from: 8 * 24000, to: 16 * 24000 })
+    const inside = planLoopAudio(
+      { ...project, loopEndSample: 12 * 24000 },
+      { nowLinear: 4 * 24000, scheduledUntil: 8 * 24000, wrapQueued: false },
+    )
+    expect(inside.action).not.toBe('restart')
   })
 })
 
