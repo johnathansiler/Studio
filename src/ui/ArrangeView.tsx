@@ -8,6 +8,7 @@ import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
 import { clipPlayRatio, snapClipTimeline } from '../audio/clipSnap'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
+import { clipTempoBadge } from '../model/clipTempo'
 import { trimAudioClip } from '../model/clips'
 import { rectsHit } from '../model/edit'
 import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
@@ -1842,6 +1843,7 @@ function ClipView({
   const [swipe, setSwipe] = useState<{ laneId: string; from: number; to: number } | null>(null)
   const outline = project.waveforms?.[clip.bufferId]
   const sourceLen = sourceSamplesOf(shown)
+  const tempoBadge = clipTempoBadge(clip.stretch)
   const selected = store.selectedClipIds.includes(clip.id)
 
   function pointerDown(event: ReactPointerEvent, mode: 'move' | 'start' | 'end') {
@@ -2054,6 +2056,7 @@ function ClipView({
       <em>
         {clip.name}
         {clip.stretch && Math.abs(clip.durationSamples - sourceSamplesOf(clip)) > 1 ? ` ${Math.round((clip.durationSamples / sourceSamplesOf(clip)) * 100)}%` : ''}
+        {tempoBadge ? ` · ${tempoBadge}` : ''}
         {clip.folder ? ` · ${clip.folder.lanes.length} takes` : ''}
         {clip.source === 'guide' ? ' · guide' : ''}
         {clip.source === 'aligned-take' ? ' · aligned' : ''}
