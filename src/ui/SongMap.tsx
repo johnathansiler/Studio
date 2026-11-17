@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SECTION_KINDS } from '../model/sections'
 import type { SectionKind } from '../model/types'
 import {
@@ -15,6 +15,9 @@ import './songMap.css'
 
 const METERS = ['4/4', '3/4', '6/8', '5/4', '7/8']
 
+/** The BPM offer leaves after one gesture outside it, or on its own after this long. */
+export const SMART_TEMPO_OFFER_MS = 4500
+
 function watch(move: (event: PointerEvent) => void, up: (event: PointerEvent) => void) {
   const end = (event: PointerEvent) => {
     window.removeEventListener('pointermove', move)
@@ -27,9 +30,26 @@ function watch(move: (event: PointerEvent) => void, up: (event: PointerEvent) =>
 
 export function SmartTempoBar({ store }: { store: ProjectStore }) {
   const offer = store.smartTempo
+  const bar = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!offer) return
+    const timer = window.setTimeout(() => store.dismissSmartTempo(), SMART_TEMPO_OFFER_MS)
+    const dismiss = (event: Event) => {
+      const node = event.target
+      if (node instanceof Node && bar.current?.contains(node)) return
+      store.dismissSmartTempo()
+    }
+    window.addEventListener('pointerdown', dismiss, true)
+    window.addEventListener('keydown', dismiss, true)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('pointerdown', dismiss, true)
+      window.removeEventListener('keydown', dismiss, true)
+    }
+  }, [store, offer])
   if (!offer) return null
   return (
-    <div className="smart-tempo" role="group" aria-label="Smart tempo">
+    <div ref={bar} className="smart-tempo" role="group" aria-label="Smart tempo" data-smart-tempo="">
       <span>This clip is about {offer.bpm.toFixed(1)} BPM.</span>
       <button type="button" title="Set the song tempo to this clip" onClick={() => store.adaptClipTempo(offer.trackId, offer.clipId)}>
         Use for song

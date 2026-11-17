@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { formatLoopReadout, loopGridBeats, loopSnapMinSamples, resolveLoopDrag, type LoopDragMode } from '../model/loopEdit'
 import { positionReadout } from '../model/snapGrid'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
@@ -7,8 +7,20 @@ import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
 import { armFinePress } from './integerTick'
-import { LOOP_DRAG_THRESHOLD, LOOP_TOUCH_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, type LoopGripBox } from './loopGrips'
+import { LOOP_DRAG_THRESHOLD, LOOP_GRIP_VISUAL, LOOP_TOUCH_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, resolveGripParks, type GripPark, type LoopGripBox } from './loopGrips'
 import './loopRegion.css'
+
+/** Arrange caps sit on the loop edges. Park a cap only after it has left the visible slice. */
+export function arrangeGripParks(start: number, end: number, viewLeft: number, viewRight: number, visual = LOOP_GRIP_VISUAL) {
+  return resolveGripParks({
+    startFace: Math.min(start, end),
+    startFaceEnd: Math.min(start, end) + visual,
+    endFace: Math.max(start, end) - visual,
+    endFaceEnd: Math.max(start, end),
+    viewLeft,
+    viewRight,
+  })
+}
 
 type DragPoint = { x: number; y: number; shift: boolean; alt: boolean }
 
@@ -74,6 +86,8 @@ export function LoopRegion({
   const [, setPaint] = useState(0)
   const lastTap = useRef(0)
   const [box, setBox] = useState({ width: 0, viewLeft: 0, viewWidth: 0 })
+  const boxRef = useRef(box)
+  const edgesRef = useRef({ start: 0, end: 0 })
   const readout = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const sampleAtRef = useRef(sampleAt)
   sampleAtRef.current = sampleAt
@@ -85,16 +99,12 @@ export function LoopRegion({
   useLayoutEffect(() => {
     const host = hostRef.current
     if (!host) return
+    let frame = 0
     const measure = () => {
       // A sticky ruler resolves `inset: 0` against the visible slice, so the
       // host stays on screen while the bars scroll. Size it to the ruler's
-      // layout width and pin only the left edge so the caps travel with the beats.
+      // layout width and pin only the left edge so on-screen caps stay on the beat.
       const width = followScroll ? (host.parentElement?.offsetWidth || host.offsetWidth) : host.clientWidth
-      if (followScroll) {
-        const next = { width, viewLeft: 0, viewWidth: width }
-        setBox((prev) => (near(prev.width, next.width) && near(prev.viewLeft, 0) && near(prev.viewWidth, next.viewWidth) ? prev : next))
-        return
-      }
       const scroller = scrollParent(host)
       const hostRect = host.getBoundingClientRect()
       const viewRect = scroller.getBoundingClientRect()
@@ -103,9 +113,22 @@ export function LoopRegion({
       const rawLeft = padLeft - hostRect.left
       const rawRight = padRight - hostRect.left
       const viewLeft = Math.max(0, rawLeft)
-      const viewRight = Math.min(width, Math.max(viewLeft, rawRight))
-      const viewWidth = Math.max(0, viewRight - viewLeft) || width
-      const next = { width, viewLeft, viewWidth }
+      const viewRight = Math.min(width || rawRight, Math.max(viewLeft, rawRight))
+      const viewWidth = Math.max(0, viewRight - viewLeft) || (followScroll ? 0 : width)
+      if (followScroll) {
+        const edges = edgesRef.current
+        const prev = boxRef.current
+        const prevParks = arrangeGripParks(edges.start, edges.end, prev.viewLeft, prev.viewLeft + prev.viewWidth)
+        const nextParks = arrangeGripParks(edges.start, edges.end, viewLeft, viewLeft + viewWidth)
+        const next = { width, viewLeft, viewWidth }
+        boxRef.current = next
+        const samePark = prevParks.start === nextParks.start && prevParks.end === nextParks.end
+        const sameWidth = near(prev.width, width)
+        if (prev.width > 0 && samePark && sameWidth) return
+        setBox(next)
+        return
+      }
+      const next = { width, viewLeft, viewWidth: viewWidth || width }
       setBox((prev) => (
         near(prev.width, next.width) &&
         near(prev.viewLeft, next.viewLeft) &&
@@ -114,9 +137,20 @@ export function LoopRegion({
           : next
       ))
     }
+    const onScroll = () => {
+      if (!followScroll) {
+        measure()
+        return
+      }
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        measure()
+      })
+    }
     measure()
     const scroller = scrollParent(host)
-    if (!followScroll) scroller.addEventListener('scroll', measure, { passive: true })
+    scroller.addEventListener('scroll', onScroll, { passive: true })
     const observer = new ResizeObserver(measure)
     observer.observe(scroller)
     observer.observe(host)
@@ -128,7 +162,8 @@ export function LoopRegion({
     }
     host.addEventListener('touchmove', blockTouch, { passive: false })
     return () => {
-      if (!followScroll) scroller.removeEventListener('scroll', measure)
+      if (frame) cancelAnimationFrame(frame)
+      scroller.removeEventListener('scroll', onScroll)
       observer.disconnect()
       window.removeEventListener('resize', measure)
       host.removeEventListener('touchmove', blockTouch)
@@ -200,15 +235,24 @@ export function LoopRegion({
   const width = box.width
   const rawLeft = xAt(project.loopStartSample, width)
   const rawRight = xAt(project.loopEndSample, width)
+  edgesRef.current = { start: Math.min(rawLeft, rawRight), end: Math.max(rawLeft, rawRight) }
   const left = Math.min(rawLeft, rawRight)
   const barWidth = Math.max(0, Math.abs(rawRight - rawLeft))
+  const visible = boxRef.current
   const viewLeft = followScroll ? 0 : (box.viewWidth > 0 ? box.viewLeft : 0)
   const viewWidth = followScroll ? width : (box.viewWidth > 0 ? box.viewWidth : width)
+  const parks: { start: GripPark; end: GripPark } = followScroll
+    ? arrangeGripParks(edgesRef.current.start, edgesRef.current.end, visible.viewLeft, visible.viewLeft + visible.viewWidth)
+    : { start: 'track', end: 'track' }
   const grips = layoutLoopGrips({
     start: rawLeft,
     end: rawRight,
     hostWidth: width,
-    hostHeight: hostRef.current?.clientHeight || (confineHits ? 22 : 44),
+    hostHeight: (() => {
+      const measured = hostRef.current?.clientHeight || 0
+      if (confineHits) return measured || 22
+      return Math.max(44, measured)
+    })(),
     viewLeft,
     viewWidth,
     hit: loopGripHit(coarse),
@@ -307,8 +351,8 @@ export function LoopRegion({
       data-loop-region={view}
       data-loop-length={readout.length}
       data-loop-span={readout.span}
-      data-park-start={followScroll ? 'track' : undefined}
-      data-park-end={followScroll ? 'track' : undefined}
+      data-park-start={followScroll ? parks.start : undefined}
+      data-park-end={followScroll ? parks.end : undefined}
       role="group"
       aria-label={`Loop, ${readout.text}. Drag the edges to resize. Drag the middle to move it. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       style={followScroll ? {
@@ -326,15 +370,29 @@ export function LoopRegion({
         style={{ left, width: barWidth, touchAction: 'none' }}
         title={`${readout.text}. Drag to move the loop. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       />
-      <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} />
-      <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} />
+      <ParkDock side="left" parks={parks}>
+        {parks.start === 'left' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} parked="left" />}
+        {parks.end === 'left' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} parked="left" />}
+      </ParkDock>
+      {parks.start === 'track' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} />}
+      {parks.end === 'track' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} />}
+      <ParkDock side="right" parks={parks}>
+        {parks.start === 'right' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} parked="right" />}
+        {parks.end === 'right' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} parked="right" />}
+      </ParkDock>
       {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
       {liveRead && <em className="loop-drag-read" data-loop-drag-read="1" style={{ left: liveRead.x }}>{liveRead.text}</em>}
     </div>
   )
 }
 
+function ParkDock({ side, parks, children }: { side: 'left' | 'right'; parks: { start: GripPark; end: GripPark }; children: ReactNode }) {
+  if (parks.start !== side && parks.end !== side) return null
+  return <div className={`park-dock ${side}`}>{children}</div>
+}
+
 function LoopGrip({ edge, box, dragging, parked = null }: { edge: 'start' | 'end'; box: LoopGripBox; dragging: boolean; parked?: 'left' | 'right' | null }) {
+  const tall = box.hitHeight >= 44
   return (
     <button
       type="button"
@@ -347,8 +405,9 @@ function LoopGrip({ edge, box, dragging, parked = null }: { edge: 'start' | 'end
         top: 0,
         width: Math.max(44, box.hitWidth),
         minWidth: 44,
-        height: box.hitHeight,
-        minHeight: 0,
+        height: tall ? Math.max(44, box.hitHeight) : box.hitHeight,
+        minHeight: tall ? 44 : 0,
+        maxHeight: '100%',
         bottom: 'auto',
         touchAction: 'none',
       } : {

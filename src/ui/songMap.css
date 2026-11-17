@@ -120,4 +120,20 @@
 }
 .smart-row { padding: 0; border: 0; background: transparent; }
 .shell.phone .map-head button, .shell.phone .smart-tempo button, .shell.phone .smart-row button { min-height: 36px; }
+/* Landscape has no spare height. A banner in the column pushes Mute, Solo,
+   and Arm under the dock, so the offer floats on the timeline instead. */
+.shell.phone.land .arrange-wrap { position: relative; }
+.shell.phone.land .smart-tempo {
+  position: absolute;
+  z-index: 12;
+  /* The phone loop ruler is 22px and the playhead strip under it is 42px.
+     Sit below both so those bars stay touchable. The offer is out of flow,
+     to the right of the header column, so it does not push or cover
+     Mute, Solo, Arm, or the dock. */
+  top: calc(22px + 42px + 4px);
+  left: calc(var(--track-head-w, 220px) + 8px);
+  right: 8px;
+  width: auto;
+  flex-wrap: nowrap;
+}
 .playhead { z-index: 6; }

@@ -73,6 +73,12 @@
 }
 .loop-host:active .song-loop { cursor: grabbing; }
 /* Invisible hit pad. The slim face is the only thing drawn, and both faces share the ruler row. */
+/* Parked caps stay in the loop bar. The 44px target is the width, so a thin bar does not cover the playhead strip. */
+.loop-host.follow-scroll .park-dock .loop-grip {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
 .loop-host button.loop-grip {
   position: absolute;
   top: 0;

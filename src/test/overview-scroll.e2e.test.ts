@@ -167,7 +167,7 @@ describe('timeline overview and loop handles', () => {
           const inner = document.querySelector('.timeline-inner') as HTMLElement
           const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement
           scroller.scrollLeft = scrollLeft
-          await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))))
           const project = (window as unknown as {
             __cueharbor: { store: { project: { tempo: number; loopStartSample: number; loopEndSample: number; sampleRate: number } } }
           }).__cueharbor.store.project
@@ -181,10 +181,18 @@ describe('timeline overview and loop handles', () => {
           const endBeat = project.loopEndSample / project.sampleRate / (60 / project.tempo)
           const grip = host.querySelector('[data-loop-edge="start"]') as HTMLElement
           const strip = document.querySelector('[data-playhead-strip]')?.getBoundingClientRect()
+          const expectStart = origin + startBeat * beatPx
+          const expectEnd = origin + endBeat * beatPx
+          const viewLeft = scroller.getBoundingClientRect().left
+          const viewRight = viewLeft + scroller.clientWidth
           return {
-            start: Math.abs(start.left - (origin + startBeat * beatPx)),
-            end: Math.abs(end.right - (origin + endBeat * beatPx)),
-            region: Math.abs(region.left - (origin + startBeat * beatPx)),
+            start: Math.abs(start.left - expectStart),
+            end: Math.abs(end.right - expectEnd),
+            startOnScreen: expectStart >= viewLeft - 1 && expectStart <= viewRight + 1,
+            endOnScreen: expectEnd >= viewLeft - 1 && expectEnd <= viewRight + 1,
+            startInside: start.right > viewLeft + 1 && start.left < viewRight - 1,
+            endInside: end.right > viewLeft + 1 && end.left < viewRight - 1,
+            region: Math.abs(region.left - expectStart),
             parkStart: host.dataset.parkStart,
             parkEnd: host.dataset.parkEnd,
             hit: grip.getBoundingClientRect().width,
@@ -195,10 +203,20 @@ describe('timeline overview and loop handles', () => {
             gripBottom: grip.getBoundingClientRect().bottom,
           }
         }, left)
-        expect(row.parkStart, `${viewport.width} start ${left}`).toBe('track')
-        expect(row.parkEnd, `${viewport.width} end ${left}`).toBe('track')
-        expect(row.start, `${viewport.width} start x ${left}`).toBeLessThan(1.5)
-        expect(row.end, `${viewport.width} end x ${left}`).toBeLessThan(1.5)
+        if (row.startOnScreen) {
+          expect(row.parkStart, `${viewport.width} start ${left}`).toBe('track')
+          expect(row.start, `${viewport.width} start x ${left}`).toBeLessThan(1.5)
+        } else {
+          expect(row.parkStart, `${viewport.width} start parked ${left}`).not.toBe('track')
+          expect(row.startInside, `${viewport.width} start stays on screen ${left}`).toBe(true)
+        }
+        if (row.endOnScreen) {
+          expect(row.parkEnd, `${viewport.width} end ${left}`).toBe('track')
+          expect(row.end, `${viewport.width} end x ${left}`).toBeLessThan(1.5)
+        } else {
+          expect(row.parkEnd, `${viewport.width} end parked ${left}`).not.toBe('track')
+          expect(row.endInside, `${viewport.width} end stays on screen ${left}`).toBe(true)
+        }
         expect(row.region, `${viewport.width} region ${left}`).toBeLessThan(1.5)
         expect(row.hit, `${viewport.width} hit`).toBeGreaterThanOrEqual(44)
         expect(row.hostWidth, `${viewport.width} host spans the timeline`).toBeGreaterThan(row.scroll + 80)
@@ -209,7 +227,7 @@ describe('timeline overview and loop handles', () => {
     }
   }, 60000)
 
-  it('keeps an off-screen end on its beat, then drags it once it is in view', async () => {
+  it('parks an off-screen end on the visible edge, then drags it once it is in view', async () => {
     const { page, errors } = await boot({ width: 390, height: 844 }, true)
     await page.evaluate(() => {
       const store = (window as unknown as {
@@ -219,16 +237,23 @@ describe('timeline overview and loop handles', () => {
     })
     await page.waitForFunction(() => {
       const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement | null
-      const face = host?.querySelector('[data-loop-edge="end"] .loop-grip-face') as HTMLElement | null
+      const grip = host?.querySelector('[data-loop-edge="end"]') as HTMLElement | null
       const scroll = document.querySelector('.timeline-scroll') as HTMLElement | null
       const inner = document.querySelector('.timeline-inner') as HTMLElement | null
-      if (!host || !face || !scroll || !inner) return false
-      if (host.dataset.parkEnd !== 'track') return false
+      const strip = document.querySelector('[data-playhead-strip]')
+      if (!host || !grip || !scroll || !inner || !strip) return false
+      if (host.dataset.parkEnd !== 'right') return false
       const project = (window as unknown as { __cueharbor: { store: { project: { sampleRate: number; loopEndSample: number } } } }).__cueharbor.store.project
       const px = Number(inner.dataset.px)
       const expectEnd = inner.getBoundingClientRect().left + (project.loopEndSample / project.sampleRate) * px
-      const viewRight = scroll.getBoundingClientRect().left + scroll.clientWidth
-      return expectEnd > viewRight + 20 && Math.abs(face.getBoundingClientRect().right - expectEnd) < 1.5
+      const view = scroll.getBoundingClientRect()
+      const box = grip.getBoundingClientRect()
+      const stripBox = strip.getBoundingClientRect()
+      return expectEnd > view.right + 20
+        && box.right <= view.right + 1
+        && box.left >= view.right - box.width - 1
+        && box.width >= 44
+        && box.bottom <= stripBox.top + 1
     })
     await page.evaluate(() => {
       const scroller = document.querySelector('.timeline-scroll') as HTMLElement
@@ -236,6 +261,19 @@ describe('timeline overview and loop handles', () => {
       const project = (window as unknown as { __cueharbor: { store: { project: { sampleRate: number; loopEndSample: number } } } }).__cueharbor.store.project
       const endPx = (project.loopEndSample / project.sampleRate) * Number(inner.dataset.px)
       scroller.scrollLeft = Math.max(0, endPx - scroller.clientWidth + 36)
+    })
+    await page.waitForFunction(() => {
+      const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement | null
+      const face = host?.querySelector('[data-loop-edge="end"] .loop-grip-face') as HTMLElement | null
+      const scroll = document.querySelector('.timeline-scroll') as HTMLElement | null
+      const inner = document.querySelector('.timeline-inner') as HTMLElement | null
+      if (!host || !face || !scroll || !inner) return false
+      if (host.dataset.parkEnd !== 'track') return false
+      const project = (window as unknown as { __cueharbor: { store: { project: { sampleRate: number; loopEndSample: number } } } }).__cueharbor.store.project
+      const expectEnd = inner.getBoundingClientRect().left + (project.loopEndSample / project.sampleRate) * Number(inner.dataset.px)
+      const view = scroll.getBoundingClientRect()
+      const box = face.getBoundingClientRect()
+      return expectEnd < view.right - 4 && expectEnd > view.left && Math.abs(box.right - expectEnd) < 2
     })
     const before = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number } } } }).__cueharbor.store.project.loopEndSample)
     const parked = await page.evaluate(() => {
@@ -280,6 +318,202 @@ describe('timeline overview and loop handles', () => {
     const after = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number; loopStartSample: number } } } }).__cueharbor.store.project)
     expect(after.loopEndSample).toBeLessThan(before)
     expect(after.loopStartSample).toBe(0)
+    expect(errors, errors.join('\n')).toEqual([])
+    await page.close()
+  }, 60000)
+
+  it('drags a parked cap by the finger delta and leaves the playhead strip free', async () => {
+    const viewports = [
+      { width: 390, height: 844, touch: true },
+      { width: 344, height: 882, touch: true },
+      { width: 844, height: 390, touch: true },
+      { width: 1440, height: 900, touch: false },
+    ]
+    for (const viewport of viewports) {
+      const { page, errors } = await boot(viewport, viewport.touch)
+      const chrome = await page.evaluate(() => {
+        const boxOf = (selector: string) => {
+          const node = document.querySelector(selector) as HTMLElement | null
+          if (!node) return null
+          const box = node.getBoundingClientRect()
+          const style = getComputedStyle(node)
+          const shown = style.display !== 'none' && style.visibility !== 'hidden' && box.width > 8 && box.height > 8
+          return {
+            shown,
+            onScreen: shown && box.top >= -1 && box.left >= -1 && box.bottom <= window.innerHeight + 1 && box.right <= window.innerWidth + 1,
+          }
+        }
+        const phone = document.querySelector('.shell.phone') != null
+        return {
+          phone,
+          menu: boxOf(phone ? '[data-phone-tab="menu"]' : '.menu-btn'),
+          browse: boxOf(phone ? '[data-phone-tab="browse"]' : '.arrange-panels .cap-btn'),
+          tools: boxOf(phone ? '[data-phone-tab="tools"]' : '.tool-slot'),
+        }
+      })
+      expect(chrome.menu?.onScreen, `${viewport.width} menu`).toBe(true)
+      expect(chrome.browse?.onScreen, `${viewport.width} browse`).toBe(true)
+      expect(chrome.tools?.onScreen, `${viewport.width} tools`).toBe(true)
+      if (!chrome.phone) {
+        expect(errors, errors.join('\n')).toEqual([])
+        await page.close()
+        continue
+      }
+      await page.evaluate(() => {
+        const store = (window as unknown as {
+          __cueharbor: { store: { project: { sampleRate: number }; setLoop: (on: boolean, start?: number, end?: number) => void } }
+        }).__cueharbor.store
+        store.setLoop(true, 0, Math.round(store.project.sampleRate * 20))
+      })
+      await page.waitForFunction(() => {
+        const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement | null
+        const grip = host?.querySelector('[data-loop-edge="end"]') as HTMLElement | null
+        const ruler = document.querySelector('.arrange .timeline-scroll .ruler') as HTMLElement | null
+        const strip = document.querySelector('[data-playhead-strip]') as HTMLElement | null
+        if (!host || !grip || !ruler || !strip || host.dataset.parkEnd !== 'right') return false
+        const gripBox = grip.getBoundingClientRect()
+        const rulerBox = ruler.getBoundingClientRect()
+        const stripBox = strip.getBoundingClientRect()
+        const y = stripBox.top + stripBox.height / 2
+        const xs = [stripBox.left + 12, stripBox.left + stripBox.width / 2, stripBox.right - 12]
+        const clear = xs.every((x) => {
+          const hit = document.elementFromPoint(x, y)
+          return hit?.closest('[data-playhead-strip]') != null && hit?.closest('[data-loop-edge], .loop-grip, .park-dock') == null
+        })
+        return gripBox.width >= 44
+          && Math.abs(gripBox.height - rulerBox.height) <= 1
+          && gripBox.bottom <= stripBox.top + 1
+          && clear
+      })
+      const before = await page.evaluate(() => {
+        const project = (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number; loopStartSample: number; sampleRate: number } } } }).__cueharbor.store.project
+        return { end: project.loopEndSample, start: project.loopStartSample, rate: project.sampleRate }
+      })
+      const box = await page.locator('[data-loop-region="arrange"] [data-loop-edge="end"]').boundingBox()
+      const from = { x: box!.x + box!.width - 8, y: box!.y + box!.height / 2 }
+      const to = { x: from.x - 90, y: from.y }
+      if (viewport.touch) {
+        const client = await page.context().newCDPSession(page)
+        const point = (x: number, y: number) => [{ x: Math.round(x), y: Math.round(y), id: 1 }]
+        await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(from.x, from.y) })
+        for (let step = 1; step <= 6; step++) {
+          const x = from.x + ((to.x - from.x) * step) / 6
+          await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(x, from.y) })
+          await page.waitForTimeout(16)
+        }
+        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+        await client.detach()
+      } else {
+        await page.mouse.move(from.x, from.y)
+        await page.mouse.down()
+        await page.mouse.move(to.x, to.y, { steps: 6 })
+        await page.mouse.up()
+      }
+      await page.waitForTimeout(40)
+      const after = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number; loopStartSample: number } } } }).__cueharbor.store.project)
+      const moved = before.end - after.loopEndSample
+      expect(moved, `${viewport.width} parked drag`).toBeGreaterThan(before.rate * 0.25)
+      expect(moved, `${viewport.width} parked drag stays a delta`).toBeLessThan(before.rate * 4)
+      expect(after.loopStartSample).toBe(before.start)
+      expect(errors, errors.join('\n')).toEqual([])
+      await page.close()
+    }
+  }, 90000)
+
+  it('keeps the arrange playhead on the audio clock through wrap, seek, tempo, and pause', async () => {
+    const { page, errors } = await boot({ width: 390, height: 844 }, true)
+    const read = () => page.evaluate(() => new Promise<{
+      status: string
+      sample: number
+      expectPx: number
+      drawn: number
+      visual: number
+      gap: number
+      seen: number
+      loopEnd: number
+    }>((resolve) => {
+      // Read on the frame after the playhead writer, so a loop wrap is already in the transform.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const hook = (window as unknown as {
+            __cueharbor: {
+              engine: { visualSample: () => number; status: string; positionSamples: number }
+              store: { project: { sampleRate: number; loopEnabled: boolean; loopStartSample: number; loopEndSample: number } }
+            }
+          }).__cueharbor
+          const node = document.querySelector('[data-playhead="arrange"]') as HTMLElement
+          const inner = document.querySelector('.timeline-inner') as HTMLElement
+          const px = Number(inner.dataset.px)
+          const project = hook.store.project
+          const raw = hook.engine.status === 'playing' ? hook.engine.visualSample() : hook.engine.positionSamples
+          const start = Math.max(0, project.loopStartSample)
+          const end = Math.max(start + 1, project.loopEndSample)
+          const linear = Math.max(0, raw)
+          const sample = !project.loopEnabled || linear < start ? linear : linear < end ? linear : start + ((linear - start) % (end - start))
+          const expectPx = (sample / project.sampleRate) * px
+          const match = /translateX\(([-\d.]+)px\)/.exec(node.style.transform)
+          const drawn = match ? Number(match[1]) : Number.NaN
+          const visual = node.getBoundingClientRect().left - inner.getBoundingClientRect().left
+          resolve({
+            status: hook.engine.status,
+            sample,
+            expectPx,
+            drawn,
+            visual,
+            gap: Math.abs(drawn - expectPx),
+            seen: Math.abs(visual - expectPx),
+            loopEnd: (hook.store.project.loopEndSample / hook.store.project.sampleRate) * px,
+          })
+        })
+      })
+    }))
+    await page.evaluate(async () => {
+      const hook = (window as unknown as {
+        __cueharbor: {
+          engine: { resume: () => Promise<void>; play: (sample: number) => Promise<void> }
+          store: { project: { sampleRate: number }; setLoop: (on: boolean, start?: number, end?: number) => void }
+        }
+      }).__cueharbor
+      const rate = hook.store.project.sampleRate
+      hook.store.setLoop(true, 0, Math.round(rate))
+      await hook.engine.resume()
+      await hook.engine.play(0)
+    })
+    const gaps: number[] = []
+    let wrapped = false
+    let previous = 0
+    for (let i = 0; i < 30; i++) {
+      await page.waitForTimeout(50)
+      const row = await read()
+      if (row.status !== 'playing') continue
+      gaps.push(row.gap)
+      expect(row.gap, `frame ${i} transform`).toBeLessThan(4)
+      expect(row.seen, `frame ${i} painted`).toBeLessThan(4)
+      expect(row.drawn, `frame ${i} stays inside the loop`).toBeLessThanOrEqual(row.loopEnd + 4)
+      if (row.sample + 2000 < previous) wrapped = true
+      previous = row.sample
+    }
+    expect(gaps.length).toBeGreaterThan(8)
+    expect(wrapped, 'loop wrap').toBe(true)
+    await page.evaluate(() => (window as unknown as { __cueharbor: { store: { setTempo: (bpm: number) => void } } }).__cueharbor.store.setTempo(90))
+    await page.waitForTimeout(180)
+    const slowed = await read()
+    expect(slowed.gap).toBeLessThan(4)
+    await page.evaluate(() => (window as unknown as { __cueharbor: { engine: { seek: (sample: number) => void } } }).__cueharbor.engine.seek(0))
+    await page.waitForFunction(() => {
+      const engine = (window as unknown as { __cueharbor: { engine: { visualSample: () => number; status: string } } }).__cueharbor.engine
+      return engine.status === 'playing' && engine.visualSample() < 24000
+    })
+    const sought = await read()
+    expect(sought.gap).toBeLessThan(4)
+    await page.evaluate(() => (window as unknown as { __cueharbor: { engine: { stop: () => void } } }).__cueharbor.engine.stop())
+    await page.waitForTimeout(40)
+    const paused = await read()
+    await page.waitForTimeout(200)
+    const held = await read()
+    expect(paused.status).toBe('stopped')
+    expect(Math.abs(held.drawn - paused.drawn)).toBeLessThan(0.5)
+    expect(held.gap).toBeLessThan(4)
     expect(errors, errors.join('\n')).toEqual([])
     await page.close()
   }, 60000)
@@ -799,11 +1033,11 @@ describe('timeline overview and loop handles', () => {
       } else {
         expect(box.gripH, `${name} loop hit height`).toBeGreaterThanOrEqual(44)
       }
-      if (box.endScreen <= box.scrollRight + 8) {
-        expect(box.gripRight, `${name} loop hit stays inside the timeline`).toBeLessThanOrEqual(box.scrollRight + 1)
-      } else {
+      if (box.endScreen >= box.laneLeft - 8 && box.endScreen <= box.scrollRight + 8) {
         expect(Math.abs(box.faceRight - box.endScreen), `${name} loop cap stays on its beat`).toBeLessThan(16)
       }
+      expect(box.gripRight, `${name} loop hit stays inside the timeline`).toBeLessThanOrEqual(box.scrollRight + 1)
+      expect(box.gripRight, `${name} loop hit stays on screen`).toBeGreaterThan(box.laneLeft)
       expect(box.faceTop, `${name} loop cap inside the strip`).toBeGreaterThanOrEqual(-1)
       expect(box.faceBottom, `${name} loop cap inside the strip`).toBeLessThanOrEqual(box.rulerH + (box.rulerH <= 26 ? 1 : 8))
       if (box.clipHit) {
