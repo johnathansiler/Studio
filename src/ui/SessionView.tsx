@@ -153,25 +153,46 @@ function SessionBody({
   useEffect(() => {
     const masterHold: MeterHold = { value: 0, at: 0 }
     const trackHolds = new Map<string, MeterHold>()
+    let masterBar: HTMLElement | null = null
+    let masterPainted = -1
+    const bars = new Map<string, { node: HTMLElement; painted: number }>()
+    const paint = (painted: number, shown: number) => Math.abs(painted - shown) >= 0.015 || (shown <= 0.001 && painted > 0.001)
     const unsub = subscribeFrame((now) => {
       const next = engine.levels()
       const master = holdReading(masterHold, next.master, now)
+      let alive = transportMoving(engine.status) || master > 0.001
       const root = mixScroll.current
-      if (root) {
-        const masterBar = root.querySelector<HTMLElement>('.sl-master .sl-meter i')
-        if (masterBar) masterBar.style.height = `${Math.min(100, master * 140)}%`
-        for (const [id, level] of Object.entries(next.tracks)) {
-          let slot = trackHolds.get(id)
-          if (!slot) {
-            slot = { value: 0, at: 0 }
-            trackHolds.set(id, slot)
-          }
-          const shown = holdReading(slot, level, now)
-          const bar = root.querySelector<HTMLElement>(`[data-mixer="${CSS.escape(id)}"] .sl-meter i`)
-          if (bar) bar.style.height = `${Math.min(100, shown * 160)}%`
+      if (!root) masterBar = null
+      else if (!masterBar || !masterBar.isConnected) {
+        masterBar = root.querySelector<HTMLElement>('.sl-master .sl-meter i')
+        masterPainted = -1
+      }
+      if (masterBar && paint(masterPainted, master)) {
+        masterPainted = master
+        masterBar.style.height = `${Math.min(100, master * 140)}%`
+      }
+      for (const id in next.tracks) {
+        let slot = trackHolds.get(id)
+        if (!slot) {
+          slot = { value: 0, at: 0 }
+          trackHolds.set(id, slot)
+        }
+        const shown = holdReading(slot, next.tracks[id] || 0, now)
+        if (shown > 0.001) alive = true
+        if (!root) continue
+        let cached = bars.get(id)
+        if (!cached || !cached.node.isConnected) {
+          const node = root.querySelector<HTMLElement>(`[data-mixer="${CSS.escape(id)}"] .sl-meter i`)
+          if (!node) continue
+          cached = { node, painted: -1 }
+          bars.set(id, cached)
+        }
+        if (paint(cached.painted, shown)) {
+          cached.painted = shown
+          cached.node.style.height = `${Math.min(100, shown * 160)}%`
         }
       }
-      return transportMoving(engine.status) || master > 0.001
+      return alive
     })
     const off = engine.subscribe(() => wakeTicker())
     return () => {

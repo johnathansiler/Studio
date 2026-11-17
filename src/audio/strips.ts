@@ -219,11 +219,37 @@ export function prepareMeter(analyser: AnalyserNode, sampleRate: number) {
   analyser.fftSize = meterFftSize(sampleRate)
 }
 
+/**
+ * One exact-length view per scratch buffer.
+ * `getFloatTimeDomainData` requires that length, and a fresh subarray each frame would churn the collector.
+ */
+const domainViews = new WeakMap<Float32Array, Map<number, Float32Array>>()
+
+function domainData(scratch: Float32Array, length: number) {
+  if (length >= scratch.length) return scratch
+  let sizes = domainViews.get(scratch)
+  if (!sizes) {
+    sizes = new Map()
+    domainViews.set(scratch, sizes)
+  }
+  let view = sizes.get(length)
+  if (!view) {
+    view = scratch.subarray(0, length)
+    sizes.set(length, view)
+  }
+  return view
+}
+
+function readDomain(analyser: AnalyserNode, scratch: Float32Array) {
+  const length = Math.min(scratch.length, analyser.fftSize || scratch.length)
+  const data = domainData(scratch, length) as unknown as Float32Array<ArrayBuffer>
+  analyser.getFloatTimeDomainData(data)
+  return length
+}
+
 /** Loudest sample currently in the analyser window. */
 export function analyserPeak(analyser: AnalyserNode, scratch: Float32Array) {
-  const length = Math.min(scratch.length, analyser.fftSize || scratch.length)
-  const data = scratch.subarray(0, length) as unknown as Float32Array<ArrayBuffer>
-  analyser.getFloatTimeDomainData(data)
+  const length = readDomain(analyser, scratch)
   let peak = 0
   for (let i = 0; i < length; i++) {
     const value = Math.abs(scratch[i] || 0)
@@ -239,9 +265,7 @@ export function releasePeak(held: number, instant: number, dt: number) {
 }
 
 export function analyserRms(analyser: AnalyserNode, scratch: Float32Array): number {
-  const length = Math.min(scratch.length, analyser.fftSize || scratch.length)
-  const data = scratch.subarray(0, length) as unknown as Float32Array<ArrayBuffer>
-  analyser.getFloatTimeDomainData(data)
+  const length = readDomain(analyser, scratch)
   let sum = 0
   for (let i = 0; i < length; i++) sum += scratch[i] * scratch[i]
   return Math.sqrt(sum / Math.max(1, length))

@@ -189,8 +189,16 @@ export class AudioEngine {
   private cueReturnGain: GainNode | null = null
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
   private meterScratch = new Float32Array(4096)
-  /** Peak hold for each analyser, released from the audio clock. */
+  /** Peak hold for each analyser, released from the audio clock. The slot is reused. */
   private meterHolds = new WeakMap<AnalyserNode, { held: number; at: number }>()
+  /**
+   * Last `levels()` result for this context and audio time.
+   * Arrange and mix each ask once per strip inside one frame. The analyser data
+   * does not change until `currentTime` does, so those asks share one scan.
+   */
+  private levelContext: AudioContext | null = null
+  private levelStamp = Number.NaN
+  private levelCache: { master: number; input: number; talk: number; tracks: Record<string, number> } | null = null
   private readonly rackHost = new RackHost()
   private readonly padHost = new PadHost()
   private readonly libraryHost = new LibraryHost()
@@ -1609,9 +1617,12 @@ export class AudioEngine {
   }
 
   levels() {
+    const ctx = this.ctx
+    const at = ctx?.currentTime ?? -1
+    if (this.levelCache && this.levelContext === ctx && this.levelStamp === at) return this.levelCache
     const tracks: Record<string, number> = {}
     for (const [id, strip] of this.strips) tracks[id] = this.meterLevel(strip.analyser)
-    return {
+    const sample = {
       master: this.masterMeter
         ? this.meterLevel(this.masterMeter)
         : this.masterStrip
@@ -1621,6 +1632,10 @@ export class AudioEngine {
       talk: this.talkAnalyser ? analyserRms(this.talkAnalyser, this.meterScratch) : 0,
       tracks,
     }
+    this.levelContext = ctx
+    this.levelStamp = at
+    this.levelCache = sample
+    return sample
   }
 
   /**
@@ -1632,10 +1647,14 @@ export class AudioEngine {
   private meterLevel(analyser: AnalyserNode) {
     const instant = analyserPeak(analyser, this.meterScratch)
     const now = this.ctx?.currentTime ?? 0
-    const prev = this.meterHolds.get(analyser)
-    const held = releasePeak(prev?.held ?? 0, instant, prev ? now - prev.at : 0)
-    this.meterHolds.set(analyser, { held, at: now })
-    return held
+    let slot = this.meterHolds.get(analyser)
+    if (!slot) {
+      slot = { held: 0, at: now }
+      this.meterHolds.set(analyser, slot)
+    }
+    slot.held = releasePeak(slot.held, instant, now - slot.at)
+    slot.at = now
+    return slot.held
   }
 
   /** Timeline sample from the audio clock, including while the tab is in the background. */
