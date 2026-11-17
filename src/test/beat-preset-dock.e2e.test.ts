@@ -45,9 +45,12 @@ type HitReport = {
   tabs: { name: string; hit: string }[]
   pages: { name: string; hit: string }[]
   close: string
+  closeHeight: number
   closeOverlaps: string[]
   trayBottom: number
   recordTop: number
+  pageHeight: number
+  presetNames: string[]
 }
 
 async function readHits(page: Page, trayOpen: boolean): Promise<HitReport> {
@@ -74,11 +77,27 @@ async function readHits(page: Page, trayOpen: boolean): Promise<HitReport> {
     const dock = document.querySelector('.phone-dock-slot')
     const close = document.querySelector('.anchored-menu.preset-menu > button.sheet-close')
     const tray = document.querySelector('.anchored-menu.preset-menu[data-menu-size="tray"]')
+    const page = document.querySelector('[data-pads="plugin"] [data-plugin-page]:not([hidden])')
     const presetBox = preset?.getBoundingClientRect()
     const dockBox = dock?.getBoundingClientRect()
     const recordBox = record?.getBoundingClientRect()
     const closeBox = close?.getBoundingClientRect()
     const trayBox = tray?.getBoundingClientRect()
+    const pageBox = page?.getBoundingClientRect()
+    const presetNames: string[] = []
+    if (open && trayBox) {
+      for (const node of document.querySelectorAll('.anchored-menu.preset-menu .preset-list button')) {
+        const box = node.getBoundingClientRect()
+        const top = Math.max(box.top, trayBox.top + 1)
+        const bottom = Math.min(box.bottom, trayBox.bottom - 1)
+        if (bottom - top < 8 || box.width < 8) continue
+        const x = box.left + Math.min(24, box.width / 2)
+        const y = (top + bottom) / 2
+        const hit = labelOf(document.elementFromPoint(x, y))
+        const name = labelOf(node)
+        if (hit && hit === name) presetNames.push(name)
+      }
+    }
     const closeOverlaps: string[] = []
     if (closeBox && closeBox.width > 0) {
       const others = [
@@ -106,9 +125,12 @@ async function readHits(page: Page, trayOpen: boolean): Promise<HitReport> {
         hit: centerHit(node),
       })),
       close: open ? centerHit(close) : '',
+      closeHeight: closeBox ? Math.round(closeBox.height) : -1,
       closeOverlaps,
       trayBottom: trayBox ? Math.round(trayBox.bottom) : -1,
       recordTop: recordBox ? Math.round(recordBox.top) : -1,
+      pageHeight: pageBox ? Math.round(pageBox.height) : -1,
+      presetNames,
     }
   }, trayOpen)
 }
@@ -146,6 +168,7 @@ describe('beat machine preset row stays above the phone dock', () => {
         expect(closed.dockTop, `${viewport.name} dock`).toBeGreaterThan(0)
         expect(closed.presetBottom, `${viewport.name} preset above dock`).toBeLessThanOrEqual(closed.dockTop)
         expect(closed.pages.map((item) => item.hit), `${viewport.name} page tabs`).toEqual(['Pads', 'Sound', 'Pattern'])
+        expect(closed.pageHeight, `${viewport.name} pad page`).toBeGreaterThanOrEqual(40)
 
         await preset.tap()
         await page.locator('.anchored-menu.preset-menu[data-menu-size="tray"]').waitFor()
@@ -156,8 +179,11 @@ describe('beat machine preset row stays above the phone dock', () => {
         expect(opened.tabs.map((item) => item.hit), `${viewport.name} phone tabs`).toEqual(['Menu. Project, edit, view, and settings.', 'Browse', 'Tools'])
         expect(opened.trayBottom, `${viewport.name} tray above record`).toBeLessThanOrEqual(opened.recordTop)
         expect(opened.close, `${viewport.name} close`).toBe('Close')
+        expect(opened.closeHeight, `${viewport.name} close size`).toBeGreaterThanOrEqual(40)
         expect(opened.closeOverlaps, `${viewport.name} close overlap`).toEqual([])
         expect(opened.pages.map((item) => item.hit), `${viewport.name} page tabs with tray`).toEqual(['Pads', 'Sound', 'Pattern'])
+        expect(opened.presetNames.length, `${viewport.name} preset names`).toBeGreaterThan(0)
+        expect(opened.pageHeight, `${viewport.name} pad page with tray`).toBeGreaterThanOrEqual(40)
         await page.locator('.anchored-menu.preset-menu > button.sheet-close').tap()
         await page.locator('.anchored-menu.preset-menu').waitFor({ state: 'detached' })
       }
@@ -167,6 +193,7 @@ describe('beat machine preset row stays above the phone dock', () => {
       await page.screenshot({ path: '/opt/cursor/artifacts/beat-presets-880x1000-closed.png' })
       const foldClosed = await readHits(page, false)
       expect(foldClosed.preset, '880x1000 presets').toBe('Presets')
+      expect(foldClosed.pageHeight, '880x1000 pad page').toBeGreaterThanOrEqual(40)
       await page.locator('.hw-lip').getByRole('button', { name: 'Presets', exact: true }).tap()
       await page.locator('.anchored-menu.preset-menu[data-menu-size="tray"]').waitFor()
       await page.screenshot({ path: '/opt/cursor/artifacts/beat-presets-880x1000-open.png' })
@@ -174,6 +201,8 @@ describe('beat machine preset row stays above the phone dock', () => {
       expect(foldOpen.record, '880x1000 record').toBe('Record')
       expect(foldOpen.trayBottom, '880x1000 tray above record').toBeLessThanOrEqual(foldOpen.recordTop)
       expect(foldOpen.closeOverlaps, '880x1000 close overlap').toEqual([])
+      expect(foldOpen.closeHeight, '880x1000 close size').toBeGreaterThanOrEqual(40)
+      expect(foldOpen.presetNames.length, '880x1000 preset names').toBeGreaterThan(0)
       await context.close()
     } finally {
       await browser.close()
