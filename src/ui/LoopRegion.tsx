@@ -193,8 +193,9 @@ export function LoopRegion({
       beatBeats: 4 / Math.max(1, projectNow.timeSignature.denominator),
       pxPerQuarter: quarterPxAt(projectNow, rect, sampleAtRef.current),
     })
+    // Beats can be the snap grid once a beat is wide enough. The loop still cannot shrink under one bar.
     const minSamples = snapping
-      ? loopSnapMinSamples(projectNow, state.mode === 'start' ? state.originEnd : state.originStart, spec.gridBeats)
+      ? loopSnapMinSamples(projectNow, state.mode === 'start' ? state.originEnd : state.originStart, quartersPerBar(projectNow.timeSignature))
       : (fine ? state.minSamples : 1)
     const next = resolveStickyLoopDrag(
       {
