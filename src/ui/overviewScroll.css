@@ -475,10 +475,42 @@
    Match the timeline scroller, which already stops above the overview gutter.
    Bottom padding lets the last track scroll clear of that edge on phone and landscape. */
 .shell.phone.land .arrange .heads.heads {
+  position: relative;
   margin-bottom: 0;
   height: calc(100% - var(--overview-gutter, 40px));
   max-height: calc(100% - var(--overview-gutter, 40px));
+  padding-bottom: 0;
   box-sizing: border-box;
+}
+
+/* Short landscape: Add Track used to sit under the scroller and cover Mute.
+   Park it in the ruler gap and let the header scroller use the same band as the lanes,
+   so every track's Mute, Solo, Arm, and menu can scroll into a clear hit target. */
+.shell.phone.land .arrange .heads-scroll {
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.shell.phone.land .arrange .track-add {
+  position: absolute;
+  top: 2px;
+  left: 11px;
+  right: 2px;
+  z-index: 8;
+  width: auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0;
+}
+.shell.phone.land .arrange .head {
+  overflow: hidden;
 }
 
 .shell.phone .arrange .heads,
