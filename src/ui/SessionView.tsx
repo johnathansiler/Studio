@@ -31,6 +31,7 @@ import { dropLibrarySound, SessionBrowser, soundById } from './sessionBrowser'
 import { SessionDetail } from './sessionDetail'
 import { sessionTargetAt } from './sessionPointer'
 import { gainToDb } from '../model/time'
+import { holdReading, type MeterHold } from './levels'
 import { TouchSlider } from './kit/controls'
 import { previewChannel, settleMixFollow, useLiveMix } from './liveMix'
 import './sessionGrid.css'
@@ -80,7 +81,6 @@ function SessionBody({
   const clipScroll = useRef<HTMLDivElement>(null)
   const mixScroll = useRef<HTMLDivElement>(null)
   const scrollLock = useRef(false)
-  const [levels, setLevels] = useState<{ master: number; tracks: Record<string, number> }>({ master: 0, tracks: {} })
   const [now, setNow] = useState(() => engine.currentTimelineSample())
   const clickTimer = useRef(0)
   const lastClick = useRef<{ key: string; at: number } | null>(null)
@@ -151,11 +151,54 @@ function SessionBody({
   }, [engine, store])
 
   useEffect(() => {
-    const id = window.setInterval(() => {
+    const masterHold: MeterHold = { value: 0, at: 0 }
+    const trackHolds = new Map<string, MeterHold>()
+    let masterBar: HTMLElement | null = null
+    let masterPainted = -1
+    const bars = new Map<string, { node: HTMLElement; painted: number }>()
+    const paint = (painted: number, shown: number) => Math.abs(painted - shown) >= 0.015 || (shown <= 0.001 && painted > 0.001)
+    const unsub = subscribeFrame((now) => {
       const next = engine.levels()
-      setLevels({ master: next.master, tracks: next.tracks })
-    }, 90)
-    return () => window.clearInterval(id)
+      const master = holdReading(masterHold, next.master, now)
+      let alive = transportMoving(engine.status) || master > 0.001
+      const root = mixScroll.current
+      if (!root) masterBar = null
+      else if (!masterBar || !masterBar.isConnected) {
+        masterBar = root.querySelector<HTMLElement>('.sl-master .sl-meter i')
+        masterPainted = -1
+      }
+      if (masterBar && paint(masterPainted, master)) {
+        masterPainted = master
+        masterBar.style.height = `${Math.min(100, master * 140)}%`
+      }
+      for (const id in next.tracks) {
+        let slot = trackHolds.get(id)
+        if (!slot) {
+          slot = { value: 0, at: 0 }
+          trackHolds.set(id, slot)
+        }
+        const shown = holdReading(slot, next.tracks[id] || 0, now)
+        if (shown > 0.001) alive = true
+        if (!root) continue
+        let cached = bars.get(id)
+        if (!cached || !cached.node.isConnected) {
+          const node = root.querySelector<HTMLElement>(`[data-mixer="${CSS.escape(id)}"] .sl-meter i`)
+          if (!node) continue
+          cached = { node, painted: -1 }
+          bars.set(id, cached)
+        }
+        if (paint(cached.painted, shown)) {
+          cached.painted = shown
+          cached.node.style.height = `${Math.min(100, shown * 160)}%`
+        }
+      }
+      return alive
+    })
+    const off = engine.subscribe(() => wakeTicker())
+    return () => {
+      unsub()
+      off()
+    }
   }, [engine])
 
   function showDetail() {
@@ -344,12 +387,12 @@ function SessionBody({
           {mixerOn && (
             <div className="sl-mixline" ref={mixScroll} onScroll={(event) => syncScroll(event.currentTarget, clipScroll.current)}>
               {tracks.map((track, index) => (
-                <TrackMix key={track.id} store={store} engine={engine} track={track} index={index} level={levels.tracks[track.id] ?? 0} />
+                <TrackMix key={track.id} store={store} engine={engine} track={track} index={index} />
               ))}
               <div className="sl-mix sl-master" data-mixer="master">
                 <div className="sl-fader">
                   <MasterFader store={store} engine={engine} value={grid.project.masterVolume} />
-                  <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, levels.master * 140)}%` }} /></div>
+                  <div className="sl-meter" aria-hidden><i /></div>
                 </div>
               </div>
             </div>
@@ -588,7 +631,7 @@ function MasterFader({ store, engine, value }: { store: ProjectStore; engine: Au
   )
 }
 
-function TrackMix({ store, engine, track, index, level }: { store: ProjectStore; engine: AudioEngine; track: Track; index: number; level: number }) {
+function TrackMix({ store, engine, track, index }: { store: ProjectStore; engine: AudioEngine; track: Track; index: number }) {
   const buses = store.project.tracks.filter((item) => item.type === 'bus')
   const live = useLiveMix(track.volume, {
     audio: (next) => previewChannel(engine, store.project, 'volume', track.id, next),
@@ -606,7 +649,7 @@ function TrackMix({ store, engine, track, index, level }: { store: ProjectStore;
     <div className="sl-mix" data-mixer={track.id}>
       <div className="sl-fader">
         <TouchSlider vertical label={`${track.name} volume`} title="Volume." min={0} max={1.25} step={0.001} value={live.value} fallback={0.8} format={gainToDb} onStart={() => store.beginAutomationTouch()} onCommit={() => { live.release(); store.endAutomationTouch() }} onChange={live.move} />
-        <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, level * 160)}%` }} /></div>
+        <div className="sl-meter" aria-hidden><i /></div>
       </div>
       <label className="sl-pan">
         Pan
