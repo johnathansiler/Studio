@@ -1,3 +1,6 @@
+/** One sentence on the screen before a session starts. */
+export const COLLAB_START_LINE = 'Call, video, and record together.'
+
 /** The two setup actions that stay on screen. Opus, Ping, and Jam are not shown. */
 
 export const SETUP_PLAIN = {

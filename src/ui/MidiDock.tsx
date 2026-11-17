@@ -5,7 +5,6 @@ import type { MidiEditorMode } from '../model/types'
 import { TipButton } from './Hint'
 import { DrumEditor } from './DrumEditor'
 import { EditorPinned } from './keyboardChrome'
-import { FitRow } from './fitRow'
 import { PianoRoll } from './PianoRoll'
 import { ScoreView } from './ScoreView'
 import { StepInput } from './StepInput'
@@ -40,6 +39,7 @@ export function MidiDock({
       {MODES.map((mode) => (
         <TipButton
           key={mode.id}
+          className="mode-tab"
           label={mode.label}
           hint={mode.hint}
           pressed={editor.mode === mode.id}
@@ -52,8 +52,8 @@ export function MidiDock({
     <div className="midi-dock" data-screen-overlay="" aria-label="Piano roll">
       {editor.mode !== 'roll' && (
         <div className="roll-head">
+          <div className="mode-tabs" role="tablist" aria-label="Editor mode">{modes}</div>
           <EditorPinned store={store} engine={engine} onClose={onClose} />
-          <FitRow className="me-modes">{modes}</FitRow>
         </div>
       )}
       {editor.mode === 'step' && <StepInput store={store} engine={engine} />}
