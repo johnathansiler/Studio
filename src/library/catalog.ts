@@ -71,6 +71,10 @@ function tempo(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
 
+function positive(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
 function parseEntry(input: unknown, share: (value: string) => string): { entry: LibraryEntry; words: string[] } | null {
   if (!input || typeof input !== 'object') return null
   const raw = input as Record<string, unknown>
@@ -86,6 +90,9 @@ function parseEntry(input: unknown, share: (value: string) => string): { entry: 
       key,
       size: typeof raw.size === 'number' && raw.size > 0 ? raw.size : 0,
       format: share(text(raw.format).toLowerCase()),
+      sampleRate: positive(raw.sampleRate) ?? positive(raw.sample_rate),
+      bitDepth: positive(raw.bitDepth) ?? positive(raw.bit_depth),
+      channels: positive(raw.channels),
       pack: share(text(raw.pack)),
       type: share(text(raw.type).toLowerCase()),
       category: share(text(raw.category).toLowerCase()),

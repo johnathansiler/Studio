@@ -15,6 +15,13 @@ export const SAFETY_ATTACK = 8
 export const SAFETY_RELEASE_SEC = 0.05
 /** Full-scale ceiling. Unity sine waves are not reduced. */
 export const SAFETY_CEILING = 1
+/**
+ * Sample peak under which the 16x detector cannot reach the ceiling.
+ * A Nyquist tone at 0.5 reads about 0.64 through the kernel, so 0.45 stays
+ * under full scale even with that overshoot. Preview audio sits near −14 dBFS
+ * and the idle master is silence, so both skip the FIR.
+ */
+export const SAFETY_PASS = 0.45
 
 export function holdFullScale(channels: Float32Array[]) {
   let peak = 0
@@ -67,6 +74,22 @@ export function createSafetyLimiter(sampleRate = 48000) {
     },
     process(left: ArrayLike<number>, right: ArrayLike<number>, outL: Float32Array, outR: Float32Array) {
       const n = Math.min(left.length, outL.length)
+      if (gain === 1 && target === 1 && blockUnderPass(left, right, n, delayL, delayR, peaks)) {
+        for (let i = 0; i < n; i++) {
+          const inL = finite(left[i])
+          const inR = finite(right[i] ?? inL)
+          const slot = index % look
+          outL[i] = delayL[slot]
+          outR[i] = delayR[slot]
+          delayL[slot] = inL
+          delayR[slot] = inR
+          const absL = inL < 0 ? -inL : inL
+          const absR = inR < 0 ? -inR : inR
+          peaks[slot] = absL > absR ? absL : absR
+          index += 1
+        }
+        return
+      }
       for (let i = 0; i < n; i++) {
         const inL = finite(left[i])
         const inR = finite(right[i] ?? inL)
@@ -103,4 +126,18 @@ export function createSafetyLimiter(sampleRate = 48000) {
 
 function finite(sample: number | undefined) {
   return typeof sample === 'number' && Number.isFinite(sample) ? sample : 0
+}
+
+function blockUnderPass(left: ArrayLike<number>, right: ArrayLike<number>, n: number, delayL: Float32Array, delayR: Float32Array, peaks: Float32Array) {
+  for (let i = 0; i < n; i++) {
+    const inL = finite(left[i])
+    const inR = finite(right[i] ?? inL)
+    if ((inL < 0 ? -inL : inL) > SAFETY_PASS || (inR < 0 ? -inR : inR) > SAFETY_PASS) return false
+  }
+  for (let k = 0; k < delayL.length; k++) {
+    const l = delayL[k]
+    const r = delayR[k]
+    if ((l < 0 ? -l : l) > SAFETY_PASS || (r < 0 ? -r : r) > SAFETY_PASS || peaks[k] > SAFETY_PASS) return false
+  }
+  return true
 }

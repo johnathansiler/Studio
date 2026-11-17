@@ -3,6 +3,10 @@ export interface LibraryEntry {
   key: string
   size: number
   format: string
+  /** Present after the library is converted to the 48 kHz 24-bit stereo WAV standard. */
+  sampleRate?: number
+  bitDepth?: number
+  channels?: number
   pack: string
   type: string
   category: string

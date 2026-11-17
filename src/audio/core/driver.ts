@@ -39,12 +39,25 @@ export function deviceKind(userAgent: string): DeviceKind {
   return 'other'
 }
 
-/** Bluetooth needs a longer buffer. iOS Safari glitches on the smallest hint. */
+/**
+ * Bluetooth needs a longer buffer. iOS Safari glitches on the smallest hint.
+ * Android keeps the short hint: the long one adds a second of wait on the pads.
+ */
 export function chooseBufferHint(kind: DeviceKind, route: AudioRoute): BufferHint {
   if (route === 'bluetooth') return kind === 'android-chrome' ? 'balanced' : 'playback'
   if (kind === 'ios-safari') return 'balanced'
-  if (kind === 'android-chrome') return 'interactive'
   return 'interactive'
+}
+
+/**
+ * Speaker rate on Android. Chrome often reads 44100 from AudioManager while the
+ * HAL runs at 48000, then resamples the whole graph once per device callback.
+ */
+export const ANDROID_HAL_RATE = 48000
+
+/** Undefined leaves the device rate alone. Android asks for the HAL rate. */
+export function contextSampleRate(kind: DeviceKind): number | undefined {
+  return kind === 'android-chrome' ? ANDROID_HAL_RATE : undefined
 }
 
 export function bufferSamplesFor(hint: BufferHint) {
