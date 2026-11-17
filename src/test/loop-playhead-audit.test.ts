@@ -64,7 +64,26 @@ describe('timeline pinch', () => {
     })
     const ratio = next.px / 90
     expect(next.scrollLeft + (anchor.midX - anchor.viewLeft)).toBeCloseTo(anchor.anchorX * ratio)
-    expect(next.scrollTop + (anchor.midY - anchor.viewTop)).toBeCloseTo(anchor.anchorY * ratio)
+    expect(next.scrollTop + (anchor.midY - anchor.viewTop)).toBeCloseTo(anchor.anchorY)
+  })
+
+  it('does not move vertical scroll while the scale eases to the cap', () => {
+    let current = 90
+    let top: number | null = null
+    for (let i = 0; i < 12; i++) {
+      const next = pinchTimelineZoom({
+        ...anchor,
+        originPx: 90,
+        currentPx: current,
+        originDist: 80,
+        dist: 240,
+      })
+      expect(next.scrollTop + (anchor.midY - anchor.viewTop)).toBeCloseTo(anchor.anchorY)
+      if (top != null) expect(next.scrollTop).toBeCloseTo(top)
+      top = next.scrollTop
+      current = next.px
+    }
+    expect(current).toBeCloseTo(180)
   })
 })
 
@@ -75,53 +94,31 @@ describe('playhead motion', () => {
     expect(playheadContentX(200, 186, 420)).toBe(434)
   })
 
-  it('moves a compositor animation instead of writing transform every frame', () => {
-    const times: number[] = []
-    let animations = 0
-    let playState = 'paused'
-    const node = {
-      style: { transform: '', willChange: '' },
-      animate() {
-        animations += 1
-        let currentTime: number | null = 0
-        let playbackRate = 1
-        return {
-          get currentTime() {
-            return currentTime
-          },
-          set currentTime(value: number | null) {
-            currentTime = value
-            if (value != null) times.push(value)
-          },
-          get playbackRate() {
-            return playbackRate
-          },
-          set playbackRate(value: number) {
-            playbackRate = value
-          },
-          get playState() {
-            return playState
-          },
-          play() {
-            playState = 'running'
-          },
-          pause() {
-            playState = 'paused'
-          },
-        }
-      },
-    }
+  it('writes only the playhead transform from the audio sample', () => {
+    const node = { style: { transform: '' } }
     const sample = 48000
     const px = playheadPx(sample, 48000, 90)
-    placePlayhead(node, sample, 48000, 90, true)
-    placePlayhead(node, sample + 480, 48000, 90, true)
-    expect(animations).toBe(1)
-    expect(node.style.transform).toBe('')
-    expect(node.style.willChange).toBe('transform')
-    expect(times).toEqual([(px / 90) * 1000])
-    expect(playState).toBe('running')
-    placePlayhead(node, sample + 48000, 48000, 90, true)
-    expect(times).toEqual([(px / 90) * 1000, ((px + 90) / 90) * 1000])
-    expect(playheadTransform(px)).toBe(`translateX(${px}px)`)
+    placePlayhead(node, sample, 48000, 90)
+    expect(node.style.transform).toBe(playheadTransform(px))
+    placePlayhead(node, sample + 480, 48000, 90)
+    expect(node.style.transform).toBe(playheadTransform(playheadPx(sample + 480, 48000, 90)))
+    placePlayhead(node, sample + 480, 48000, 90)
+    expect(node.style.transform).toBe(playheadTransform(playheadPx(sample + 480, 48000, 90)))
+  })
+
+  it('snaps to the loop start, a new scale, and a seek without a time limit', () => {
+    const node = { style: { transform: '' } }
+    const end = 48000 * 8
+    const start = 48000 * 4
+    placePlayhead(node, end, 48000, 90)
+    placePlayhead(node, start, 48000, 90)
+    expect(node.style.transform).toBe(playheadTransform(playheadPx(start, 48000, 90)))
+    placePlayhead(node, start, 48000, 180)
+    expect(node.style.transform).toBe('translateX(720px)')
+    placePlayhead(node, 0, 48000, 180)
+    expect(node.style.transform).toBe('translateX(0px)')
+    const long = 48000 * 60 * 45
+    placePlayhead(node, long, 48000, 90)
+    expect(node.style.transform).toBe(playheadTransform(playheadPx(long, 48000, 90)))
   })
 })

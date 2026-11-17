@@ -103,7 +103,9 @@ export function pinchTimelineZoom(input: {
     px,
     ratio,
     scrollLeft: input.anchorX * ratio - (input.midX - input.viewLeft),
-    scrollTop: input.anchorY * ratio - (input.midY - input.viewTop),
+    // Lane height does not follow the timeline scale. Scaling this would
+    // scroll the tracks during a horizontal pinch.
+    scrollTop: input.anchorY - (input.midY - input.viewTop),
   }
 }
 
@@ -433,7 +435,7 @@ export function ArrangeView({
     const node = headNode.current
     if (!node) return
     const projectNow = projectRef.current
-    placePlayhead(node, displayedPlayhead(positionRef.current, projectNow), projectNow.sampleRate, pxRef.current, transportMoving(engine.status))
+    placePlayhead(node, displayedPlayhead(positionRef.current, projectNow), projectNow.sampleRate, pxRef.current)
   })
   useEffect(() => engine.subscribe(() => {
     positionRef.current = engine.visualSample()
@@ -448,7 +450,7 @@ export function ArrangeView({
       const sample = displayedPlayhead(engine.visualSample(), projectNow)
       positionRef.current = sample
       const moving = transportMoving(engine.status)
-      placePlayhead(node, sample, projectNow.sampleRate, pxRef.current, moving)
+      placePlayhead(node, sample, projectNow.sampleRate, pxRef.current)
       const bar = Math.floor(projectSampleBeat(projectNow, sample))
       if (bar !== barRef.current) {
         barRef.current = bar
