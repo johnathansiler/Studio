@@ -34,18 +34,28 @@ export const PREVIEW_RAMP_SEC = 0.004
 
 /**
  * Move an existing AudioParam onto `value` for a fader or pan drag.
- * `setValueAtTime` steps the sample and clicks. A 10 ms approach is still
- * short of the finger about 50 ms later. A 4 ms line lands inside one frame.
+ * `setValueAtTime` of the target steps the sample and clicks. A 10 ms approach
+ * is still short of the finger about 50 ms later. A 4 ms line lands inside one frame.
+ *
+ * The line has to start at the value heard now. `cancelAndHoldAtTime` is absent
+ * on Firefox and throws on some Safari builds. Where it exists, a ramp that
+ * follows it still begins at the previous event, so a running context jumps.
+ * Hold when we can, then anchor with `setValueAtTime` and draw the line.
  */
 export function writeParamNow(param: RampParam, value: number, now: number) {
   const target = Number.isFinite(value) ? value : 0
   const time = Number.isFinite(now) ? now : 0
-  const current = typeof param.value === 'number' && Number.isFinite(param.value) ? param.value : target
-  if (param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(time)
-  else {
-    param.cancelScheduledValues(time)
-    param.setValueAtTime(current, time)
+  const hold = param.cancelAndHoldAtTime
+  if (typeof hold === 'function') {
+    try {
+      hold.call(param, time)
+    } catch {
+      // Firefox has no implementation. Some Safari builds throw.
+    }
   }
+  const current = typeof param.value === 'number' && Number.isFinite(param.value) ? param.value : target
+  param.cancelScheduledValues(time)
+  param.setValueAtTime(current, time)
   if (Math.abs(current - target) < 1e-5) return
   param.linearRampToValueAtTime(target, time + PREVIEW_RAMP_SEC)
 }

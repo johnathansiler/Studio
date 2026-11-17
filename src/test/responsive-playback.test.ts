@@ -3,7 +3,7 @@ import { AudioEngine } from '../audio/engine'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { resetTicker, subscribeFrame } from '../audio/ticker'
-import { PREVIEW_RAMP_SEC } from '../audio/paramCurve'
+import { PREVIEW_RAMP_SEC, writeParamNow } from '../audio/paramCurve'
 import { gainFromDb } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
 import { createMixDrag, settleMixFollow } from '../ui/liveMix'
@@ -319,7 +319,9 @@ describe('fader drag', () => {
     expect(screens).toBe(0)
     expect(store.version).toBe(version)
     expect(targets(strip.fader.gain).length).toBe(beforeTargets)
-    expect(sets(strip.fader.gain).length).toBe(beforeSets)
+    const anchored = sets(strip.fader.gain).slice(beforeSets)
+    expect(anchored).toHaveLength(moves)
+    expect(anchored.every((event) => event.value === strip.fader.gain.value)).toBe(true)
     const drawn = lines(strip.fader.gain)
     expect(drawn.length - beforeLines).toBe(moves)
     const last = drawn[drawn.length - 1]
@@ -405,18 +407,90 @@ describe('fader drag', () => {
     const quiet = gainFromDb(-6.3)
     engine.previewMix('volume', track.id, quiet)
     const added = gain.events.slice(before)
-    expect(added.map((event) => event.method)).toEqual(['hold', 'linear'])
-    expect(added[0]?.value).toBeCloseTo(gain.value, 8)
-    expect(added[1]?.value).toBeCloseTo(quiet, 8)
-    expect((added[1]?.time ?? 0) - (added[0]?.time ?? 0)).toBeCloseTo(PREVIEW_RAMP_SEC, 6)
+    expect(added.map((event) => event.method)).toEqual(['hold', 'set', 'linear'])
+    expect(added[0]?.value).toBeCloseTo(added[1]?.value ?? NaN, 8)
+    expect(Math.abs((added[1]?.value ?? 0) - quiet)).toBeGreaterThan(1e-3)
+    expect(added[2]?.value).toBeCloseTo(quiet, 8)
+    expect((added[2]?.time ?? 0) - (added[1]?.time ?? 0)).toBeCloseTo(PREVIEW_RAMP_SEC, 6)
     expect(added.every((event) => event.tau == null)).toBe(true)
-    expect(gainToDb(added[1]?.value ?? 0)).toBe('-6.3 dB')
+    expect(gainToDb(added[2]?.value ?? 0)).toBe('-6.3 dB')
     const nudged = gainFromDb(-6.2)
     const mid = gain.events.length
     engine.previewMix('volume', track.id, nudged)
     const next = gain.events.slice(mid)
-    expect(next.map((event) => event.method)).toEqual(['hold', 'linear'])
-    expect(next[1]?.value).toBeCloseTo(nudged, 8)
-    expect(gainToDb(next[1]?.value ?? 0)).toBe('-6.2 dB')
+    expect(next.map((event) => event.method)).toEqual(['hold', 'set', 'linear'])
+    expect(next[2]?.value).toBeCloseTo(nudged, 8)
+    expect(gainToDb(next[2]?.value ?? 0)).toBe('-6.2 dB')
+  })
+})
+
+describe('writeParamNow', () => {
+  function clock(initial: number, hold: 'ok' | 'missing' | 'throw') {
+    let value = initial
+    const events: { method: string; value: number; time: number }[] = []
+    const drop = (time: number) => {
+      for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i].time >= time - 1e-12) events.splice(i, 1)
+      }
+    }
+    const param = {
+      get value() { return value },
+      set value(next: number) { value = next },
+      cancelScheduledValues(time: number) {
+        drop(time)
+        events.push({ method: 'cancel', value, time })
+      },
+      setValueAtTime(next: number, time: number) {
+        value = next
+        events.push({ method: 'set', value: next, time })
+      },
+      linearRampToValueAtTime(next: number, time: number) {
+        events.push({ method: 'linear', value: next, time })
+      },
+      ...(hold === 'missing' ? {} : {
+        cancelAndHoldAtTime(time: number) {
+          if (hold === 'throw') throw new Error('not implemented')
+          drop(time)
+          events.push({ method: 'hold', value, time })
+        },
+      }),
+    }
+    return { param, events }
+  }
+
+  it('anchors the heard value and keeps a single 4 ms line when calls stack', () => {
+    const { param, events } = clock(1, 'ok')
+    writeParamNow(param, 0.2, 3)
+    writeParamNow(param, 0.55, 3)
+    writeParamNow(param, 0.8, 3)
+    const sets = events.filter((event) => event.method === 'set')
+    const lines = events.filter((event) => event.method === 'linear')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({ value: 0.8, time: 3 + PREVIEW_RAMP_SEC })
+    expect(sets.at(-1)?.value).toBeCloseTo(1)
+    expect(sets.at(-1)?.time).toBe(3)
+  })
+
+  it('continues a move from the value in progress instead of the last target', () => {
+    const { param, events } = clock(1, 'ok')
+    writeParamNow(param, 0.2, 1)
+    param.value = 0.6
+    writeParamNow(param, 0.9, 1.002)
+    const lines = events.filter((event) => event.method === 'linear')
+    const sets = events.filter((event) => event.method === 'set')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]?.value).toBeCloseTo(0.9)
+    expect(sets.at(-1)?.value).toBeCloseTo(0.6)
+    expect((lines[0]?.time ?? 0) - (sets.at(-1)?.time ?? 0)).toBeCloseTo(PREVIEW_RAMP_SEC)
+  })
+
+  it('uses cancelScheduledValues when cancelAndHoldAtTime is missing or throws', () => {
+    for (const kind of ['missing', 'throw'] as const) {
+      const { param, events } = clock(0.4, kind)
+      expect(() => writeParamNow(param, 0.7, 1.5)).not.toThrow()
+      expect(events.map((event) => event.method)).toEqual(['cancel', 'set', 'linear'])
+      expect(events[1]?.value).toBeCloseTo(0.4)
+      expect(events[2]).toMatchObject({ value: 0.7, time: 1.5 + PREVIEW_RAMP_SEC })
+    }
   })
 })
