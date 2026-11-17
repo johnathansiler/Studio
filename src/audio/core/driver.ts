@@ -39,11 +39,15 @@ export function deviceKind(userAgent: string): DeviceKind {
   return 'other'
 }
 
-/** Bluetooth needs a longer buffer. iOS Safari glitches on the smallest hint. */
+/**
+ * Android Chrome on the phone speaker underruns the smallest hint: the Z Fold
+ * preview clicks about 200 times a second. Playback asks for a longer callback.
+ * iOS Safari glitches on that same smallest hint. Bluetooth is a long buffer.
+ */
 export function chooseBufferHint(kind: DeviceKind, route: AudioRoute): BufferHint {
-  if (route === 'bluetooth') return kind === 'android-chrome' ? 'balanced' : 'playback'
+  if (kind === 'android-chrome') return 'playback'
+  if (route === 'bluetooth') return 'playback'
   if (kind === 'ios-safari') return 'balanced'
-  if (kind === 'android-chrome') return 'interactive'
   return 'interactive'
 }
 

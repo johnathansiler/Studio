@@ -39,7 +39,7 @@ import { patternPlayRange, renderPattern, type RenderedHit } from '../model/step
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
 import { decodeSlotBytes } from './sample/slot'
-import { fadePlaybackEdges, fitPlaybackRate } from './quality/playback'
+import { fitPlaybackRate, prepareSpeakerPreview } from './quality/playback'
 import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
 import { automationSchedule, channelAutomationMode, laneFor, valueAtMappedSample } from '../model/automation'
@@ -55,7 +55,7 @@ import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGe
 import { bufferHintOf, formatLatencyReadout, writeBufferHint, type BufferHint } from './core/buffer'
 import { contextAttempts } from './core/contextOptions'
 import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, clipSliceEnvelope, drumLevel, liveWhen, nextTimelineSample, placeNoteTime, scheduleDelaySeconds } from './liveStage'
-import { normalizePeak, safetyCurve } from './level'
+import { safetyCurve } from './level'
 import { fileDither } from './master/ditherPlan'
 import { holdFullScale, SAFETY_LOOK } from './master/safety'
 import { sampleLoadFault } from './sampleLoadBus'
@@ -5171,16 +5171,15 @@ export class AudioEngine {
     const out = this.speakerSide()
     const lead = channels[0]
     if (!out || !lead?.length) return
-    const shaped = raw ? channels : normalizePeak(channels)
-    const shapedLead = shaped[0]
-    if (!shapedLead?.length) return
     const fileRate = sampleRate && sampleRate > 0 ? sampleRate : (ctx.sampleRate > 0 ? ctx.sampleRate : 48000)
     const deviceRate = ctx.sampleRate > 0 ? ctx.sampleRate : fileRate
-    const fitted = fitPlaybackRate(shaped, fileRate, deviceRate)
-    const played = raw || loop ? fitted.channels : fadePlaybackEdges(fitted.channels, Math.max(8, Math.round(deviceRate * 0.0015)))
+    const prepared = raw
+      ? fitPlaybackRate(channels, fileRate, deviceRate)
+      : prepareSpeakerPreview(channels, fileRate, deviceRate, loop)
+    const played = prepared.channels
     const playedLead = played[0]
     if (!playedLead?.length) return
-    const buffer = ctx.createBuffer(Math.max(1, played.length), playedLead.length, fitted.sampleRate)
+    const buffer = ctx.createBuffer(Math.max(1, played.length), playedLead.length, prepared.sampleRate)
     played.forEach((channel, index) => {
       const data = new Float32Array(playedLead.length)
       data.set(channel.subarray(0, Math.min(channel.length, playedLead.length)))
