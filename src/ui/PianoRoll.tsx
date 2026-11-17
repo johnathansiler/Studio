@@ -111,7 +111,7 @@ export function PianoRoll({
   chrome?: boolean
   chordsOpen?: boolean
   actionsRef?: { current: PianoActions | null }
-  /** Mode buttons that share this one toolbar row. */
+  /** Roll, Step, Drums, and Score. They keep their own row so a label is never clipped. */
   leading?: ReactNode
   /** Full roll, or the clip roll opened from a MIDI clip. */
   voiceSurface?: 'roll' | 'clip'
@@ -792,9 +792,9 @@ export function PianoRoll({
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
       {chrome && <div className="roll-head">
+        {leading ? <div className="mode-tabs" role="tablist" aria-label="Editor mode">{leading}</div> : null}
         <EditorPinned store={store} engine={engine} onClose={onClose} />
         <FitRow className="scale-bar">
-        {leading}
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
         <TipButton
           className={store.midiEditor().stepInput ? 'on' : ''}
