@@ -261,6 +261,7 @@ async function streamCatalogSoundNow(options: {
   const pending: { channels: Float32Array[]; sampleRate: number; final: boolean }[] = []
   let received = 0
   let firstAt = 0
+  const marks: { at: number; received: number }[] = []
   const session = openDecoder(options.toRate, (channels, sampleRate, final) => {
     pending.push({ channels, sampleRate, final })
     consider()
@@ -308,18 +309,25 @@ async function streamCatalogSoundNow(options: {
     const total = options.totalBytes ?? 0
     if (total > 0 && received >= total) return
     const elapsed = firstAt > 0 ? (performance.now() - firstAt) / 1000 : 0
+    const recent = marks.length >= 2 ? marks[marks.length - 1] : null
+    const prior = marks.length >= 2 ? marks[marks.length - 2] : null
     if (!canStartGaplessPreview({
       receivedBytes: received,
       totalBytes: total,
       elapsedSec: elapsed,
       bufferedSec: bufferedSeconds(),
+      recentBytes: recent && prior ? recent.received - prior.received : 0,
+      recentSec: recent && prior ? (recent.at - prior.at) / 1000 : 0,
     })) return
     emitQueued()
   }
   const note = (bytes: number) => {
     if (bytes <= 0) return
-    if (!firstAt) firstAt = performance.now()
+    const now = performance.now()
+    if (!firstAt) firstAt = now
     received += bytes
+    marks.push({ at: now, received })
+    if (marks.length > 8) marks.shift()
   }
   const abort = () => session.cancel()
   options.signal?.addEventListener('abort', abort, { once: true })

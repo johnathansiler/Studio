@@ -86,6 +86,15 @@ describe('preview schedule', () => {
       elapsedSec: lateReceived / SLOWER_BYTES_PER_SEC,
       bufferedSec: 0.97 * duration,
     })).toBe(false)
+    // A fast lifetime average must not hide a link that has already slowed down.
+    expect(canStartGaplessPreview({
+      receivedBytes: lateReceived,
+      totalBytes: total,
+      elapsedSec: lateElapsed,
+      bufferedSec: 0.97 * duration,
+      recentBytes: 16 * 1024,
+      recentSec: (16 * 1024) / SLOWER_BYTES_PER_SEC,
+    })).toBe(false)
   })
 })
 

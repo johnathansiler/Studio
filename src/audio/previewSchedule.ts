@@ -23,21 +23,29 @@ export const PREVIEW_STREAM_MIN_BYTES = 8 * 1024
 
 /**
  * True when the audio already decoded will still be playing after the rest of the
- * file arrives at the throughput measured so far. Otherwise the caller waits and
- * plays the finished decode as one buffer.
+ * file arrives. The rate is the slower of the lifetime average and the last
+ * chunk interval, so a fast opening burst cannot hide a link that has fallen
+ * behind. Otherwise the caller waits and plays the finished decode as one buffer.
  */
 export function canStartGaplessPreview(input: {
   receivedBytes: number
   totalBytes: number
   elapsedSec: number
   bufferedSec: number
+  /** Bytes that arrived during `recentSec`. Omit to use the lifetime average. */
+  recentBytes?: number
+  recentSec?: number
 }): boolean {
   const total = input.totalBytes
   const received = input.receivedBytes
   if (!(total > 0) || !(received > 0) || !(input.elapsedSec > 0)) return false
   if (received >= total) return true
   if (input.elapsedSec < PREVIEW_STREAM_MIN_SEC || received < PREVIEW_STREAM_MIN_BYTES) return false
-  const throughput = received / input.elapsedSec
+  const average = received / input.elapsedSec
+  const recent = input.recentSec && input.recentSec > 0 && input.recentBytes && input.recentBytes > 0
+    ? input.recentBytes / input.recentSec
+    : average
+  const throughput = Math.min(average, recent)
   if (!(throughput > 0) || !(input.bufferedSec > 0)) return false
   const eta = (total - received) / throughput
   return input.bufferedSec >= eta * PREVIEW_STREAM_SAFETY + PREVIEW_STREAM_CUSHION_SEC
