@@ -38,6 +38,8 @@ import { findStepChannel, stepPatternOwner } from '../model/stepPlugin'
 import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
+import { decodeSlotBytes } from './sample/slot'
+import { fadePlaybackEdges, fitPlaybackRate } from './quality/playback'
 import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
 import { automationSchedule, channelAutomationMode, laneFor, valueAtMappedSample } from '../model/automation'
@@ -5004,8 +5006,17 @@ export class AudioEngine {
     }
   }
 
-  /** Decode with the playback context so a second AudioContext does not suspend it. */
+  /**
+   * Decode for a library preview.
+   * WAV, FLAC, and AIFF stay on the lossless reader so a 24-bit file is not
+   * handed to the browser resampler. Compressed files still use this context,
+   * which keeps a second AudioContext from suspending playback.
+   */
   async decodeLibrary(bytes: ArrayBuffer) {
+    const lossless = decodeSlotBytes(bytes)
+    if (lossless?.channels[0]?.length) {
+      return { sampleRate: lossless.sampleRate, channels: lossless.channels }
+    }
     const ctx = this.unlock()
     if (ctx.state !== 'running') await ctx.resume()
     const decoded = await ctx.decodeAudioData(bytes.slice(0))
@@ -5106,11 +5117,16 @@ export class AudioEngine {
     const shaped = raw ? channels : normalizePeak(channels)
     const shapedLead = shaped[0]
     if (!shapedLead?.length) return
-    const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
-    const buffer = ctx.createBuffer(Math.max(1, shaped.length), shapedLead.length, rate)
-    shaped.forEach((channel, index) => {
-      const data = new Float32Array(shapedLead.length)
-      data.set(channel.subarray(0, Math.min(channel.length, shapedLead.length)))
+    const fileRate = sampleRate && sampleRate > 0 ? sampleRate : (ctx.sampleRate > 0 ? ctx.sampleRate : 48000)
+    const deviceRate = ctx.sampleRate > 0 ? ctx.sampleRate : fileRate
+    const fitted = fitPlaybackRate(shaped, fileRate, deviceRate)
+    const played = raw || loop ? fitted.channels : fadePlaybackEdges(fitted.channels, Math.max(8, Math.round(deviceRate * 0.0015)))
+    const playedLead = played[0]
+    if (!playedLead?.length) return
+    const buffer = ctx.createBuffer(Math.max(1, played.length), playedLead.length, fitted.sampleRate)
+    played.forEach((channel, index) => {
+      const data = new Float32Array(playedLead.length)
+      data.set(channel.subarray(0, Math.min(channel.length, playedLead.length)))
       buffer.copyToChannel(data, index)
     })
     const src = ctx.createBufferSource()

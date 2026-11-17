@@ -85,4 +85,20 @@ describe('device-local note grouping', () => {
     const high = selectLayers(instruments[0]!.program, { note: highNote, velocity: midiVelocity(0.7), keyswitch: null, roundRobin: {}, trigger: 'attack' })
     expect(low.layers[0]?.zone.root).not.toBe(high.layers[0]?.zone.root)
   })
+
+  it('groups chord shots that share a pack and a base name', () => {
+    const chords = ['Amaj', 'Amin', 'Cmaj', 'Cmin', 'Emaj', 'Emin']
+    const listed = presentSoundEntries([
+      ...chords.map((chord) => sound(`packs/1 Shot Polys/Ap Shotpolyb ${chord}.wav`, { pack: '1 Shot Polys', category: 'synth', role: 'one_shot' })),
+      ...['Amaj', 'Cmaj'].map((chord) => sound(`packs/1 Shot Polys/Ap Shotpolyc ${chord}.wav`, { pack: '1 Shot Polys', category: 'synth', role: 'one_shot' })),
+      sound('packs/1 Shot Polys/kick.wav', { pack: '1 Shot Polys', category: 'kick', role: 'drum_one_shot' }),
+    ])
+    const polyb = listed.filter((entry) => entry.name === '1 Shot Polys - Ap Shotpolyb')
+    const polyc = listed.filter((entry) => entry.name === '1 Shot Polys - Ap Shotpolyc')
+    expect(polyb).toHaveLength(1)
+    expect(polyb[0]?.type).toBe('instrument')
+    expect(polyc).toHaveLength(1)
+    expect(listed.some((entry) => entry.name === 'kick')).toBe(true)
+    expect(listed.some((entry) => /Amaj/.test(entry.name))).toBe(false)
+  })
 })

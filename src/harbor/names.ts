@@ -51,8 +51,12 @@ export function parseSamplePath(path: string, fallbackOctave = 3): ParsedSample 
     const named = file.match(/(?:^|_)([a-g](?:#|b|sharp|flat)?)(-?\d)(?!\d)/i)
     if (named) root = noteMidi(named[1], Number(named[2])) ?? undefined
     else {
-      const bare = file.match(/(?:^|_)([a-g](?:#|b)?)(?:_|$)/i)
-      if (bare) root = noteMidi(bare[1], fallbackOctave) ?? undefined
+      const chord = file.match(/(?:^|[_\s-])([a-g](?:#|b)?)(maj7|min7|m7|major|minor|maj|min|dim|aug|sus|m)(?:$|[_\s-])/i)
+      if (chord) root = noteMidi(chord[1], fallbackOctave) ?? undefined
+      else {
+        const bare = file.match(/(?:^|_)([a-g](?:#|b)?)(?:_|$)/i)
+        if (bare) root = noteMidi(bare[1], fallbackOctave) ?? undefined
+      }
     }
   }
   let articulation = 'Sustain'

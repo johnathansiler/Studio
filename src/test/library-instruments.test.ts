@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { selectLayers } from '../audio/multisample/map'
 import { midiVelocity } from '../audio/multisample/types'
 import { browseLibraryRows } from '../library/browse'
-import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, planSignKeys, playbackKeys, searchInstruments, tokenizeStem } from '../library/group'
+import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, planSignKeys, playbackKeys, searchInstruments, summarizeInstrument, tokenizeStem } from '../library/group'
 import { programFromLibraryInstrument } from '../library/instrumentProgram'
 import { createLibraryApi, type LibraryEnv } from '../../server/library.ts'
 import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
@@ -415,5 +415,48 @@ describe('loose note files', () => {
     const low = selectLayers(program, { note: bass[0]!.lo, velocity: midiVelocity(0.8), keyswitch: null, roundRobin: {}, trigger: 'attack' })
     const high = selectLayers(program, { note: bass[0]!.hi, velocity: midiVelocity(0.8), keyswitch: null, roundRobin: {}, trigger: 'attack' })
     expect(low.layers[0]?.zone.root).not.toBe(high.layers[0]?.zone.root)
+  })
+
+  it('groups chord one-shots by instrument and maps each chord to its root', () => {
+    const chords = ['Amaj', 'Amin', 'Cmaj', 'Cmin', 'Emaj', 'Emin']
+    const shotb = chords.map((chord) => row(`1 Shot Polys/Ap Shotpolyb ${chord}.wav`, {
+      pack: '1 Shot Polys', type: 'synth', category: 'synth', note: 'C4', root: 'C',
+    }))
+    const shotc = ['Amaj', 'Cmaj', 'Emaj'].map((chord) => row(`1 Shot Polys/Ap Shotpolyc ${chord}.wav`, {
+      pack: '1 Shot Polys', type: 'synth', category: 'synth', note: 'C4', root: 'C',
+    }))
+    const kick = row('Drums/kick.wav', { pack: 'Kit', type: 'one-shot', category: 'kick', note: 'C1' })
+    const solo = row('One Shots/Rim click.wav', { pack: 'Kit', type: 'one-shot', category: 'perc', note: 'C4' })
+    const instruments = groupLibraryInstruments([...shotb, ...shotc, kick, solo])
+    const polyb = instruments.find((item) => item.name === '1 Shot Polys - Ap Shotpolyb')
+    const polyc = instruments.find((item) => item.name === '1 Shot Polys - Ap Shotpolyc')
+    expect(polyb?.layers).toHaveLength(6)
+    expect(polyb?.notes).toBe(3)
+    expect(new Set(polyb?.layers.map((layer) => layer.midi))).toEqual(new Set([
+      noteMidi('A3'), noteMidi('C3'), noteMidi('E3'),
+    ]))
+    expect(polyb?.layers.some((layer) => layer.midi === 60)).toBe(false)
+    expect(polyb?.previewMidi).not.toBe(60)
+    expect(polyc?.notes).toBe(3)
+    expect(instruments.some((item) => item.layers.some((layer) => layer.key.endsWith('kick.wav') || layer.key.endsWith('Rim click.wav')))).toBe(false)
+    const program = programFromLibraryInstrument(polyb!)
+    const loud = selectLayers(program, { note: noteMidi('A3')!, velocity: midiVelocity(0.95), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    const quiet = selectLayers(program, { note: noteMidi('A3')!, velocity: midiVelocity(0.2), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    const third = selectLayers(program, { note: noteMidi('E3')!, velocity: midiVelocity(0.95), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    expect(loud.layers[0]?.sample.id).toContain('Amaj')
+    expect(quiet.layers[0]?.sample.id).toContain('Amin')
+    expect(third.layers[0]?.sample.id).toContain('Emaj')
+    expect(loud.layers[0]?.zone.root).toBe(noteMidi('A3'))
+    const covered = new Set(polyb!.layers.map((layer) => layer.key))
+    const index = buildLibraryIndex(shotb, shotb.map(() => []))
+    const rows = browseLibraryRows(
+      index,
+      { total: shotb.length, ids: null },
+      [summarizeInstrument(polyb!)],
+      { text: '', type: '', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null },
+      covered,
+    )
+    expect(rows.filter((item) => item.kind === 'sound')).toHaveLength(0)
+    expect(rows.filter((item) => item.kind === 'instrument')).toHaveLength(1)
   })
 })

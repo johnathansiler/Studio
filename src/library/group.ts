@@ -4,7 +4,7 @@
  * Articulation words stay, so Normal and Staccato are different instruments.
  * Dynamics stay on the instrument as velocity layers.
  */
-import { parseLooseName } from './looseName.ts'
+import { looseMidi, parseChordToken, parseFamilySuffix, parseLooseName } from './looseName.ts'
 
 export interface InstrumentLayer {
   key: string
@@ -150,6 +150,10 @@ interface RawSample {
   looseNumbers: number[]
   /** A one-shot whose name is a note. A single file stays a row; two or more become one instrument. */
   looseFile: boolean
+  /** Chord suffix such as maj or min. Same root, different quality, stays a velocity layer. */
+  family: boolean
+  /** Stem with the chord token removed, shared by every key of the instrument. */
+  familyBase: string
 }
 
 export function noteMidi(token: string): number | null {
@@ -349,6 +353,8 @@ function emptyRaw(row: CatalogRow, midi: number | null, pitchClass: number | nul
     nameTokens: [],
     looseNumbers: [],
     looseFile: false,
+    family: false,
+    familyBase: '',
   }
 }
 
@@ -381,8 +387,30 @@ function fileStem(key: string) {
   return file.replace(/\.[a-z0-9]+$/i, '')
 }
 
+const CHORD_RANK: Record<string, number> = {
+  dim: 15,
+  m: 30,
+  min: 30,
+  minor: 30,
+  min7: 35,
+  m7: 35,
+  sus: 50,
+  sus2: 50,
+  sus4: 52,
+  aug: 55,
+  '7': 60,
+  maj: 80,
+  major: 80,
+  maj7: 85,
+}
+
+function chordRank(quality: string) {
+  return CHORD_RANK[quality] ?? 50
+}
+
 function parseRaw(row: CatalogRow): RawSample | null {
   const stem = fileStem(row.key)
+  const family = parseFamilySuffix(stem)
   const named = pitchFromStem(stem)
   if (named) return emptyRaw(row, named.midi, named.pitchClass)
   const loose = parseLooseName(stem)
@@ -483,12 +511,33 @@ function parseRaw(row: CatalogRow): RawSample | null {
       if (named != null && pitchClass(named) === pc) words.splice(i, 1)
     }
   }
+  let bareClass: number | null = null
+  let familyBase = ''
+  let familyNote = false
+  if (family) {
+    const last = words[words.length - 1]
+    if (last && parseChordToken(last)) words.pop()
+    familyNote = true
+    familyBase = family.base
+    if (!velocityId) {
+      velocityId = family.quality
+      velocityRank = chordRank(family.quality)
+    }
+    // A catalog note of C4 on every file is a default, not the chord root.
+    if (family.octave != null) {
+      const heard = looseMidi(family.pitchClass, family.octave)
+      if (heard != null) midi = heard
+    } else {
+      midi = null
+      bareClass = family.pitchClass
+    }
+  }
   return {
     key: row.key,
     size: row.size,
     category: row.category && row.category !== 'null' ? row.category : '',
     midi,
-    pitchClass: null,
+    pitchClass: bareClass,
     velocityId,
     velocityRank,
     rr,
@@ -497,6 +546,8 @@ function parseRaw(row: CatalogRow): RawSample | null {
     nameTokens: words.map((word) => word.toLowerCase()),
     looseNumbers,
     looseFile: false,
+    family: familyNote,
+    familyBase,
   }
 }
 
@@ -729,7 +780,7 @@ function buildOne(pack: string, folder: string, tokens: string[], samples: RawSa
   let id = hashId(key)
   while (ids.has(id)) id += 'x'
   ids.add(id)
-  const named = displayName(pack, folder, tokens, source.length)
+  const named = familyName(pack, folder, source) ?? displayName(pack, folder, tokens, source.length)
   const velocities = new Set(shown.map((layer) => `${layer.velLo}-${layer.velHi}`))
   let roundRobins = 1
   const bySlot = new Map<string, number>()
@@ -811,14 +862,36 @@ function applyIndexSeries(items: { raw: RawSample; stem: string }[]) {
   })
 }
 
+function familyName(pack: string, folder: string, samples: RawSample[]) {
+  const bases = [...new Set(samples.map((sample) => sample.familyBase))]
+  if (!samples.every((sample) => sample.family) || bases.length !== 1) return null
+  const base = titleWords(bases[0] || '')
+  const folderTitle = titleWords(meaningfulFolders(pack, folder).slice(-1)[0] || '')
+  const packTitle = titleWords(cleanPack(pack))
+  const label = base || folderTitle
+  const name = packTitle && label && !label.toLowerCase().includes(packTitle.toLowerCase())
+    ? `${packTitle} - ${label}`
+    : (label || packTitle)
+  if (!name) return null
+  return { name, code: '' }
+}
+
+function titleWords(value: string) {
+  return value.split(/\s+/).filter(Boolean).map((word) => {
+    if (/[A-Z]/.test(word)) return word
+    return word.charAt(0).toUpperCase() + word.slice(1)
+  }).join(' ')
+}
+
 function isGroupable(entry: CatalogRow) {
   const type = (entry.type || '').toLowerCase()
-  if (type === 'multisample note') return true
   if (type === 'loop' || type === 'sfx') return false
+  if (type === 'multisample note') return true
   const stem = fileStem(entry.key)
+  if (parseFamilySuffix(stem)) return true
   if (pitchFromStem(stem) || parseLooseName(stem)) {
     if (!type) return true
-    return type === 'one-shot' || type === 'sample' || type === 'instrument'
+    return type === 'one-shot' || type === 'sample' || type === 'instrument' || type === 'synth'
   }
   return false
 }
@@ -887,7 +960,8 @@ export function groupLibraryInstruments(entries: CatalogRow[]): LibraryInstrumen
   for (const group of groups.values()) {
     const chromatic = group.samples.some((sample) => !sample.looseFile)
     const pitches = new Set(group.samples.map((sample) => sample.midi).filter((midi): midi is number => midi != null))
-    if (!chromatic && pitches.size < 2) continue
+    const chordFamily = group.samples.filter((sample) => sample.family).length >= 2
+    if (!chromatic && pitches.size < 2 && !chordFamily) continue
     const one = buildOne(group.pack, group.folder, group.tokens, group.samples, ids)
     if (one) built.push(one)
   }

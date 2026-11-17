@@ -67,6 +67,47 @@ export function parseLooseName(stem: string): LooseName | null {
   return null
 }
 
+const CHORD_QUALITY = 'maj7|min7|m7|major|minor|dim7|sus4|sus2|maj|min|aug|sus|dim|m|7'
+
+export interface ChordToken {
+  pitchClass: number
+  quality: string
+  octave: number | null
+}
+
+export interface FamilySuffix extends ChordToken {
+  /** Filename stem with the chord token removed. Empty when the file is only the chord. */
+  base: string
+}
+
+/** `Amaj`, `C#min`, `Bbmaj7`, `F#m`, `Amin3`. A plain `C4` is a note, not a chord. */
+export function parseChordToken(token: string): ChordToken | null {
+  const match = token.trim().match(new RegExp(`^([A-Ga-g])([#b])?(${CHORD_QUALITY})(-1|\\d+)?$`, 'i'))
+  if (!match) return null
+  let semi = PITCH[match[1].toLowerCase()]
+  if (semi == null) return null
+  const accidental = (match[2] || '').toLowerCase()
+  if (accidental === '#') semi += 1
+  if (accidental === 'b') semi -= 1
+  semi = ((semi % 12) + 12) % 12
+  const octave = match[4] ? Number(match[4]) : null
+  if (octave != null && (octave < -1 || octave > 9)) return null
+  return { pitchClass: semi, quality: match[3].toLowerCase(), octave }
+}
+
+/**
+ * `Ap Shotpolyb Amaj` → base `Ap Shotpolyb`, root A, quality maj.
+ * The separator is a space or a hyphen, so a word that merely ends in a letter stays whole.
+ */
+export function parseFamilySuffix(stem: string): FamilySuffix | null {
+  const text = stem.trim().replace(/[_]+/g, ' ').replace(/\s+/g, ' ')
+  const bits = text.split(/[\s-]+/).filter(Boolean)
+  if (!bits.length) return null
+  const chord = parseChordToken(bits[bits.length - 1])
+  if (!chord) return null
+  return { ...chord, base: bits.slice(0, -1).join(' ') }
+}
+
 export function looseTitle(value: string) {
   const words = value.trim().split(/[\s_-]+/).filter(Boolean)
   if (!words.length) return 'Instrument'
