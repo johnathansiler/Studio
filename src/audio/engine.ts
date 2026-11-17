@@ -5089,6 +5089,8 @@ export class AudioEngine {
   }
 
   private previewClock: { start: number; duration: number; loop: boolean } | null = null
+  /** Rate-matched library preview that grows while the file is still downloading. */
+  private previewFeed: { token: number; gain: GainNode; next: number; started: number } | null = null
 
   stopPreview() {
     this.previewEpoch += 1
@@ -5102,6 +5104,7 @@ export class AudioEngine {
     }
     this.previewStops = []
     this.previewClock = null
+    this.previewFeed = null
   }
 
   /** Playhead across the current preview, from the audio clock. Loops wrap. */
@@ -5269,6 +5272,70 @@ export class AudioEngine {
     }
     if (ctx.state === 'running') arm()
     else void ctx.resume().then(() => { if (this.previewStops.some((item) => item.stop === stop)) arm() })
+  }
+
+  /**
+   * Append rate-matched preview audio.
+   * The samples are already at `sampleRate`. A new token replaces the preview.
+   * The same token schedules the next slice at the end of the previous one.
+   */
+  feedPreview(token: number, channels: Float32Array[], sampleRate: number, gain = 0.8) {
+    const ctx = this.unlock()
+    const out = this.speakerSide()
+    const lead = channels[0]
+    if (!out || !lead?.length || !(sampleRate > 0)) return
+    if (!this.previewFeed || this.previewFeed.token !== token) {
+      this.stopPreview()
+      const node = ctx.createGain()
+      node.gain.value = Math.max(0.0001, gain)
+      node.connect(out)
+      const started = ctx.currentTime + 0.02
+      this.previewFeed = { token, gain: node, next: started, started }
+      const drop = () => { try { node.disconnect() } catch { /* already gone */ } }
+      this.previewStops.push({ stop: drop, disconnect: drop })
+    }
+    const feed = this.previewFeed
+    if (!feed) return
+    if (Math.abs(feed.gain.gain.value - gain) > 0.001) {
+      const next = Math.max(0.0001, gain)
+      try { feed.gain.gain.setTargetAtTime(next, ctx.currentTime, 0.008) } catch { feed.gain.gain.value = next }
+    }
+    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, sampleRate)
+    for (let index = 0; index < channels.length; index++) {
+      const data = new Float32Array(lead.length)
+      data.set((channels[index] ?? lead).subarray(0, lead.length))
+      buffer.copyToChannel(data, index)
+    }
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    src.connect(feed.gain)
+    const when = Math.max(feed.next, ctx.currentTime + 0.005)
+    const stop = () => { try { src.stop() } catch { /* already stopped */ } }
+    const disconnect = () => {
+      try { src.disconnect() } catch { /* already disconnected */ }
+      src.buffer = null
+    }
+    src.onended = () => {
+      disconnect()
+      this.previewStops = this.previewStops.filter((item) => item.stop !== stop)
+    }
+    this.previewStops.push({ stop, disconnect })
+    const arm = () => {
+      if (!this.previewStops.some((item) => item.stop === stop)) return
+      try { src.start(when) } catch { disconnect() }
+    }
+    if (ctx.state === 'running') arm()
+    else void ctx.resume().then(arm)
+    feed.next = when + buffer.duration
+    this.previewClock = { start: feed.started, duration: Math.max(0.001, feed.next - feed.started), loop: false }
+    this.previewRates = { sourceRate: sampleRate, outputRate: sampleRate }
+  }
+
+  setPreviewGain(token: number, gain: number) {
+    const feed = this.previewFeed
+    if (!feed || feed.token !== token || !this.ctx) return
+    const next = Math.max(0.0001, gain)
+    try { feed.gain.gain.setTargetAtTime(next, this.ctx.currentTime, 0.008) } catch { feed.gain.gain.value = next }
   }
 
   private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {

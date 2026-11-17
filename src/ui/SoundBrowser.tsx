@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { fetchInstrument, type LibraryEntry } from '../audio/multisample/library'
 import { libraryBaseUrl } from '../audio/multisample/source'
 import type { SamplePack } from '../audio/multisample/types'
 import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
 import { soundCache } from '../sounds/cache'
-import { browserSounds, catalogMessage, fetchCatalogSound, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundRoles, soundTags } from '../sounds/catalog'
+import { browserSounds, cachedSoundCatalog, catalogMessage, fetchCatalogSound, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundRoles, soundTags } from '../sounds/catalog'
+import { libraryFetch } from '../sounds/direct'
+import { rememberedFile, streamCatalogSound } from '../sounds/playStream'
+import { soundFileUrl } from '../sounds/source'
 import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { loopBarCount } from '../model/playheadPlace'
@@ -255,8 +258,6 @@ const KIND_LABEL: Record<SoundKind, string> = {
   instrument: 'Instrument',
 }
 
-const CATALOG_WAIT_MS = 8000
-
 const KIND_CHIPS: { id: SoundQuery['type']; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'one-shot', label: 'One-shots' },
@@ -265,28 +266,15 @@ const KIND_CHIPS: { id: SoundQuery['type']; label: string }[] = [
   { id: 'instrument', label: 'Instruments' },
 ]
 
-function until<T>(work: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('timed out')), ms)
-    work.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (error) => {
-        clearTimeout(timer)
-        reject(error instanceof Error ? error : new Error('Could not load sounds.'))
-      },
-    )
-  })
-}
-
 type PreviewEngine = {
   unlock: () => void
   stopPreview: () => void
   previewPcm: (channels: Float32Array[], sampleRate?: number, loop?: boolean) => void
   currentTimelineSample: () => number
   decodeLibrary?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>
+  /** Rate-matched slices. The same token appends; a new token replaces the preview. */
+  feedPreview?: (token: number, channels: Float32Array[], sampleRate: number, gain?: number) => void
+  setPreviewGain?: (token: number, gain: number) => void
   previewHead?: (now?: number) => { ratio: number; loop: boolean; duration: number; done: boolean } | null
   holdLibraryPack?: (trackId: string, pack: SamplePack) => void
   auditionLibrary?: (trackId: string, pitch?: number, velocity?: number) => Promise<void>
@@ -341,10 +329,10 @@ export function SoundBrowser({
 }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const sounds = selectSounds(store)
-  const [result, setResult] = useState<CatalogResult>(initial ?? { entries: [], status: 'missing' })
+  const [result, setResult] = useState<CatalogResult>(initial ?? cachedSoundCatalog() ?? { entries: [], status: 'missing' })
   const [starters] = useState<LibraryEntry[]>([])
   const [page, setPage] = useState(0)
-  const [loading, setLoading] = useState(!initial)
+  const [loading, setLoading] = useState(!initial && !cachedSoundCatalog()?.entries.length)
   const [failed, setFailed] = useState(false)
   const [text, setText] = useState('')
   const [type, setType] = useState<SoundQuery['type']>(lockType && lockType !== 'all' ? lockType : 'all')
@@ -371,6 +359,7 @@ export function SoundBrowser({
   const [playing, setPlaying] = useState('')
   const [wave, setWave] = useState<{ id: string; bars: number } | null>(null)
   const heard = useRef(new Map<string, Float32Array>())
+  const peaks = useRef(new Map<string, { min: number; max: number }[]>())
   const [heardTick, setHeardTick] = useState(0)
   const [head, setHead] = useState(0)
   const entriesRef = useRef(result.entries)
@@ -384,15 +373,23 @@ export function SoundBrowser({
   useEffect(() => {
     if (initial) return
     let alive = true
-    setLoading(true)
-    setFailed(false)
-    void until(loadSoundCatalog(fetch, soundCache()), CATALOG_WAIT_MS).then((next) => {
-      if (!alive) return
+    const saw = { rows: result.entries.length > 0 }
+    const show = (next: CatalogResult) => {
+      if (!alive || !next.entries.length) return
+      saw.rows = true
       setResult(next)
       setFailed(false)
       setLoading(false)
-    }).catch(() => {
+    }
+    if (!saw.rows) setLoading(true)
+    setFailed(false)
+    void loadSoundCatalog(libraryFetch, soundCache(), { onUpdate: show }).then((next) => {
       if (!alive) return
+      setResult(next)
+      setFailed(!next.entries.length && !saw.rows)
+      setLoading(false)
+    }).catch(() => {
+      if (!alive || saw.rows) return
       setResult({ entries: [], status: 'missing' })
       setFailed(true)
       setLoading(false)
@@ -489,11 +486,44 @@ export function SoundBrowser({
   const playOnKeys = type === 'instrument'
   const filtered = browserSounds(result.entries, query)
   const starterRows = filterStarters(starters, query)
+  const virtual = !initial
   const pageSize = 60
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const pageCount = virtual ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize))
   const safePage = Math.min(page, pageCount - 1)
-  const shownSounds = filtered.slice(safePage * pageSize, safePage * pageSize + pageSize)
-  const shown = shownSounds.length + starterRows.length
+  const listed = virtual ? filtered : filtered.slice(safePage * pageSize, safePage * pageSize + pageSize)
+  const ROW = 58
+  const listRef = useRef<HTMLDivElement>(null)
+  const [span, setSpan] = useState({ start: 0, end: 16 })
+  useLayoutEffect(() => {
+    if (!virtual) return
+    const node = listRef.current
+    if (!node) return
+    const update = () => {
+      const top = node.scrollTop
+      const view = node.clientHeight || 640
+      const start = Math.max(0, Math.floor(top / ROW) - 4)
+      const end = Math.min(listed.length, Math.ceil((top + view) / ROW) + 8)
+      setSpan((prev) => prev.start === start && prev.end === end ? prev : { start, end })
+    }
+    update()
+    node.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(node)
+    return () => {
+      node.removeEventListener('scroll', update)
+      observer?.disconnect()
+    }
+  }, [virtual, listed.length, text, type, bpm, soundKey, collection, category, tag, role])
+  const shownSounds = virtual ? listed.slice(span.start, Math.max(span.end, span.start + 1)) : listed
+  const prefetchKey = virtual ? filtered.slice(0, 2).map((entry) => entry.id).join('\n') : ''
+  useEffect(() => {
+    if (!prefetchKey) return
+    const rows = filtered.filter((entry) => entry.origin !== 'private').slice(0, 2)
+    for (const entry of rows) {
+      void fetchCatalogSound(entry, { priority: 'prefetch', fetchImpl: libraryFetch, cache: soundCache() }).catch(() => undefined)
+    }
+  }, [prefetchKey])
+  const shown = (virtual ? listed.length : shownSounds.length) + starterRows.length
   const total = filtered.length + starterRows.length
   const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || collection || category || tag || role)
   const keys = soundKeys(result.entries)
@@ -524,9 +554,15 @@ export function SoundBrowser({
     setLoading(true)
     setFailed(false)
     try {
-      const next = await until(loadSoundCatalog(fetch, soundCache()), CATALOG_WAIT_MS)
+      const next = await loadSoundCatalog(libraryFetch, soundCache(), {
+        onUpdate: (update) => {
+          if (!update.entries.length) return
+          setResult(update)
+          setLoading(false)
+        },
+      })
       setResult(next)
-      setFailed(false)
+      setFailed(!next.entries.length)
     } catch {
       setResult({ entries: [], status: 'missing' })
       setFailed(true)
@@ -553,11 +589,53 @@ export function SoundBrowser({
   }
 
   const previewAbort = useRef<AbortController | null>(null)
+  function rememberedChannels(entry: SoundEntry) {
+    const file = entry.sha256 ? rememberedFile(entry.sha256) : null
+    if (!file?.channels[0]?.length) return null
+    const rate = store.project.sampleRate
+    if (file.matched?.[0]?.length && file.matchedRate === rate) return { sampleRate: file.matchedRate, channels: file.matched }
+    return { sampleRate: file.sampleRate, channels: file.channels }
+  }
+
   async function loadEntry(entry: SoundEntry, signal?: AbortSignal) {
+    const ready = rememberedChannels(entry)
+    if (ready) {
+      setLoadRatio(1)
+      return ready
+    }
     setLoadRatio(0)
-    const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio, signal })
+    if (entry.origin !== 'private') {
+      try {
+        const file = await streamCatalogSound({
+          url: soundFileUrl(entry.path),
+          toRate: store.project.sampleRate,
+          sha256: entry.sha256,
+          totalBytes: entry.bytes,
+          signal,
+          fetchImpl: libraryFetch,
+          cache: soundCache(),
+          play: false,
+          onSlice: () => undefined,
+        })
+        if (file.peaks.length) peaks.current.set(entry.id, file.peaks)
+        const matched = file.matched?.[0]?.length && file.matchedRate === store.project.sampleRate
+        setLoadRatio(1)
+        return matched
+          ? { sampleRate: file.matchedRate!, channels: file.matched! }
+          : { sampleRate: file.sampleRate, channels: file.channels }
+      } catch (error) {
+        if (signal?.aborted) throw error
+      }
+    }
+    const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio, signal, fetchImpl: libraryFetch })
     if (engine.decodeLibrary) return engine.decodeLibrary(bytes)
     return decodeSoundBytes(bytes)
+  }
+
+  function warm(entry: SoundEntry) {
+    if (entry.origin === 'private') return
+    engine.unlock()
+    void fetchCatalogSound(entry, { fetchImpl: libraryFetch, cache: soundCache() }).catch(() => undefined)
   }
 
   async function preview(entry: SoundEntry) {
@@ -576,6 +654,39 @@ export function SoundBrowser({
     const gen = ++previewGen.current
     setBusy(entry.id)
     try {
+      if (entry.type !== 'loop' && entry.origin !== 'private' && engine.feedPreview) {
+        let started = false
+        const file = await streamCatalogSound({
+          url: soundFileUrl(entry.path),
+          toRate: store.project.sampleRate,
+          sha256: entry.sha256,
+          totalBytes: entry.bytes,
+          signal: controller.signal,
+          fetchImpl: libraryFetch,
+          cache: soundCache(),
+          onSlice: (slice) => {
+            if (gen !== previewGen.current || controller.signal.aborted) return
+            engine.feedPreview?.(gen, slice.channels, slice.sampleRate, slice.gain)
+            engine.setPreviewGain?.(gen, slice.gain)
+            if (started) return
+            started = true
+            setPlaying(entry.id)
+            setHead(0)
+            setBusy('')
+          },
+        })
+        if (gen !== previewGen.current || controller.signal.aborted) return
+        if (file.peaks.length) peaks.current.set(entry.id, file.peaks)
+        const lead = file.matched?.[0] ?? file.channels[0]
+        if (lead?.length) {
+          heard.current.set(entry.id, lead)
+          setHeardTick((tick) => tick + 1)
+        }
+        setWave({ id: entry.id, bars: 0 })
+        setHead(0)
+        setPlaying(entry.id)
+        return
+      }
       const decoded = await loadEntry(entry, controller.signal)
       if (gen !== previewGen.current || controller.signal.aborted) return
       const channels = previewChannelsFor(entry, decoded.channels, decoded.sampleRate, store.project, engine.currentTimelineSample())
@@ -888,7 +999,7 @@ export function SoundBrowser({
         <PrivateLibraryButton onDone={(message, changed) => {
           setPrivateNote(message)
           if (!changed) return
-          void loadSoundCatalog(fetch, soundCache()).then((next) => setResult(next)).catch(() => undefined)
+          void loadSoundCatalog(libraryFetch, soundCache()).then((next) => setResult(next)).catch(() => undefined)
         }} />
         <SoundFilterButton
           bpm={bpm}
@@ -934,7 +1045,9 @@ export function SoundBrowser({
         </p>
       )}
       {fault && <p className="sound-status" role="alert">{fault}</p>}
-      <div className="sound-list">
+      <div className={`sound-list${virtual ? ' is-virtual' : ''}`} ref={listRef}>
+        {virtual && <div className="sound-spacer" style={{ height: Math.max(listed.length, 1) * ROW }} />}
+        <div className="sound-window" style={virtual ? { transform: `translateY(${span.start * ROW}px)` } : undefined}>
         {starterRows.map((entry) => {
           const on = playing === entry.id
           const credit = `${entry.description} ${entry.license} · Hugging Face`
@@ -996,6 +1109,7 @@ export function SoundBrowser({
                 title={`${playHint} ${credit}. ${hosted}`}
                 disabled={busy === entry.id}
                 onDragStart={(event) => beginDrag(entry.id, entry.name, event)}
+                onPointerDown={() => warm(entry)}
                 onDragEnd={() => { dragId = ''; window.setTimeout(() => { dragMoved.current = false }, 0) }}
                 onClick={() => {
                   if (dragMoved.current) return
@@ -1003,9 +1117,9 @@ export function SoundBrowser({
                   void preview(entry)
                 }}
               >
-                {heard.current.get(entry.id) && (
+                {(peaks.current.get(entry.id) || heard.current.get(entry.id)) && (
                   <span className="sound-wave" aria-hidden="true" data-heard={heardTick}>
-                    <MiniWave channel={heard.current.get(entry.id)} color="rgba(142, 224, 174, 0.95)" label="Sound waveform" />
+                    <MiniWave outline={peaks.current.get(entry.id)} channel={peaks.current.get(entry.id) ? undefined : heard.current.get(entry.id)} color="rgba(142, 224, 174, 0.95)" label="Sound waveform" />
                     {on && wave?.id === entry.id && (
                       <>
                         <b className="sound-shade" style={{ width: `${head * 100}%` }} />
@@ -1038,6 +1152,7 @@ export function SoundBrowser({
             </div>
           )
         })}
+        </div>
       </div>
       {count && <p className="sound-count">{count}{pageCount > 1 ? ` Page ${safePage + 1} of ${pageCount}.` : ''}</p>}
       {pageCount > 1 && (

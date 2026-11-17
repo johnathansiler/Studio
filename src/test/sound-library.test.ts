@@ -356,4 +356,28 @@ describe('sound library', () => {
     }
     expect(calls).toBe(urls.length)
   })
+
+  it('lets one prefetch run while a tap still has a free slot', async () => {
+    resetSoundDownloads()
+    const cache = new SoundCache([memoryByteStore()])
+    let calls = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetchImpl = async () => {
+      calls += 1
+      await gate
+      return new Response(new Uint8Array([1, 2, 3, 4]))
+    }
+    const urls = [1, 2, 3].map((index) => legacySoundFileUrl(`loops/prefetch-${index}.wav`))
+    const prefetch = urls.map((url) => fetchSoundBytes(url, fetchImpl, cache, { attempts: 1, priority: 'prefetch' }))
+    try {
+      for (let i = 0; i < 20 && calls < 1; i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+      expect(calls).toBe(1)
+    } finally {
+      release()
+      await Promise.allSettled(prefetch)
+      resetSoundDownloads()
+    }
+    expect(calls).toBe(urls.length)
+  })
 })

@@ -1,15 +1,19 @@
+import { libraryFetch } from './direct'
 import { assertSoundUrl } from './source'
 
 export interface StoredFile {
   key: string
   size: number
   at: number
+  sha256?: string
 }
 
 export interface ByteStore {
   get(key: string): Promise<ArrayBuffer | null>
   put(key: string, bytes: ArrayBuffer): Promise<void>
   delete?(key: string): Promise<void>
+  /** Remember a hash that was already checked, so the next read can skip it. */
+  note?(key: string, sha256: string): Promise<void>
   /** Sizes already on disk. Audio bytes stay put until a later read. */
   stat?(): Promise<StoredFile[]>
 }
@@ -20,12 +24,23 @@ export const SOUND_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
 /** How many library files download at once. Extra requests wait, and a cancel leaves the queue. */
 export const SOUND_DOWNLOAD_LIMIT = 3
 
+/** Background preview fetches. They never take the last slot from a tap. */
+const PREFETCH_LIMIT = 1
+
+function pinnedCatalogKey(key: string) {
+  return key.includes('/catalogs/soundscout-') || key.endsWith('#rows')
+}
+
 export interface FetchSoundOptions {
   attempts?: number
   delayMs?: number
   sha256?: string
   totalBytes?: number
   onProgress?: (ratio: number) => void
+  /** Called with each network chunk so playback can start before the file ends. */
+  onChunk?: (chunk: Uint8Array) => void
+  /** Prefetch waits behind a tap. A tap never waits behind prefetch. */
+  priority?: 'user' | 'prefetch'
   signal?: AbortSignal
 }
 
@@ -139,11 +154,25 @@ export function idbByteStore(): ByteStore {
         tx.onerror = () => reject(tx.error)
       })
     },
+    async note(key, sha256) {
+      const db = await openSoundDb()
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(DB_META, 'readwrite')
+        const store = tx.objectStore(DB_META)
+        const read = store.get(key)
+        read.onsuccess = () => {
+          const row = (read.result as { size?: number; at?: number } | undefined) ?? { size: 0, at: Date.now() }
+          store.put({ size: row.size ?? 0, at: row.at ?? Date.now(), sha256 }, key)
+        }
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+      })
+    },
     async stat() {
       const db = await openSoundDb()
       const saved = await readStore(db, DB_META, (value) => {
-        const row = value as { size?: number, at?: number }
-        return { size: row?.size ?? 0, at: row?.at ?? 0 }
+        const row = value as { size?: number, at?: number, sha256?: string }
+        return { size: row?.size ?? 0, at: row?.at ?? 0, sha256: typeof row?.sha256 === 'string' ? row.sha256 : undefined }
       })
       if (saved.length) return saved
       const scanned = await readStore(db, DB_STORE, (value) => {
@@ -163,7 +192,7 @@ export function idbByteStore(): ByteStore {
   }
 }
 
-function readStore(db: IDBDatabase, name: string, measure: (value: unknown) => { size: number, at: number }) {
+function readStore(db: IDBDatabase, name: string, measure: (value: unknown) => { size: number, at: number, sha256?: string }) {
   return new Promise<StoredFile[]>((resolve, reject) => {
     if (!db.objectStoreNames.contains(name)) {
       resolve([])
@@ -178,7 +207,7 @@ function readStore(db: IDBDatabase, name: string, measure: (value: unknown) => {
         return
       }
       const measured = measure(cursor.value)
-      rows.push({ key: String(cursor.key), size: measured.size, at: measured.at })
+      rows.push({ key: String(cursor.key), size: measured.size, at: measured.at, sha256: measured.sha256 })
       cursor.continue()
     }
     request.onerror = () => reject(request.error)
@@ -199,6 +228,7 @@ export function browserSoundStores(): ByteStore[] {
 export class SoundCache {
   private readonly order: string[] = []
   private readonly sizes = new Map<string, number>()
+  private readonly hashes = new Map<string, string>()
   private readonly ready: Promise<void>
 
   constructor(private readonly layers: ByteStore[], private readonly budget = SOUND_CACHE_BUDGET_BYTES) {
@@ -236,9 +266,24 @@ export class SoundCache {
     await this.evict(key)
   }
 
+  knownHash(key: string) {
+    return this.hashes.get(key) ?? ''
+  }
+
+  /** The bytes were checked against the catalog. Later reads of this key skip the hash. */
+  async noteHash(key: string, sha256: string) {
+    const hash = sha256.trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(hash)) return
+    this.hashes.set(key, hash)
+    for (const layer of this.layers) {
+      try { await layer.note?.(key, hash) } catch { /* a memory layer has no extra record */ }
+    }
+  }
+
   async delete(key: string) {
     await this.ready
     this.sizes.delete(key)
+    this.hashes.delete(key)
     this.order.splice(0, this.order.length, ...this.order.filter((item) => item !== key))
     for (const layer of this.layers) {
       try {
@@ -259,7 +304,7 @@ export class SoundCache {
   private async evict(keep: string) {
     const total = () => [...this.sizes.values()].reduce((sum, size) => sum + size, 0)
     while (total() > this.budget) {
-      const victim = this.order.find((key) => key !== keep)
+      const victim = this.order.find((key) => key !== keep && !pinnedCatalogKey(key))
       if (!victim) break
       if (!keep && this.order.length === 1) break
       await this.forget(victim)
@@ -268,6 +313,7 @@ export class SoundCache {
 
   private async forget(key: string) {
     this.sizes.delete(key)
+    this.hashes.delete(key)
     this.order.splice(0, this.order.length, ...this.order.filter((item) => item !== key))
     for (const layer of this.layers) {
       try {
@@ -293,6 +339,7 @@ export class SoundCache {
       if (this.sizes.has(row.key)) continue
       this.sizes.set(row.key, row.size)
       this.order.push(row.key)
+      if (row.sha256) this.hashes.set(row.key, row.sha256)
     }
     await this.evict('')
   }
@@ -314,10 +361,11 @@ export async function sha256Hex(bytes: ArrayBuffer) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function readBody(response: Response, onProgress?: (ratio: number) => void, totalHint = 0) {
+async function readBody(response: Response, onProgress?: (ratio: number) => void, totalHint = 0, onChunk?: (chunk: Uint8Array) => void) {
   const reader = response.body?.getReader?.()
   if (!reader) {
     const bytes = await response.arrayBuffer()
+    if (bytes.byteLength) onChunk?.(new Uint8Array(bytes))
     onProgress?.(1)
     return bytes
   }
@@ -330,6 +378,7 @@ async function readBody(response: Response, onProgress?: (ratio: number) => void
     if (step.done) break
     if (!step.value) continue
     chunks.push(step.value)
+    onChunk?.(step.value)
     received += step.value.byteLength
     if (total > 0) onProgress?.(Math.min(1, received / total))
   }
@@ -351,44 +400,58 @@ interface Flight {
   controller: AbortController
   promise: Promise<ArrayBuffer>
   waiters: number
+  chunks: Uint8Array[]
+  listeners: Set<(chunk: Uint8Array) => void>
 }
 
 const flights = new Map<string, Flight>()
 let activeDownloads = 0
-const downloadWaiters: Array<() => void> = []
+let prefetchActive = 0
+const userWaiters: Array<() => void> = []
+const prefetchWaiters: Array<() => void> = []
 
-function acquireDownload(signal?: AbortSignal) {
+function acquireDownload(signal?: AbortSignal, priority: 'user' | 'prefetch' = 'user') {
   if (signal?.aborted) return Promise.reject(cancelled())
-  if (activeDownloads < SOUND_DOWNLOAD_LIMIT) {
+  const prefetch = priority === 'prefetch'
+  if (activeDownloads < SOUND_DOWNLOAD_LIMIT && (!prefetch || prefetchActive < PREFETCH_LIMIT)) {
     activeDownloads += 1
+    if (prefetch) prefetchActive += 1
     return Promise.resolve()
   }
+  const queue = prefetch ? prefetchWaiters : userWaiters
   return new Promise<void>((resolve, reject) => {
     const grant = () => {
       signal?.removeEventListener('abort', onAbort)
       activeDownloads += 1
+      if (prefetch) prefetchActive += 1
       resolve()
     }
     const onAbort = () => {
-      const index = downloadWaiters.indexOf(grant)
-      if (index >= 0) downloadWaiters.splice(index, 1)
+      const index = queue.indexOf(grant)
+      if (index >= 0) queue.splice(index, 1)
       reject(cancelled())
     }
-    downloadWaiters.push(grant)
+    queue.push(grant)
     signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
-function releaseDownload() {
+function releaseDownload(priority: 'user' | 'prefetch' = 'user') {
   activeDownloads = Math.max(0, activeDownloads - 1)
-  const next = downloadWaiters.shift()
-  if (next) next()
+  if (priority === 'prefetch') prefetchActive = Math.max(0, prefetchActive - 1)
+  if (userWaiters.length) {
+    userWaiters.shift()?.()
+    return
+  }
+  if (prefetchActive < PREFETCH_LIMIT && prefetchWaiters.length) prefetchWaiters.shift()?.()
 }
 
 /** Tests start from an empty download queue. */
 export function resetSoundDownloads() {
   activeDownloads = 0
-  downloadWaiters.splice(0, downloadWaiters.length)
+  prefetchActive = 0
+  userWaiters.splice(0, userWaiters.length)
+  prefetchWaiters.splice(0, prefetchWaiters.length)
 }
 
 function cancelled() {
@@ -417,16 +480,17 @@ function waitFor(promise: Promise<ArrayBuffer>, signal?: AbortSignal) {
   })
 }
 
-async function downloadSound(url: string, fetchImpl: FetchLike, cache: SoundCache, options: FetchSoundOptions, signal: AbortSignal) {
-  await acquireDownload(signal)
+async function downloadSound(url: string, fetchImpl: FetchLike, cache: SoundCache, options: FetchSoundOptions, signal: AbortSignal, onChunk: (chunk: Uint8Array) => void) {
+  const priority = options.priority === 'prefetch' ? 'prefetch' : 'user'
+  await acquireDownload(signal, priority)
   try {
-    return await downloadSoundBody(url, fetchImpl, cache, options, signal)
+    return await downloadSoundBody(url, fetchImpl, cache, options, signal, onChunk)
   } finally {
-    releaseDownload()
+    releaseDownload(priority)
   }
 }
 
-async function downloadSoundBody(url: string, fetchImpl: FetchLike, cache: SoundCache, options: FetchSoundOptions, signal: AbortSignal) {
+async function downloadSoundBody(url: string, fetchImpl: FetchLike, cache: SoundCache, options: FetchSoundOptions, signal: AbortSignal, onChunk: (chunk: Uint8Array) => void) {
   const expected = options.sha256?.trim().toLowerCase()
   const attempts = Math.max(1, Math.round(options.attempts ?? 3))
   let last: unknown
@@ -435,9 +499,10 @@ async function downloadSoundBody(url: string, fetchImpl: FetchLike, cache: Sound
       if (signal.aborted) throw cancelled()
       const response = await fetchImpl(url, { signal })
       if (!response.ok) throw new Error(`Could not download that sound (${response.status})`)
-      const bytes = await readBody(response, options.onProgress, options.totalBytes ?? 0)
+      const bytes = await readBody(response, options.onProgress, options.totalBytes ?? 0, onChunk)
       if (expected && await sha256Hex(bytes) !== expected) throw new Error('Downloaded audio does not match the SoundScout catalog.')
       try { await cache.put(url, bytes) } catch { /* playback can use the bytes just fetched */ }
+      if (expected) void cache.noteHash(url, expected)
       return bytes
     } catch (error) {
       last = error
@@ -451,19 +516,26 @@ async function downloadSoundBody(url: string, fetchImpl: FetchLike, cache: Sound
 }
 
 /** Download one library file from Hugging Face, or the browser copy from last time. */
-export async function fetchSoundBytes(url: string, fetchImpl: FetchLike = (input, init) => fetch(input, init), cache = soundCache(), options: FetchSoundOptions = {}): Promise<ArrayBuffer> {
+export async function fetchSoundBytes(url: string, fetchImpl: FetchLike = libraryFetch, cache = soundCache(), options: FetchSoundOptions = {}): Promise<ArrayBuffer> {
   assertSoundUrl(url)
   const expected = options.sha256?.trim().toLowerCase()
   const hit = await cache.get(url)
-  if (hit && (!expected || await sha256Hex(hit) === expected)) {
+  const known = cache.knownHash(url)
+  if (hit && (!expected || known === expected || await sha256Hex(hit) === expected)) {
+    if (expected && known !== expected) void cache.noteHash(url, expected)
     options.onProgress?.(1)
     return hit
   }
   const existing = flights.get(url)
   if (existing) {
     existing.waiters += 1
+    if (options.onChunk) {
+      existing.listeners.add(options.onChunk)
+      for (const chunk of existing.chunks) options.onChunk(chunk)
+    }
     const release = () => {
       existing.waiters -= 1
+      if (options.onChunk) existing.listeners.delete(options.onChunk)
       if (existing.waiters <= 0) existing.controller.abort()
     }
     if (options.signal?.aborted) {
@@ -478,14 +550,19 @@ export async function fetchSoundBytes(url: string, fetchImpl: FetchLike = (input
     }
   }
   const controller = new AbortController()
-  const flight: Flight = { controller, promise: Promise.resolve(new ArrayBuffer(0)), waiters: 1 }
+  const flight: Flight = { controller, promise: Promise.resolve(new ArrayBuffer(0)), waiters: 1, chunks: [], listeners: new Set() }
+  if (options.onChunk) flight.listeners.add(options.onChunk)
   const release = () => {
     flight.waiters -= 1
+    if (options.onChunk) flight.listeners.delete(options.onChunk)
     if (flight.waiters <= 0) controller.abort()
   }
   if (options.signal?.aborted) release()
   else options.signal?.addEventListener('abort', release, { once: true })
-  const promise = downloadSound(url, fetchImpl, cache, options, controller.signal)
+  const promise = downloadSound(url, fetchImpl, cache, options, controller.signal, (chunk) => {
+    flight.chunks.push(chunk)
+    for (const listener of flight.listeners) listener(chunk)
+  })
   flight.promise = promise
   flights.set(url, flight)
   try {
