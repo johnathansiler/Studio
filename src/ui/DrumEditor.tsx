@@ -119,7 +119,7 @@ export function DrumEditor({ store, engine }: { store: ProjectStore; engine: Aud
           </>
         )}
       </div>
-      <div className="me-lanes" role="grid" aria-label="Drum lanes. Each row is a pad. Tap a cell to add a hit.">
+      <div className="me-lanes" data-drum-grid="" role="grid" aria-label="Drum lanes. Each row is a pad. Tap a cell to add a hit.">
         <div className="me-loop">
           <span className="me-pad">Loop</span>
           <div className="me-loop-host" style={{ width: trackW }}>
