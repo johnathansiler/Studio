@@ -211,7 +211,7 @@
   flex-flow: row nowrap;
 }
 
-/* Arrange dock: nine equal cells on one row. Height is 44px. A selected Delete wraps under them. */
+/* Arrange dock: nine equal cells on one row. Height is 44px. A selected Delete is the tenth cell. */
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] {
   display: grid;
   grid-template-columns: repeat(var(--arrange-cols, 9), minmax(0, 1fr));
@@ -224,6 +224,13 @@
   min-height: 44px;
   height: auto;
   overflow: hidden;
+}
+
+/* The shared tray pad is 5px. On a short landscape that extra 10px drops the
+   first track's Mute row just under the header scroller. Keep the 44px hits
+   and drop the pad so those buttons stay on screen at scroll zero. */
+.shell.phone.land .phone-context.btn-tray[data-phone-context="arrange"] {
+  padding: 0;
 }
 
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit,

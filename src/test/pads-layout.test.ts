@@ -143,7 +143,7 @@ describe('beat machine layout', () => {
         expect(face.readout, viewport.name).toBe(false)
         expect(face.waveText, viewport.name).not.toMatch(/Vinyl|Swing|One shot|Vintage|Level/)
         expect(face.transportHidden, viewport.name).toBe(false)
-        for (const word of ['Record', 'Overdub', 'Replace', 'Stop', 'Play', 'Erase', 'Arm', 'Count in', 'Metronome', 'Trim', 'Auto chop']) {
+        for (const word of ['Record', 'Overdub', 'Replace', 'Stop', 'Play', 'Erase', 'Arm', 'Count-in', 'Metronome', 'Trim', 'Auto chop']) {
           expect(face.transportText, `${viewport.name} ${word}`).toContain(word)
         }
         expect(face.lipHidden, viewport.name).toBe(false)
