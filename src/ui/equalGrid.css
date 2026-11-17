@@ -187,7 +187,7 @@
   min-width: 0;
 }
 
-/* Phone Arrange dock: Delete, tempo, and Duplicate join the same eight cells as Tools. */
+/* Phone Arrange dock: tempo and Duplicate join the same row as the edit buttons. */
 .shell.phone .phone-context.btn-tray > .transport-extras-slot,
 .shell.phone .phone-context.btn-tray .transport-extras {
   display: contents !important;
@@ -211,41 +211,41 @@
   flex-flow: row nowrap;
 }
 
-/* Arrange dock: eight equal cells. Long words are icons, and tempo reads Tap over the number. */
+/* Arrange dock: nine equal cells on one row. Height is 44px. A selected Delete wraps under them. */
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] {
   display: grid;
-  grid-template-columns: repeat(8, minmax(40px, 1fr));
-  grid-auto-rows: 40px;
+  grid-template-columns: repeat(var(--arrange-cols, 9), minmax(0, 1fr));
+  grid-auto-rows: 44px;
   align-items: stretch;
   justify-content: stretch;
-  gap: 2px;
+  gap: 1px;
   width: 100%;
   max-width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   height: auto;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .bpm-readout {
   width: 100%;
-  min-width: 40px;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-  overflow: visible;
-  padding: 0 2px;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  overflow: hidden;
+  padding: 0 1px;
 }
 
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-face,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-word,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .tempo-kicker,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .tempo-figure {
-  overflow: visible;
+  overflow: hidden;
   text-overflow: clip;
   white-space: nowrap;
-  max-width: none;
+  max-width: 100%;
 }
 
 .shell.phone .phone-context.btn-tray .transport-extras > .tempo-cluster {
@@ -276,10 +276,34 @@
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .transport-extras .bpm-readout,
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit {
   width: 100% !important;
-  min-width: 40px !important;
+  min-width: 0 !important;
   max-width: none !important;
   flex: none !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
   justify-self: stretch;
+}
+
+.contextual-delete { display: contents; }
+
+.transport-extras .count-read {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.05;
+  gap: 1px;
+}
+
+.transport-extras .count-read .t-word { font-size: 11px; }
+
+.transport-extras .t-state {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
 }
 
 /* Roll sits beside the name, in flow, so it does not cover the meter or the control row. */

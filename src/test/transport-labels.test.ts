@@ -155,6 +155,10 @@ describe('transport words', () => {
             minWidth: Math.min(...widths),
             widthSpread: Math.max(...widths) - Math.min(...widths),
             clickWord: words.includes('Click') || [...document.querySelectorAll('.t-word')].some((node) => (node.textContent || '').trim() === 'Click'),
+            metroWord: [...document.querySelectorAll('.t-word')].some((node) => (node.textContent || '').trim() === 'Metronome'),
+            countWord: [...document.querySelectorAll('.t-word')].some((node) => (node.textContent || '').trim() === 'Count-in'),
+            loopWord: [...document.querySelectorAll('.t-word')].some((node) => (node.textContent || '').trim() === 'Loop'),
+            legacyCount: [...document.querySelectorAll('.t-word')].some((node) => (node.textContent || '').trim() === '1-2'),
             clickOff,
             clickOn,
             countOff,
@@ -171,12 +175,18 @@ describe('transport words', () => {
           expect(order.words.filter((word) => word !== 'Tempo' && word !== 'Click' && word !== '1-2' && word !== 'Reset' && word !== 'Punch' && word !== 'Delete' && word !== 'Duplicate'), viewport.name).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
         }
         expect(order.rowCount, viewport.name).toBe(6)
+        expect(order.clickWord, viewport.name).toBe(false)
+        expect(order.legacyCount, viewport.name).toBe(false)
         if (viewport.name === 'phone') {
-          expect(order.clickWord, viewport.name).toBe(false)
+          expect(order.metroWord, viewport.name).toBe(false)
+          expect(order.countWord, viewport.name).toBe(false)
+          expect(order.loopWord, viewport.name).toBe(false)
           expect(order.countPresent, viewport.name).toBe(false)
           expect(order.recOn, viewport.name).not.toBe(order.recOff)
         } else {
-          expect(order.clickWord, viewport.name).toBe(true)
+          expect(order.metroWord, viewport.name).toBe(true)
+          expect(order.countWord, viewport.name).toBe(true)
+          expect(order.loopWord, viewport.name).toBe(true)
           expect(order.clickOn, viewport.name).not.toBe(order.clickOff)
           expect(order.countOn, viewport.name).toBe(order.clickOn)
           expect(order.recOn, viewport.name).not.toBe(order.clickOn)
