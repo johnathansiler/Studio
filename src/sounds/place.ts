@@ -3,7 +3,7 @@ import { interactiveAudioContext } from '../audio/micTap'
 import { normalizePeak } from '../audio/level'
 import { bpmFromName, fitLoopBeats } from '../audio/loopSeam'
 import { resampleSinc } from '../audio/quality/resample'
-import { defaultStretch, detectBpm, renderTempoFollow, samplesAtBeat, tempoMapOf, timelineSamples } from '../audio/stretch/engine'
+import { defaultStretch, detectBpm } from '../audio/stretch/engine'
 import type { StretchMode } from '../model/types'
 import { quartersPerBar } from '../model/time'
 import { uid, type AudioAsset, type AudioClip, type Project } from '../model/types'
@@ -32,19 +32,6 @@ export function stretchModeFor(entry: SoundEntry): StretchMode {
   return 'pro'
 }
 
-function beatAtSample(sample: number, project: Project) {
-  const map = tempoMapOf(project.tempo, project.tempoMap, project.automation)
-  const rate = project.sampleRate
-  let lo = 0
-  let hi = Math.max(1, (Math.max(0, sample) / rate) * (project.tempo / 60) + 8)
-  for (let i = 0; i < 24; i++) {
-    const mid = (lo + hi) / 2
-    if (samplesAtBeat(mid, rate, project.tempo, map) < sample) lo = mid
-    else hi = mid
-  }
-  return (lo + hi) / 2
-}
-
 /**
  * Tempo follow uses the catalog BPM only.
  * A loop with no BPM keeps its natural length unless the caller passes `conform`.
@@ -60,7 +47,9 @@ export function loopBpm(entry: SoundEntry, channel?: Float32Array, sampleRate?: 
 
 /**
  * Build the asset and clip for the playhead.
- * A loop follows the song tempo only when the catalog recorded a BPM.
+ * The clip keeps the file length and the file tempo. Tempo sync is a separate
+ * choice on the clip, because stretching an 808 or any tonal loop changes the
+ * tone before anyone has asked for it.
  */
 export function placeSound(options: {
   entry: SoundEntry
@@ -78,8 +67,18 @@ export function placeSound(options: {
   const bpm = loopBpm(options.entry, lead, rate)
   const mode = stretchModeFor(options.entry)
   const stretch = bpm
-    ? { ...defaultStretch(lead.length, mode), followTempo: true, sourceBpm: bpm }
+    ? { ...defaultStretch(lead.length, mode), followTempo: false, sourceBpm: bpm }
     : defaultStretch(lead.length, mode)
+  if (stretch.sourceBpm) {
+    const fit = fitLoopBeats({
+      samples: lead.length,
+      sampleRate: rate,
+      bpm: stretch.sourceBpm,
+      name: `${options.entry.name} ${options.entry.path}`,
+      beatsPerBar: quartersPerBar(options.project.timeSignature),
+    })
+    if (fit) stretch.sourceBpm = fit.sourceBpm
+  }
   const clip: AudioClip = {
     id: options.clipId || uid('clip'),
     name: options.entry.name,
@@ -93,39 +92,28 @@ export function placeSound(options: {
     source: 'import',
     stretch,
   }
-  if (stretch.followTempo && stretch.sourceBpm) {
-    const fit = fitLoopBeats({
-      samples: lead.length,
-      sampleRate: rate,
-      bpm: stretch.sourceBpm,
-      name: `${options.entry.name} ${options.entry.path}`,
-      beatsPerBar: quartersPerBar(options.project.timeSignature),
-    })
-    if (fit) stretch.sourceBpm = fit.sourceBpm
-    clip.durationSamples = timelineSamples(clip, options.project)
-  }
   return {
     asset: { id: clip.bufferId, name: options.entry.name, sampleRate: rate, channels },
     clip,
   }
 }
 
-/** Speaker preview. Loops are stretched to the project tempo before they play. */
+/**
+ * Speaker preview at the file tempo.
+ * A 105 BPM 808 stretched to the song tempo (usually 120) goes through the
+ * phase vocoder or the granular preview. On a bass sine that is a pitch error
+ * of tens to hundreds of cents, which is the crunch. Sync stays on the clip.
+ */
 export function previewChannelsFor(
-  entry: SoundEntry,
+  _entry: SoundEntry,
   channels: Float32Array[],
   fileRate: number,
   project: Project,
-  startSample = 0,
+  _startSample = 0,
 ): Float32Array[] {
-  const matched = matchProjectRate(channels, fileRate, project.sampleRate)
-  const lead = matched[0]
-  const bpm = lead ? loopBpm(entry, lead, project.sampleRate) : null
-  if (!lead?.length || !bpm) return matched
-  const map = tempoMapOf(project.tempo, project.tempoMap, project.automation)
-  const startBeat = beatAtSample(startSample, project)
-  const mode = stretchModeFor(entry)
-  return matched.map((channel) => renderTempoFollow(channel, project.sampleRate, bpm, project.tempo, map, startBeat, mode))
+  void _entry
+  void _startSample
+  return matchProjectRate(channels, fileRate, project.sampleRate)
 }
 
 export function audioTrackFor(project: Project, selectedId: string | null, droppedId?: string | null) {

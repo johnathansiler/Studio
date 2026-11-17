@@ -51,6 +51,10 @@ function place(entry: SoundEntry, channel: Float32Array, tempo: number) {
   project.tempo = tempo
   const placed = placeSound({ entry, channels: [channel], fileRate: rate, project, startSample: 0, clipId: entry.id })
   if (!placed) throw new Error('missing clip')
+  if (placed.clip.stretch?.sourceBpm) {
+    placed.clip.stretch.followTempo = true
+    placed.clip.durationSamples = timelineSamples(placed.clip, project)
+  }
   const store = new ProjectStore(project)
   const track = store.project.tracks.find((item) => item.type === 'audio')!
   store.addAsset(placed.asset)

@@ -166,7 +166,9 @@ describe('loop length on the bar grid', () => {
       project,
       startSample: 0,
     })
-    expect(placed?.clip.durationSamples).toBe(Math.round(16 * rate * 60 / 120))
+    expect(placed?.clip.stretch?.followTempo).toBe(false)
+    expect(placed?.clip.durationSamples).toBe(padded)
+    expect(placed?.clip.stretch?.sourceBpm).toBeCloseTo(fit?.sourceBpm ?? 0, 5)
     const loose = placeSound({
       entry: loopEntry('pad', 100),
       channels: [tone(4, Math.round(rate * 0.8))],

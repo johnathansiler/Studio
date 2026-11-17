@@ -142,8 +142,9 @@ describe('SoundScout catalog', () => {
       project: createEmptyProject(48000),
       startSample: 0,
     })
-    expect(timedPlaced?.clip.stretch?.followTempo).toBe(true)
+    expect(timedPlaced?.clip.stretch?.followTempo).toBe(false)
     expect(timedPlaced?.clip.stretch?.sourceBpm).toBe(timed.bpm)
+    expect(timedPlaced?.clip.durationSamples).toBe(480)
     expect(() => soundFileUrl('loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => soundFileUrl('one-shots/drums/kick.wav')).toThrow(/Hugging Face|library/)
     expect(legacySoundFileUrl('loops/dust.wav')).toBe(`${SOUND_DATASET_BASE}/loops/dust.wav`)

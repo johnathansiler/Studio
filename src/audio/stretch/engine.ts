@@ -522,7 +522,10 @@ export function timeStretch(
   }
   if (mode === 'tape') return resampleTo(input, length, quality)
   if (mode === 'beats') return stretchBeats(input, length, sampleRate, quality)
-  if (quality === 'preview') return wsola(input, length, mode)
+  // Granular preview (WSOLA) on a tonal loop, especially a low 808, hunts for a
+  // grain and lands hundreds of cents off. Pro and tonal keep the phase vocoder
+  // even for the first buffer. Beats and voice still use the lighter preview.
+  if (quality === 'preview' && mode !== 'pro' && mode !== 'tonal') return wsola(input, length, mode)
   return phaseStretch(input, length, sampleRate, mode)
 }
 
