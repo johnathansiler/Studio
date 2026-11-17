@@ -48,11 +48,34 @@ async function expectCollabFills(page: Page) {
       clientWidth: document.documentElement.clientWidth,
       lowerBottom: lowerBox?.bottom ?? null,
       panelBottom: panelBox?.bottom ?? null,
+      phase: document.querySelector('[data-collab-phase]')?.getAttribute('data-collab-phase') || '',
+      dockTop: null as number | null,
+      dockBottom: null as number | null,
+      tabsHeight: 0,
+      tabsBottom: null as number | null,
     }
   })
+  const dock = await page.locator('.shell.phone .tool-slot.phone-dock-slot')
+  const dockShown = (await dock.count()) > 0 && await dock.evaluate((node) => getComputedStyle(node).display !== 'none')
+  if (dockShown) {
+    const dockBox = await dock.boundingBox()
+    const tabs = await page.locator('.phone-tabs').boundingBox()
+    box.dockTop = dockBox?.y ?? null
+    box.dockBottom = dockBox ? dockBox.y + dockBox.height : null
+    box.tabsHeight = tabs?.height ?? 0
+    box.tabsBottom = tabs ? tabs.y + tabs.height : null
+  }
   expect(box.transport).toBe(0)
   expect(box.paneTop, `pane ${box.paneTop} header ${box.headerBottom} shell ${box.shellBottom}`).toBeLessThanOrEqual(box.headerBottom + 2)
-  expect(box.shellBottom - box.paneBottom).toBeLessThan(8)
+  if (dockShown) {
+    expect(box.phase).toBe('start')
+    expect(box.paneBottom).toBeLessThanOrEqual((box.dockTop ?? 0) + 2)
+    expect(box.shellBottom - (box.dockBottom ?? 0)).toBeLessThan(8)
+    expect(box.tabsHeight).toBeGreaterThanOrEqual(40)
+    expect(box.tabsBottom ?? 0).toBeLessThanOrEqual(box.shellBottom + 1)
+  } else {
+    expect(box.shellBottom - box.paneBottom).toBeLessThan(8)
+  }
   expect(Math.abs(box.shellWidth - box.paneWidth)).toBeLessThan(8)
   expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth + 1)
   if (box.lowerBottom != null && box.panelBottom != null) {
