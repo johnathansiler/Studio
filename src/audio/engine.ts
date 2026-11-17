@@ -37,6 +37,7 @@ import { emptyPatternLoopSamples, patternHitTrack, rackPlayMode, transportPatter
 import { findStepChannel, stepPatternOwner } from '../model/stepPlugin'
 import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
+import { abutPreviewSlice } from './previewSchedule'
 import { encodeWav, linearResample } from '../model/wav'
 import { decodeSlotBytes } from './sample/slot'
 import { fitPlaybackRate, prepareSpeakerPreview } from './quality/playback'
@@ -5279,23 +5280,25 @@ export class AudioEngine {
    * The samples are already at `sampleRate`. A new token replaces the preview.
    * The same token schedules the next slice at the end of the previous one.
    */
-  feedPreview(token: number, channels: Float32Array[], sampleRate: number, gain = 0.8) {
+  feedPreview(token: number, channels: Float32Array[], sampleRate: number, gain = 0.8): boolean {
     const ctx = this.unlock()
     const out = this.speakerSide()
     const lead = channels[0]
-    if (!out || !lead?.length || !(sampleRate > 0)) return
-    if (!this.previewFeed || this.previewFeed.token !== token) {
+    if (!out || !lead?.length || !(sampleRate > 0)) return false
+    const follow = this.previewFeed?.token === token ? this.previewFeed : null
+    const when = abutPreviewSlice(follow ? follow.next : null, ctx.currentTime)
+    if (when == null) return false
+    if (!follow) {
       this.stopPreview()
       const node = ctx.createGain()
       node.gain.value = Math.max(0.0001, gain)
       node.connect(out)
-      const started = ctx.currentTime + 0.02
-      this.previewFeed = { token, gain: node, next: started, started }
+      this.previewFeed = { token, gain: node, next: when, started: when }
       const drop = () => { try { node.disconnect() } catch { /* already gone */ } }
       this.previewStops.push({ stop: drop, disconnect: drop })
     }
     const feed = this.previewFeed
-    if (!feed) return
+    if (!feed) return false
     if (Math.abs(feed.gain.gain.value - gain) > 0.001) {
       const next = Math.max(0.0001, gain)
       try { feed.gain.gain.setTargetAtTime(next, ctx.currentTime, 0.008) } catch { feed.gain.gain.value = next }
@@ -5309,7 +5312,6 @@ export class AudioEngine {
     const src = ctx.createBufferSource()
     src.buffer = buffer
     src.connect(feed.gain)
-    const when = Math.max(feed.next, ctx.currentTime + 0.005)
     const stop = () => { try { src.stop() } catch { /* already stopped */ } }
     const disconnect = () => {
       try { src.disconnect() } catch { /* already disconnected */ }
@@ -5322,6 +5324,10 @@ export class AudioEngine {
     this.previewStops.push({ stop, disconnect })
     const arm = () => {
       if (!this.previewStops.some((item) => item.stop === stop)) return
+      if (ctx.currentTime > when && follow) {
+        disconnect()
+        return
+      }
       try { src.start(when) } catch { disconnect() }
     }
     if (ctx.state === 'running') arm()
@@ -5329,6 +5335,7 @@ export class AudioEngine {
     feed.next = when + buffer.duration
     this.previewClock = { start: feed.started, duration: Math.max(0.001, feed.next - feed.started), loop: false }
     this.previewRates = { sourceRate: sampleRate, outputRate: sampleRate }
+    return true
   }
 
   setPreviewGain(token: number, gain: number) {

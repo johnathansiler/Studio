@@ -273,7 +273,7 @@ type PreviewEngine = {
   currentTimelineSample: () => number
   decodeLibrary?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>
   /** Rate-matched slices. The same token appends; a new token replaces the preview. */
-  feedPreview?: (token: number, channels: Float32Array[], sampleRate: number, gain?: number) => void
+  feedPreview?: (token: number, channels: Float32Array[], sampleRate: number, gain?: number) => boolean | void
   setPreviewGain?: (token: number, gain: number) => void
   previewHead?: (now?: number) => { ratio: number; loop: boolean; duration: number; done: boolean } | null
   holdLibraryPack?: (trackId: string, pack: SamplePack) => void
@@ -666,7 +666,8 @@ export function SoundBrowser({
           cache: soundCache(),
           onSlice: (slice) => {
             if (gen !== previewGen.current || controller.signal.aborted) return
-            engine.feedPreview?.(gen, slice.channels, slice.sampleRate, slice.gain)
+            const accepted = engine.feedPreview?.(gen, slice.channels, slice.sampleRate, slice.gain)
+            if (accepted === false) return
             engine.setPreviewGain?.(gen, slice.gain)
             if (started) return
             started = true

@@ -1,3 +1,4 @@
+import { canStartGaplessPreview } from '../audio/previewSchedule'
 import type { SoundCache } from './cache'
 import { fetchSoundBytes, type FetchSoundOptions } from './cache'
 import { RateStreamer, WavDecoder, peakOutline, type WavInfoReady } from './wavStream'
@@ -207,8 +208,10 @@ function mainDecoder(toRate: number, onSlice: (channels: Float32Array[], sampleR
 }
 
 /**
- * Download, or read the cached file, and play rate-matched slices as soon as
- * the sinc window is stable. The file-rate PCM is the lossless decode.
+ * Download, or read the cached file, and play rate-matched audio.
+ * Slices start only when the buffered audio outlasts the rest of the download
+ * at the measured throughput. Otherwise the finished decode plays as one buffer.
+ * A slice is never appended after silence.
  */
 export async function streamCatalogSound(options: {
   url: string
@@ -255,22 +258,69 @@ async function streamCatalogSoundNow(options: {
 }): Promise<StreamedFile> {
   let peak = 0
   let played = 0
-  let started = false
-  const fadeAt = Math.max(8, Math.round((options.toRate > 0 ? options.toRate : 48000) * 0.0015))
+  const pending: { channels: Float32Array[]; sampleRate: number; final: boolean }[] = []
+  let received = 0
+  let firstAt = 0
   const session = openDecoder(options.toRate, (channels, sampleRate, final) => {
+    pending.push({ channels, sampleRate, final })
+    consider()
+  })
+  const bufferedSeconds = () => {
+    let samples = 0
+    let rate = options.toRate || 48000
+    for (const slice of pending) {
+      samples += slice.channels[0]?.length ?? 0
+      if (slice.sampleRate > 0) rate = slice.sampleRate
+    }
+    return samples / Math.max(1, rate)
+  }
+  const emitQueued = () => {
+    if (!pending.length) return
+    const batch = pending.splice(0, pending.length)
     let nextPeak = peak
-    for (const channel of channels) {
-      for (let i = 0; i < channel.length; i++) {
-        const sample = Math.abs(channel[i] || 0)
-        if (sample > nextPeak) nextPeak = sample
+    for (const slice of batch) {
+      for (const channel of slice.channels) {
+        for (let i = 0; i < channel.length; i++) {
+          const sample = Math.abs(channel[i] || 0)
+          if (sample > nextPeak) nextPeak = sample
+        }
       }
     }
     peak = nextPeak
-    const faded = fadeEdges(channels, fadeAt, !started, final)
-    started = true
-    played += faded[0]?.length ?? 0
-    options.onSlice({ channels: faded, sampleRate, gain: previewGain(peak) })
-  })
+    const gain = previewGain(peak)
+    const fade = Math.max(8, Math.round((batch[0].sampleRate || options.toRate || 48000) * 0.0015))
+    batch.forEach((slice, index) => {
+      const first = played === 0 && index === 0
+      const last = slice.final
+      played += slice.channels[0]?.length ?? 0
+      options.onSlice({
+        channels: fadeEdges(slice.channels, fade, first, last),
+        sampleRate: slice.sampleRate,
+        gain,
+      })
+    })
+  }
+  const consider = () => {
+    if (played > 0) {
+      emitQueued()
+      return
+    }
+    const total = options.totalBytes ?? 0
+    if (total > 0 && received >= total) return
+    const elapsed = firstAt > 0 ? (performance.now() - firstAt) / 1000 : 0
+    if (!canStartGaplessPreview({
+      receivedBytes: received,
+      totalBytes: total,
+      elapsedSec: elapsed,
+      bufferedSec: bufferedSeconds(),
+    })) return
+    emitQueued()
+  }
+  const note = (bytes: number) => {
+    if (bytes <= 0) return
+    if (!firstAt) firstAt = performance.now()
+    received += bytes
+  }
   const abort = () => session.cancel()
   options.signal?.addEventListener('abort', abort, { once: true })
   let streamed = false
@@ -281,7 +331,9 @@ async function streamCatalogSoundNow(options: {
       signal: options.signal,
       onChunk: (chunk) => {
         streamed = true
+        note(chunk.byteLength)
         session.push(chunk)
+        consider()
       },
     })
     if (options.signal?.aborted) {
@@ -290,11 +342,13 @@ async function streamCatalogSoundNow(options: {
     }
     if (!streamed) {
       const view = new Uint8Array(bytes)
+      note(view.byteLength)
       const first = Math.min(view.byteLength, 96 * 1024)
       if (first) session.push(view.subarray(0, first))
       await new Promise((resolve) => setTimeout(resolve, 0))
       if (options.signal?.aborted) throw new DOMException('The download was cancelled.', 'AbortError')
       if (first < view.byteLength) session.push(view.subarray(first))
+      consider()
     }
     session.finish()
     const file = await session.done
@@ -310,53 +364,25 @@ async function streamCatalogSoundNow(options: {
 }
 
 function replay(file: StreamedFile, toRate: number, onSlice: (slice: PreviewSlice) => void) {
-  if (file.matched?.[0]?.length && file.matchedRate === (toRate || file.sampleRate)) {
-    emitParts(file.matched, file.matchedRate, onSlice)
-    return
-  }
-  const frames = file.channels[0]?.length ?? 0
-  if (!frames) return
-  const rate = new RateStreamer(file.channels, frames, file.sampleRate, toRate || file.sampleRate)
-  const headFrames = Math.min(frames, Math.max(1, Math.round(file.sampleRate * 0.12)))
-  const head = headFrames < frames ? rate.take(headFrames, frames) : null
-  const tail = rate.take(frames, frames)
-  const parts = [head, tail].filter((part): part is Float32Array[] => Boolean(part?.[0]?.length))
-  if (!parts.length) return
-  let peak = 0
-  for (const part of parts) {
-    for (const channel of part) {
-      for (let i = 0; i < channel.length; i++) {
-        const sample = Math.abs(channel[i] || 0)
-        if (sample > peak) peak = sample
-      }
-    }
-  }
-  const fadeAt = Math.max(8, Math.round(((toRate > 0 ? toRate : file.sampleRate) || 48000) * 0.0015))
   const sampleRate = toRate || file.sampleRate
-  parts.forEach((part, index) => {
-    const last = index === parts.length - 1
-    onSlice({ channels: fadeEdges(part, fadeAt, index === 0, last), sampleRate, gain: previewGain(peak) })
-  })
-}
-
-function emitParts(partsIn: Float32Array[], sampleRate: number, onSlice: (slice: PreviewSlice) => void) {
-  const frames = partsIn[0]?.length ?? 0
-  if (!frames) return
-  const head = Math.min(frames, Math.max(1, Math.round(sampleRate * 0.12)))
-  const pieces = head < frames
-    ? [partsIn.map((channel) => channel.subarray(0, head)), partsIn.map((channel) => channel.subarray(head))]
-    : [partsIn]
+  const matched = file.matched?.[0]?.length && file.matchedRate === sampleRate ? file.matched : null
+  const channels = matched ?? rateMatch(file, sampleRate)
+  const lead = channels?.[0]
+  if (!channels || !lead?.length) return
   let peak = 0
-  for (const channel of partsIn) {
+  for (const channel of channels) {
     for (let i = 0; i < channel.length; i++) {
       const sample = Math.abs(channel[i] || 0)
       if (sample > peak) peak = sample
     }
   }
   const fadeAt = Math.max(8, Math.round(sampleRate * 0.0015))
-  pieces.forEach((part, index) => {
-    const last = index === pieces.length - 1
-    const channels = part.map((channel) => Float32Array.from(channel))
-    onSlice({ channels: fadeEdges(channels, fadeAt, index === 0, last), sampleRate, gain: previewGain(peak) })
-  })
+  onSlice({ channels: fadeEdges(channels, fadeAt, true, true), sampleRate, gain: previewGain(peak) })
+}
+
+function rateMatch(file: StreamedFile, toRate: number) {
+  const frames = file.channels[0]?.length ?? 0
+  if (!frames) return null
+  const rate = new RateStreamer(file.channels, frames, file.sampleRate, toRate || file.sampleRate)
+  return rate.take(frames, frames)
 }
