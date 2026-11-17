@@ -68,10 +68,10 @@ describe('stability across phone viewports', () => {
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await page.getByRole('button', { name: /^Arrange/ }).first().waitFor({ timeout: 20000 })
         await screen(page, /^Mix/)
-        await screen(page, /^Collab/)
+        await screen(page, /^Menu/)
         await screen(page, /^Arrange/)
         const dock = await page.evaluate(() => {
-          const tabs = ['menu', 'browse', 'tools'].map((id) => {
+          const tabs = ['browse', 'tools', 'ideas'].map((id) => {
             const node = document.querySelector(`[data-phone-tab="${id}"]`)
             const box = node?.getBoundingClientRect()
             return {

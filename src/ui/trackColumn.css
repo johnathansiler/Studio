@@ -183,7 +183,7 @@
   line-height: 24px;
 }
 
-.shell.phone .phone-tool-row.btn-tray {
+.shell .phone-tool-row.btn-tray {
   display: flex;
   flex-flow: row nowrap;
   align-items: stretch;
@@ -195,7 +195,7 @@
   box-sizing: border-box;
 }
 
-.shell.phone .phone-tool-row.btn-tray .phone-hit {
+.shell .phone-tool-row.btn-tray .phone-hit {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -203,9 +203,9 @@
   width: 0;
   min-width: 0;
   max-width: none;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
   margin: 0;
   padding: 0 1px;
   border-radius: 8px;
@@ -221,7 +221,7 @@
   line-height: 1;
 }
 
-.shell.phone .phone-tool-row.btn-tray .phone-hit .phone-face {
+.shell .phone-tool-row.btn-tray .phone-hit .phone-face {
   height: auto;
   max-height: none;
   padding: 0;
@@ -236,8 +236,8 @@
   letter-spacing: 0;
 }
 
-.shell.phone .phone-tool-row.btn-tray .phone-hit.on,
-.shell.phone .phone-tool-row.btn-tray .phone-hit[aria-pressed='true'] {
+.shell .phone-tool-row.btn-tray .phone-hit.on,
+.shell .phone-tool-row.btn-tray .phone-hit[aria-pressed='true'] {
   background-color: var(--btn-toggle-bg);
   background-image: var(--btn-quiet-face);
   color: var(--btn-toggle-ink);
@@ -370,30 +370,32 @@
   display: contents;
 }
 
-.shell.phone .phone-context.btn-tray .phone-hit,
-.shell.phone .phone-context.btn-tray .t-btn,
-.shell.phone .phone-context.btn-tray .bpm-readout {
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-  padding: 0 8px;
+.shell .phone-context.btn-tray .phone-hit,
+.shell .phone-context.btn-tray .t-btn,
+.shell .phone-context.btn-tray .bpm-readout {
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  padding: 0 2px;
   border-radius: 8px;
-  border: 1px solid var(--btn-quiet-border);
-  background-color: var(--btn-quiet-bg);
-  background-image: var(--btn-quiet-face);
-  box-shadow: var(--btn-bevel);
-  color: var(--btn-quiet-ink);
+  border: 0;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
   font-size: 11px;
   font-weight: 650;
 }
 
-.shell.phone .phone-context.btn-tray .phone-hit.on,
-.shell.phone .phone-context.btn-tray .phone-hit[aria-pressed="true"] {
-  background-color: var(--btn-toggle-bg);
-  background-image: var(--btn-quiet-face);
-  color: var(--btn-toggle-ink);
+.shell .phone-context.btn-tray .phone-hit.on,
+.shell .phone-context.btn-tray .phone-hit[aria-pressed="true"],
+.shell .phone-context.btn-tray .t-btn.on,
+.shell .phone-context.btn-tray .t-btn[aria-pressed="true"] {
+  background-color: var(--accent);
+  background-image: var(--face);
+  color: var(--accent-ink);
   border-color: transparent;
-  box-shadow: var(--btn-bevel-pressed);
+  box-shadow: var(--raised);
 }
 
 .shell.phone .phone-context.btn-tray .phone-hit .phone-face {
@@ -429,7 +431,7 @@
 .shell.phone .phone-context.btn-tray .tempo-kicker { font-size: 9px; }
 .shell.phone .phone-context.btn-tray .tempo-figure { font-size: 12px; }
 
-.shell.phone .phone-context.btn-tray {
+.shell .phone-context.btn-tray {
   flex-flow: row nowrap;
   align-items: stretch;
   justify-content: stretch;
@@ -439,9 +441,9 @@
   gap: 2px;
 }
 
-.shell.phone .phone-context.btn-tray .phone-hit,
-.shell.phone .phone-context.btn-tray .t-btn,
-.shell.phone .phone-context.btn-tray .bpm-readout {
+.shell .phone-context.btn-tray .phone-hit,
+.shell .phone-context.btn-tray .t-btn,
+.shell .phone-context.btn-tray .bpm-readout {
   flex: 1 1 0;
   width: 0;
   min-width: 0;
@@ -450,8 +452,8 @@
   font-size: 11px;
 }
 
-.shell.phone .phone-context .transport-extras-slot,
-.shell.phone .phone-context .transport-extras,
+.shell .phone-context .transport-extras-slot,
+.shell .phone-context .transport-extras,
 .command-strip .transport-extras-slot,
 .command-strip .transport-extras {
   display: contents;

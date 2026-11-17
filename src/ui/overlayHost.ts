@@ -47,7 +47,7 @@ export interface ViewTabFrame {
   height: number
 }
 
-/** Measure the Arrange / Mix / Collab bar and publish it as shared layout tokens. */
+/** Measure the Menu / Arrange / Mix bar and publish it as shared layout tokens. */
 export function syncViewTabFrame(root?: ParentNode | null): ViewTabFrame | null {
   if (typeof document === 'undefined') return null
   const bar = (root ?? document).querySelector('.views')
@@ -69,12 +69,12 @@ export function syncViewTabFrame(root?: ParentNode | null): ViewTabFrame | null 
   return frame
 }
 
-/** The phone shell, whether `root` is that element or a parent that contains it. */
+/** The studio shell, whether `root` is that element or a parent that contains it. */
 function phoneShell(root?: ParentNode | null): Element | null {
   if (typeof document === 'undefined') return null
-  if (root instanceof Element && root.classList.contains('shell') && root.classList.contains('phone')) return root
+  if (root instanceof Element && root.classList.contains('shell')) return root
   const scope = root ?? document
-  return scope.querySelector('.shell.phone')
+  return scope.querySelector('.shell')
 }
 
 /** Room between the transport (or the tabs) and the phone bottom bar. Sheets use this height. */

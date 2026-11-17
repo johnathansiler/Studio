@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
@@ -7,7 +7,7 @@ import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../stat
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { SnapChoices } from './UtilitySheets'
-import { DeleteTrackConfirm, applyTrackDelete, eqCols } from './equalGrid'
+import { DeleteTrackConfirm, applyTrackDelete } from './equalGrid'
 import { useScreenOverlay } from './screenOverlay'
 import {
   phoneContextKind,
@@ -169,10 +169,10 @@ export function PhoneDock({
   place,
   menuOpen,
   browseOpen,
-  menuRef,
+  ideasOpen,
   onMenu,
   onBrowse,
-  onWarmMenu,
+  onIdeas,
   onWarmBrowse,
   onMenuAction: _onMenuAction,
   onUndo,
@@ -185,10 +185,10 @@ export function PhoneDock({
   place: PhonePlace
   menuOpen: boolean
   browseOpen: boolean
-  menuRef: RefObject<HTMLButtonElement | null>
+  ideasOpen: boolean
   onMenu: () => void
   onBrowse: () => void
-  onWarmMenu?: () => void
+  onIdeas: () => void
   onWarmBrowse?: () => void
   onMenuAction: (action: string) => void
   onUndo: () => void
@@ -239,14 +239,26 @@ export function PhoneDock({
   }, [place, menuOpen, browseOpen])
   useScreenOverlay(() => setTransportMore(false), transportMore && place === 'mix')
 
+  function closeIdeas() {
+    if (ideasOpen) onIdeas()
+  }
+
   function openTools() {
     if (menuOpen) onMenu()
     if (browseOpen) onBrowse()
+    closeIdeas()
     if (arrangeLive) {
       toggleArrangeSheet('tools')
       return
     }
     setOffstage((value) => (value === 'tools' ? null : 'tools'))
+  }
+
+  function openIdeas() {
+    if (menuOpen) onMenu()
+    if (browseOpen) onBrowse()
+    closeTools()
+    onIdeas()
   }
 
   function openSnap() {
@@ -310,7 +322,7 @@ export function PhoneDock({
       ) : null}
       {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
       {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
-      <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}${kind === 'mix' ? ' eq-grid phone-mix-row' : ''}`} style={kind === 'mix' ? eqCols(3) : kind === 'arrange' ? { ['--arrange-cols' as string]: String(9 + (showArrangeDelete ? 1 : 0)) } : undefined} role="toolbar" aria-label="Actions" data-phone-context={kind}>
+      <div className="phone-context btn-tray phone-context-tray" role="toolbar" aria-label="Actions" data-phone-context={kind}>
         {kind === 'clip' && clip && (
           <>
             {clip.kind !== 'pattern' && (
@@ -360,12 +372,6 @@ export function PhoneDock({
               pressed={transportMore}
               onClick={() => setTransportMore((open) => !open)}
             />
-          </>
-        )}
-        {kind === 'collab' && (
-          <>
-            <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
-            <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
           </>
         )}
         {kind === 'plugin' && (
@@ -420,23 +426,7 @@ export function PhoneDock({
           </>
         )}
       </div>
-      <div className="phone-tabs" aria-label="Phone">
-        <button
-          ref={menuRef}
-          type="button"
-          className={`phone-tab menu-btn${menuOpen ? ' active on' : ''}`}
-          data-phone-tab="menu"
-          aria-pressed={menuOpen}
-          aria-label="Menu. Project, edit, view, and settings."
-          title="Project, edit, view, and settings."
-          aria-expanded={menuOpen}
-          aria-controls="shell-menu"
-          onPointerEnter={onWarmMenu}
-          onTouchStart={onWarmMenu}
-          onClick={onMenu}
-        >
-          <span className="menu-word">Menu</span>
-        </button>
+      <div className="phone-tabs" aria-label="Browse, Tools, and Ideas">
         <button
           type="button"
           className={`phone-tab${browseOpen ? ' active on' : ''}`}
@@ -446,7 +436,7 @@ export function PhoneDock({
           title="My Library, patterns, and clips."
           onPointerEnter={onWarmBrowse}
           onTouchStart={onWarmBrowse}
-          onClick={onBrowse}
+          onClick={() => { closeIdeas(); onBrowse() }}
         >
           Browse
         </button>
@@ -462,6 +452,17 @@ export function PhoneDock({
           onClick={openTools}
         >
           Tools
+        </button>
+        <button
+          type="button"
+          className={`phone-tab${ideasOpen ? ' active on' : ''}`}
+          data-phone-tab="ideas"
+          aria-pressed={ideasOpen}
+          aria-label="Ideas"
+          title="Pick a part, or write a full song. The MIDI stays editable."
+          onClick={openIdeas}
+        >
+          Ideas
         </button>
       </div>
     </>

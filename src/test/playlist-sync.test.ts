@@ -234,9 +234,10 @@ describe('phone arrange', () => {
         place: 'arrange',
         menuOpen: false,
         browseOpen: false,
-        menuRef: { current: null },
+        ideasOpen: false,
         onMenu() {},
         onBrowse() {},
+        onIdeas() {},
         onMenuAction() {},
         onUndo() {},
         onRedo() {},
@@ -251,8 +252,9 @@ describe('phone arrange', () => {
       expect(dock).toContain('data-phone-action="metronome"')
       expect(dock).toContain('data-phone-action="undo"')
       expect(dock).toContain('data-phone-action="redo"')
-      expect(dock).toContain('>Menu<')
+      expect(dock).not.toContain('>Menu<')
       expect(dock).toContain('>Browse<')
       expect(dock).toContain('>Tools<')
+      expect(dock).toContain('>Ideas<')
   })
 })

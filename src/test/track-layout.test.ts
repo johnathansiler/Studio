@@ -27,7 +27,6 @@ function transport(phone: boolean) {
     onRecord() {},
     onSeek() {},
     onReset() {},
-    onIdeas() {},
   }))
 }
 
@@ -36,14 +35,16 @@ function words(html: string) {
 }
 
 describe('track view layout', () => {
-  it('orders the transport as Start, Rewind, Fast Forward, Play, Record, Ideas', () => {
+  it('orders the transport as Start, Rewind, Fast Forward, Play, Record, Tap Tempo', () => {
     for (const phone of [true, false]) {
       const html = transport(phone)
       const main = html.slice(html.indexOf('t-main'), html.indexOf('transport-extras'))
       expect(main).toContain('aria-label="Go to Start.')
       expect(main).toContain('aria-label="Rewind.')
       expect(main).toContain('aria-label="Fast Forward.')
-      expect(main).toContain('aria-label="Ideas"')
+      expect(main).toContain('aria-label="Tap Tempo.')
+      expect(main).toContain('>Tap<')
+      expect(main).not.toContain('ideas-bulb')
       expect(main).not.toContain('>Punch<')
       expect(main).not.toContain('>Tempo<')
       expect(main).not.toContain('>Reset<')
@@ -64,22 +65,16 @@ describe('track view layout', () => {
       const extras = html.slice(html.indexOf('transport-extras'))
       expect(extras).not.toContain('>Delete<')
       expect(extras).not.toContain('id="transport-delete"')
-      expect(extras).toContain(phone ? '>Tap<' : '>Tempo<')
+      expect(extras).not.toContain('>Tap<')
+      expect(extras).not.toContain('>Tempo<')
       expect(extras).toContain('>Duplicate<')
       expect(extras).not.toContain('>Punch<')
       expect(extras).not.toContain('>Reset<')
       expect(extras).not.toContain('>Click<')
       expect(extras).not.toContain('>1-2<')
-      if (phone) {
-        expect(extras).not.toContain('id="transport-loop"')
-        expect(extras).not.toContain('>Metronome<')
-        expect(extras).not.toContain('>Count-in<')
-      } else {
-        expect(extras).toContain('id="transport-loop"')
-        expect(extras).toContain('>Loop<')
-        expect(extras).toContain('>Metronome<')
-        expect(extras).toContain('>Count-in<')
-      }
+      expect(extras).not.toContain('id="transport-loop"')
+      expect(extras).not.toContain('>Metronome<')
+      expect(extras).not.toContain('>Count-in<')
     }
   })
 

@@ -346,9 +346,9 @@ describe('timeline overview and loop handles', () => {
         const phone = document.querySelector('.shell.phone') != null
         return {
           phone,
-          menu: boxOf(phone ? '[data-phone-tab="menu"]' : '.menu-btn'),
-          browse: boxOf(phone ? '[data-phone-tab="browse"]' : '.arrange-panels .cap-btn'),
-          tools: boxOf(phone ? '[data-phone-tab="tools"]' : '.tool-slot'),
+          menu: boxOf('.views .menu-btn'),
+          browse: boxOf('[data-phone-tab="browse"]'),
+          tools: boxOf('[data-phone-tab="tools"]'),
         }
       })
       expect(chrome.menu?.onScreen, `${viewport.width} menu`).toBe(true)

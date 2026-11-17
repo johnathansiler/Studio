@@ -1299,6 +1299,10 @@ body:has(.unstuck-sheet) .toasts { z-index: 90; top: 64px; bottom: auto; }
   justify-content: flex-end;
   pointer-events: none;
 }
+/* Desk and fold docks are taller than the old 68px bar. Keep the hint above that tray. */
+body:has(.shell.studio:not(.phone)) .select-hint-host {
+  bottom: calc(var(--phone-chrome-bottom, 68px) + 8px + env(safe-area-inset-bottom));
+}
 .select-hint-host .toast.select-hint {
   display: flex;
   align-items: center;
@@ -4197,9 +4201,27 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   order: 7;
   flex: 0 0 auto;
 }
-.shell.phone:not(.land) .transport.simple .t-main > .tempo-cluster,
-.shell.fold .transport.simple .t-main > .tempo-cluster {
-  order: 0;
+.shell .transport.simple .t-main > .tempo-cluster {
+  order: 1;
+}
+.shell .transport.simple .t-main .tempo-cluster {
+  display: flex;
+  min-width: 0;
+}
+.shell .transport.simple .t-main .tempo-cluster > .t-btn,
+.shell .transport.simple .t-main .tempo-cluster > .bpm-readout {
+  flex-direction: column;
+  gap: 0;
+  line-height: 1;
+}
+.shell .transport.simple .t-main .tempo-kicker {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.shell .transport.simple .t-main .tempo-figure {
+  font-size: 12px;
+  font-weight: 740;
 }
 .shell:has(.tool-slot:not(:empty)) :is(
   .plugin-sheet,

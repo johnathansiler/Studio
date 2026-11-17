@@ -511,8 +511,8 @@ describe('screen overlays leave the view tabs free', () => {
         await page.getByRole('button', { name: /^Mix/ }).first().click()
         await settleClosed(page)
         expect(await page.getByRole('button', { name: /^Mix/ }).first().getAttribute('class')).toContain('active')
-        await page.getByRole('button', { name: /^Collab/ }).first().click()
-        await page.locator('[data-collab-panel="open"]').waitFor()
+        await page.getByRole('button', { name: 'Ideas', exact: true }).click()
+        await page.locator('[data-unstuck="open"]').waitFor()
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
       }
       await page.close()
