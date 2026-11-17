@@ -26,6 +26,18 @@ export function smoothParam(param: RampParam, value: number, now: number, second
 }
 
 /**
+ * Put an AudioParam on `value` at `now`.
+ * The shared smoother approaches over about five time constants (~50 ms). A fader
+ * must not wait for that: the finger writes the parameter itself.
+ */
+export function writeParamNow(param: RampParam, value: number, now: number) {
+  const target = Number.isFinite(value) ? value : 0
+  const time = Number.isFinite(now) ? now : 0
+  param.cancelScheduledValues(time)
+  param.setValueAtTime(target, time)
+}
+
+/**
  * One audio block of the same 5–15 ms approach `smoothParam` writes onto an AudioParam.
  * Plugin and instrument worklets use this so a knob does not click and does not add latency.
  */

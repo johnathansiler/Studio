@@ -195,6 +195,60 @@ export function addInsert(store: ProjectStore, trackId: string | 'master', value
   else store.addPlugin(trackId, value)
 }
 
+/** Every plugin id currently on the song, including the master. */
+export function collectPluginIds(store: ProjectStore) {
+  const ids = new Set<string>()
+  for (const plugin of store.project.masterPlugins) ids.add(plugin.id)
+  for (const track of store.project.tracks) for (const plugin of track.plugins) ids.add(plugin.id)
+  return ids
+}
+
+function pluginHost(store: ProjectStore, trackId: string | 'master', pluginId: string) {
+  const list = trackId === 'master' ? store.project.masterPlugins : store.track(trackId)?.plugins
+  return list?.find((plugin) => plugin.id === pluginId) ?? null
+}
+
+/** Instruments that addPlugin already opens. Focusing them again would toggle the face shut. */
+function opensOwnFace(pluginId: string) {
+  return pluginId === 'scaler' || pluginId === 'steps' || pluginId === 'synth' || insertsBeatMachine(pluginId)
+}
+
+function closeMixSheet() {
+  const doc = (globalThis as { document?: Document }).document
+  const sheet = doc?.querySelector?.('details.mix-more[open]')
+  if (sheet && 'open' in sheet) (sheet as HTMLDetailsElement).open = false
+}
+
+/**
+ * After Add insert, open the device that just landed.
+ * The mix sheet sits above the plugin editor, so it closes too.
+ */
+export function revealNewInsert(store: ProjectStore, prefer: string | 'master', before: Set<string>) {
+  const hosts: { trackId: string | 'master'; plugins: { id: string; pluginId: string }[] }[] = []
+  const preferred = prefer === 'master' ? store.project.masterPlugins : store.track(prefer)?.plugins
+  if (preferred) hosts.push({ trackId: prefer, plugins: preferred })
+  if (prefer !== 'master') hosts.push({ trackId: 'master', plugins: store.project.masterPlugins })
+  for (const track of store.project.tracks) {
+    if (track.id === prefer) continue
+    hosts.push({ trackId: track.id, plugins: track.plugins })
+  }
+  let placed: { trackId: string | 'master'; id: string } | null = null
+  for (const host of hosts) {
+    const added = host.plugins.find((plugin) => !before.has(plugin.id))
+    if (added) {
+      placed = { trackId: host.trackId, id: added.id }
+      break
+    }
+  }
+  if (!placed) return null
+  const plugin = pluginHost(store, placed.trackId, placed.id)
+  if (!plugin || opensOwnFace(plugin.pluginId)) {
+    if (store.pluginFocus) store.focusPlugin(null)
+  } else store.focusPlugin(placed.trackId, placed.id)
+  closeMixSheet()
+  return placed
+}
+
 /** Names that fit a narrow strip. The full name stays on the button label. */
 export function clipInsertName(name: string, column: number) {
   const inner = Math.max(28, column - 10)
@@ -332,10 +386,12 @@ function PluginPicker({ store, trackId, slot = false, order = 0 }: { store: Proj
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation()
+                const before = collectPluginIds(store)
                 if (trackId !== 'master') store.selectTrack(trackId)
                 if (slot) addStripInsert(store, trackId, plugin.id)
                 else addInsert(store, trackId, plugin.id)
                 setOpen(false)
+                revealNewInsert(store, trackId, before)
               }}
             >
               {plugin.name}

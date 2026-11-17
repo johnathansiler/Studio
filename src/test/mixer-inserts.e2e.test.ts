@@ -68,6 +68,29 @@ describe('mixer insert and pan controls', () => {
         return store.project.tracks[1].plugins.map((plugin) => plugin.pluginId)
       })
       expect(undone).not.toContain('delay')
+      await page.locator('.mixer > .strip').nth(1).getByRole('button', { name: /Add insert on/ }).click()
+      await page.getByRole('button', { name: 'EQ', exact: true }).click()
+      await page.getByRole('dialog', { name: 'EQ' }).waitFor()
+      const opened = await page.evaluate(() => {
+        const cue = (window as unknown as {
+          __cueharbor: {
+            store: {
+              pluginFocus: { trackId: string; pluginId: string } | null
+              project: { tracks: { plugins: { id: string; pluginId: string }[] }[] }
+            }
+          }
+        }).__cueharbor
+        const focus = cue.store.pluginFocus
+        const plugin = cue.store.project.tracks[1].plugins.find((item) => item.id === focus?.pluginId)
+        return {
+          trackId: focus?.trackId ?? '',
+          pluginId: plugin?.pluginId ?? '',
+          dialog: !!document.querySelector('.plugin-sheet'),
+        }
+      })
+      expect(opened.pluginId).toBe('eq')
+      expect(opened.trackId).toBeTruthy()
+      expect(opened.dialog).toBe(true)
     } finally {
       child.kill('SIGTERM')
       await browser?.close()

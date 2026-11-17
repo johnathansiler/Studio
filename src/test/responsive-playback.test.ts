@@ -3,6 +3,8 @@ import { AudioEngine } from '../audio/engine'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { resetTicker, subscribeFrame } from '../audio/ticker'
+import { gainFromDb } from '../model/mixLaw'
+import { gainToDb } from '../model/time'
 import { createMixDrag, settleMixFollow } from '../ui/liveMix'
 import { channelRoute } from '../model/sharedMix'
 import { placePlayhead, playheadPx, playheadTransform } from '../ui/playhead'
@@ -157,6 +159,10 @@ function targets(param: AudioParamMock) {
   return param.events.filter((event) => event.method === 'target')
 }
 
+function sets(param: AudioParamMock) {
+  return param.events.filter((event) => event.method === 'set')
+}
+
 describe('shared animation frame', () => {
   const queue: FrameRequestCallback[] = []
   const previous = globalThis.requestAnimationFrame
@@ -277,6 +283,7 @@ describe('fader drag', () => {
     const spec = { trackId: track.id, target: 'volume' as const, param: 'volume', min: 0, max: 1.25 }
     const strip = live.strips.get(track.id)!
     const beforeTargets = targets(strip.fader.gain).length
+    const beforeSets = sets(strip.fader.gain).length
     const origin = track.volume
     let screens = 0
     const frameCommits: number[] = []
@@ -301,7 +308,9 @@ describe('fader drag', () => {
     for (let i = 0; i < moves; i++) drag.move(origin * (1 - (i + 1) / (moves + 2)))
     expect(screens).toBe(0)
     expect(store.version).toBe(version)
-    expect(targets(strip.fader.gain).length - beforeTargets).toBe(moves)
+    expect(targets(strip.fader.gain).length).toBe(beforeTargets)
+    expect(sets(strip.fader.gain).length - beforeSets).toBe(moves)
+    expect(strip.fader.gain.value).toBeCloseTo(origin * (1 - moves / (moves + 2)), 6)
     expect(engine.graphRebuilds).toBe(built)
 
     expect(store.project.tracks[0].volume).not.toBeCloseTo(origin)
@@ -368,5 +377,27 @@ describe('fader drag', () => {
     expect(revised.channel.pan).toBeCloseTo(updated.channel.pan)
     expect(revised.channel.mute).toBe(updated.channel.mute)
     expect(revised.channel.solo).toBe(updated.channel.solo)
+  })
+
+  it('writes the fader onto the AudioParam immediately at a tenth of a decibel', () => {
+    const ctx = installAudioMocks()
+    const store = new ProjectStore(createEmptyProject(48000))
+    const engine = new AudioEngine()
+    const live = arm(engine, ctx)
+    engine.sync(store.project, () => undefined)
+    const track = store.project.tracks[0]
+    const gain = live.strips.get(track.id)!.fader.gain
+    const before = gain.events.length
+    const quiet = gainFromDb(-6.3)
+    engine.previewMix('volume', track.id, quiet)
+    const added = gain.events.slice(before)
+    expect(added.map((event) => event.method)).toEqual(['set'])
+    expect(added[0]?.tau).toBeUndefined()
+    expect(gain.value).toBeCloseTo(quiet, 8)
+    expect(gainToDb(gain.value)).toBe('-6.3 dB')
+    const nudged = gainFromDb(-6.2)
+    engine.previewMix('volume', track.id, nudged)
+    expect(gain.value).toBeCloseTo(nudged, 8)
+    expect(gainToDb(gain.value)).toBe('-6.2 dB')
   })
 })

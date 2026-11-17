@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { dbPixels, panPixels } from '../model/mixLaw'
+import { dbPixels, panDragPixels, panPixels } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
 import { attachControlGesture, READOUT_HOLD_MS, type GestureElement, type PointerLike } from '../ui/gestures'
 
@@ -17,6 +17,10 @@ class FakeControl implements GestureElement {
   scrollParent = { scrollTop: 24 }
   private listeners = new Map<string, Stored[]>()
   setPointerCapture() {}
+  box = { left: 0, top: 0, width: 0, height: 0 }
+  getBoundingClientRect() {
+    return this.box
+  }
   getAttribute(name: string) {
     return this.attrs[name] ?? null
   }
@@ -206,6 +210,68 @@ describe('knob gestures', () => {
     expect(level).toBeGreaterThan(bottom)
     expect(samples.length).toBeGreaterThan(20)
     stop()
+  })
+
+  it('reaches hard left and hard right in one drag across the knob', () => {
+    const width = 40
+    const pan = new FakeControl()
+    pan.className = 'pan-knob'
+    pan.attrs['aria-label'] = 'Vocal pan'
+    pan.box = { left: 10, top: 20, width, height: width }
+    let panned = -1
+    const stop = attachControlGesture(pan, () => ({
+      min: -1,
+      max: 1,
+      fallback: 0,
+      axis: 'x',
+      getValue: () => panned,
+      onChange: (change) => {
+        panned = change.value
+      },
+    }))
+    pan.dispatch('pointerdown', { clientX: 10, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    pan.dispatch('pointermove', { clientX: 10 + width, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    expect(panned).toBeCloseTo(1, 5)
+    pan.dispatch('pointerup', { clientX: 10 + width, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    pan.dispatch('pointerdown', { clientX: 80, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    pan.dispatch('pointermove', { clientX: 80 - width, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    expect(panned).toBeCloseTo(-1, 5)
+    pan.dispatch('pointerup', { clientX: 80 - width, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    pan.dispatch('pointerdown', { clientX: 40, clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    pan.dispatch('pointermove', { clientX: 40 + panDragPixels(37, width), clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    expect(panned).toBeCloseTo(-0.63, 5)
+    expect(panned).toBeGreaterThan(-1)
+    expect(panned).toBeLessThan(1)
+    pan.dispatch('pointerup', { clientX: 40 + panDragPixels(37, width), clientY: 40, pointerType: 'mouse', pointerId: 1 })
+    stop()
+
+    const slow = new FakeControl()
+    slow.className = 'pan-knob'
+    slow.attrs['aria-label'] = 'Vocal pan'
+    slow.box = { left: 0, top: 0, width, height: width }
+    let slowed = -1
+    let clock = 8_000
+    const spy = vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    const stopSlow = attachControlGesture(slow, () => ({
+      min: -1,
+      max: 1,
+      fallback: 0,
+      axis: 'x',
+      getValue: () => slowed,
+      onChange: (change) => {
+        slowed = change.value
+      },
+    }))
+    slow.dispatch('pointerdown', { clientX: 0, clientY: 20, pointerType: 'touch', pointerId: 3 })
+    clock = 8_200
+    slow.dispatch('pointermove', { clientX: 6, clientY: 20, pointerType: 'touch', pointerId: 3 })
+    clock = 8_700
+    slow.dispatch('pointermove', { clientX: width, clientY: 20, pointerType: 'touch', pointerId: 3 })
+    expect(slowed).toBeGreaterThan(-1)
+    expect(slowed).toBeLessThan(0.2)
+    expect(slowed).not.toBeCloseTo(1, 1)
+    stopSlow()
+    spy.mockRestore()
   })
 
   it('uses a finer pan scale when a phone drag moves vertically', () => {

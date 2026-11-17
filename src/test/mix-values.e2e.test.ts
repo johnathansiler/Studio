@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chromium, type Browser, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { dbFromGain, dbPixels, panPixels } from '../model/mixLaw'
+import { dbFromGain, dbPixels, panDragPixels } from '../model/mixLaw'
 
 async function waitForServer(url: string, child: ChildProcess) {
   const started = Date.now()
@@ -82,7 +82,9 @@ describe('continuous pan and mixer level', () => {
 
   it('drags pan to -37.5 and +12, shows them, and the engine follows', async () => {
     const knob = '.mixer > .strip .pan-knob'
-    await drag(page, knob, panPixels(-37.5, true), 0, true)
+    const width = await page.evaluate(() => (document.querySelector('.mixer > .strip .pan-knob') as HTMLElement).getBoundingClientRect().width)
+    expect(width).toBeGreaterThan(8)
+    await drag(page, knob, panDragPixels(-37.5, width, true), 0, true)
     await page.waitForTimeout(40)
     const left = await page.evaluate(async () => {
       const cue = window.__cueharbor
@@ -108,7 +110,7 @@ describe('continuous pan and mixer level', () => {
     expect(left.height).toBeGreaterThanOrEqual(40)
 
     await page.evaluate(() => window.__cueharbor.store.updateTrack(window.__cueharbor.store.project.tracks[0].id, { pan: 0 }))
-    await drag(page, knob, panPixels(12), 0, false)
+    await drag(page, knob, panDragPixels(12, width, true), 0, true)
     await page.waitForTimeout(40)
     const right = await page.evaluate(async () => {
       const cue = window.__cueharbor
@@ -131,6 +133,30 @@ describe('continuous pan and mixer level', () => {
     await page.evaluate(() => window.__cueharbor.store.redo())
     const redone = await page.evaluate(() => window.__cueharbor.store.project.tracks[0].pan)
     expect(redone).toBeCloseTo(0.12, 4)
+
+    await page.evaluate(() => window.__cueharbor.store.updateTrack(window.__cueharbor.store.project.tracks[0].id, { pan: -1 }))
+    await drag(page, knob, width, 0, false)
+    const hardRight = await page.evaluate(() => {
+      const cue = window.__cueharbor
+      const knobEl = document.querySelector('.mixer > .strip .pan-knob') as HTMLElement
+      return { stored: cue.store.project.tracks[0].pan, shown: knobEl.getAttribute('aria-valuetext') }
+    })
+    expect(hardRight.stored).toBeCloseTo(1, 4)
+    expect(hardRight.shown).toBe('Right 100')
+    await drag(page, knob, -width, 0, false)
+    const hardLeft = await page.evaluate(() => {
+      const cue = window.__cueharbor
+      const knobEl = document.querySelector('.mixer > .strip .pan-knob') as HTMLElement
+      return { stored: cue.store.project.tracks[0].pan, shown: knobEl.getAttribute('aria-valuetext') }
+    })
+    expect(hardLeft.stored).toBeCloseTo(-1, 4)
+    expect(hardLeft.shown).toBe('Left 100')
+    await page.evaluate(() => window.__cueharbor.store.updateTrack(window.__cueharbor.store.project.tracks[0].id, { pan: -1 }))
+    await drag(page, knob, width, 0, true)
+    const fine = await page.evaluate(() => window.__cueharbor.store.project.tracks[0].pan)
+    expect(fine).toBeCloseTo(-0.5, 4)
+    expect(fine).toBeGreaterThan(-1)
+    expect(fine).toBeLessThan(1)
   }, 30000)
 
   it('drags the fader to -6.3 dB and +1.7 dB and the engine gain follows', async () => {
@@ -200,6 +226,7 @@ describe('continuous pan and mixer level', () => {
     await phone.waitForTimeout(1000)
     await phone.evaluate(() => window.__cueharbor.store.setView('mix'))
     await phone.locator('.pan-knob').first().waitFor()
+    const phoneWidth = await phone.evaluate(() => (document.querySelector('.pan-knob') as HTMLElement).getBoundingClientRect().width)
     await phone.evaluate((pixels) => {
       const cue = window.__cueharbor
       cue.store.updateTrack(cue.store.project.tracks[0].id, { pan: 0 })
@@ -223,7 +250,7 @@ describe('continuous pan and mixer level', () => {
       fire('pointermove', x, y - 16)
       fire('pointermove', x, y - 16 - pixels)
       fire('pointerup', x, y - 16 - pixels)
-    }, panPixels(12, true))
+    }, panDragPixels(12, phoneWidth, true))
     await phone.waitForTimeout(40)
     const pan = await phone.evaluate(() => {
       const cue = window.__cueharbor

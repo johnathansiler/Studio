@@ -20,6 +20,7 @@ import {
   formatPan,
   gainForDb,
   gainFromDb,
+  panDragPixels,
   panPixels,
   quantizeDb,
 } from '../model/mixLaw'
@@ -47,6 +48,24 @@ describe('pan value mapping', () => {
     expect(dragPan({ origin: 0, deltaPx: PAN_PX * PAN_FINE_SCALE * 0.02, fine: true })).toBe(0)
     expect(formatPan(0)).toBe('Center')
     expect(dragPan({ origin: -0.37, deltaPx: 0, fine: false })).toBeCloseTo(-0.37, 6)
+  })
+
+  it('covers hard left to hard right in one control width and keeps the fine scale slower', () => {
+    const width = 40
+    expect(panDragPixels(200, width)).toBeCloseTo(width, 6)
+    expect(dragPan({ origin: -1, deltaPx: width, spanPx: width })).toBeCloseTo(1, 6)
+    expect(dragPan({ origin: 1, deltaPx: -width, spanPx: width })).toBeCloseTo(-1, 6)
+    expect(formatPan(1)).toBe('Right 100')
+    expect(formatPan(-1)).toBe('Left 100')
+    const partial = dragPan({ origin: 0, deltaPx: panDragPixels(37, width), spanPx: width })
+    expect(partial).toBeCloseTo(0.37, 6)
+    expect(formatPan(partial)).toBe('Right 37')
+    expect([-1, 0, 1]).not.toContain(partial)
+    const fine = dragPan({ origin: -1, deltaPx: width, spanPx: width, fine: true })
+    expect(fine).toBeCloseTo(-0.5, 6)
+    expect(fine).toBeGreaterThan(-1)
+    expect(fine).toBeLessThan(1)
+    expect(dragPan({ origin: -1, deltaPx: width })).toBeCloseTo(-0.8, 6)
   })
 
   it('recognizes pan knobs and leaves other bipolar controls alone', () => {
