@@ -20,7 +20,7 @@ import { editorForGesture, hasStepSequencer } from '../model/editorOpen'
 import { showsOnscreenPiano } from '../model/onscreenPiano'
 import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { watchLevel } from './levelMeter'
-import { placePlayhead } from './playhead'
+import { placePlayhead, playheadContentX, playheadStripWidth } from './playhead'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
@@ -61,12 +61,56 @@ import { clipReleaseAction, clipTapAction, laneDoubleClickAddsClip } from './cli
 import { arrangeOutline } from '../audio/wave/render'
 import { LoopRegion } from './LoopRegion'
 import { TimelineOverview } from './OverviewScrollbar'
-import { laneScaleAttr, clampTimelinePx } from './overviewScroll'
+import { laneScaleAttr, clampTimelinePx, timelinePxBounds } from './overviewScroll'
 import { WaveformView } from './WaveformView'
 import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
 import { TrackViewfinder } from './TrackViewfinder'
 
+/** One pinch cannot triple the timeline. 90 px/s stops at 180, not 270. */
+export const PINCH_MAX_RATIO = 2
+/** One move applies at most this factor, so a coalesced event cannot jump the scale. */
+export const PINCH_STEP = 1.12
+
+export function pinchTimelineZoom(input: {
+  originPx: number
+  currentPx: number
+  originDist: number
+  dist: number
+  anchorX: number
+  anchorY: number
+  midX: number
+  midY: number
+  viewLeft: number
+  viewTop: number
+  minPx: number
+  maxPx: number
+  maxRatio?: number
+  step?: number
+}) {
+  const maxRatio = input.maxRatio ?? PINCH_MAX_RATIO
+  const step = input.step ?? PINCH_STEP
+  const raw = input.originDist > 0 ? input.dist / input.originDist : 1
+  const capped = clampRatio(raw, 1 / maxRatio, maxRatio)
+  const target = clampRatio(input.originPx * capped, input.minPx, input.maxPx)
+  const current = Number.isFinite(input.currentPx) ? input.currentPx : input.originPx
+  let px = target
+  if (target > current * step) px = current * step
+  else if (target < current / step) px = current / step
+  px = clampRatio(px, input.minPx, input.maxPx)
+  const ratio = input.originPx > 0 ? px / input.originPx : 1
+  return {
+    px,
+    ratio,
+    scrollLeft: input.anchorX * ratio - (input.midX - input.viewLeft),
+    scrollTop: input.anchorY * ratio - (input.midY - input.viewTop),
+  }
+}
+
+function clampRatio(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, value))
+}
 
 function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins, setupButton, menu, showPlugins = true }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void; setupButton: RefObject<HTMLButtonElement | null>; menu?: ReactNode; showPlugins?: boolean }) {
   const [host, setHost] = useState<HTMLElement | null>(null)
@@ -285,6 +329,7 @@ export function ArrangeView({
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
   const scroller = useRef<HTMLDivElement>(null)
+  const [timelineView, setTimelineView] = useState(0)
   const secondsRef = useRef(16)
   const [laneZoom, setLaneZoom] = useState(1)
   const laneZoomRef = useRef(laneZoom)
@@ -320,6 +365,18 @@ export function ArrangeView({
   }, [phone, project.tracks.length])
   const innerRef = useRef<HTMLDivElement>(null)
   const coastRef = useRef(0)
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    const apply = () => {
+      const next = el.clientWidth
+      setTimelineView((prev) => (prev === next ? prev : next))
+    }
+    apply()
+    const observer = new ResizeObserver(apply)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   function onTouchpadDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0 && event.pointerType !== 'touch') return
     const body = scroller.current
@@ -371,11 +428,12 @@ export function ArrangeView({
     window.addEventListener('pointercancel', up)
   }
   useEffect(() => subscribeTools(() => setToolState(activeTool())), [])
+  const headNode = useRef<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
-    const node = innerRef.current?.querySelector<HTMLElement>('[data-playhead="arrange"]')
+    const node = headNode.current
     if (!node) return
     const projectNow = projectRef.current
-    placePlayhead(node, displayedPlayhead(positionRef.current, projectNow), projectNow.sampleRate, pxRef.current)
+    placePlayhead(node, displayedPlayhead(positionRef.current, projectNow), projectNow.sampleRate, pxRef.current, transportMoving(engine.status))
   })
   useEffect(() => engine.subscribe(() => {
     positionRef.current = engine.visualSample()
@@ -384,20 +442,19 @@ export function ArrangeView({
   }), [engine])
   useEffect(() => {
     const paintHead = () => {
-      const node = innerRef.current?.querySelector<HTMLElement>('[data-playhead="arrange"]')
+      const node = headNode.current
       if (!node) return false
       const projectNow = projectRef.current
       const sample = displayedPlayhead(engine.visualSample(), projectNow)
       positionRef.current = sample
-      placePlayhead(node, sample, projectNow.sampleRate, pxRef.current)
-      const strip = document.querySelector<HTMLElement>('[data-playhead-strip]')
-      if (strip) strip.setAttribute('aria-valuenow', String(Math.round(sample)))
+      const moving = transportMoving(engine.status)
+      placePlayhead(node, sample, projectNow.sampleRate, pxRef.current, moving)
       const bar = Math.floor(projectSampleBeat(projectNow, sample))
       if (bar !== barRef.current) {
         barRef.current = bar
         setPosition(sample)
       }
-      return transportMoving(engine.status)
+      return moving
     }
     const head = subscribeFrame(paintHead)
     const midiPainted: Record<string, boolean> = {}
@@ -460,37 +517,80 @@ export function ArrangeView({
     const el = scroller.current
     if (!el) return
     const points = new Map<number, { x: number; y: number }>()
-    let pinch: { dist: number; px: number; left: number; top: number; x: number; y: number } | null = null
+    let aim: {
+      originPx: number
+      originDist: number
+      dist: number
+      anchorX: number
+      anchorY: number
+      midX: number
+      midY: number
+    } | null = null
+    let chase = 0
     const pair = () => [...points.values()]
+    const stepPinch = () => {
+      chase = 0
+      const current = aim
+      if (!current) return
+      const rect = el.getBoundingClientRect()
+      const bounds = timelinePxBounds(el.clientWidth, secondsRef.current)
+      const next = pinchTimelineZoom({
+        originPx: current.originPx,
+        currentPx: pxRef.current,
+        originDist: current.originDist,
+        dist: current.dist,
+        anchorX: current.anchorX,
+        anchorY: current.anchorY,
+        midX: current.midX,
+        midY: current.midY,
+        viewLeft: rect.left,
+        viewTop: rect.top,
+        minPx: bounds.min,
+        maxPx: bounds.max,
+      })
+      const settled = Math.abs(next.px - pxRef.current) < 0.05
+      if (settled) {
+        el.scrollLeft = next.scrollLeft
+        el.scrollTop = next.scrollTop
+        if (points.size < 2) aim = null
+        return
+      }
+      zoomScroll.current.left = next.scrollLeft
+      zoomScroll.current.top = next.scrollTop
+      setPx(next.px)
+      chase = requestAnimationFrame(stepPinch)
+    }
     const down = (event: PointerEvent) => {
       points.set(event.pointerId, { x: event.clientX, y: event.clientY })
       if (points.size !== 2) return
       const [a, b] = pair()
-      pinch = {
+      const midX = (a.x + b.x) / 2
+      const midY = (a.y + b.y) / 2
+      const rect = el.getBoundingClientRect()
+      aim = {
+        originPx: pxRef.current,
+        originDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
         dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
-        px: pxRef.current,
-        left: el.scrollLeft,
-        top: el.scrollTop,
-        x: (a.x + b.x) / 2,
-        y: (a.y + b.y) / 2,
+        anchorX: el.scrollLeft + (midX - rect.left),
+        anchorY: el.scrollTop + (midY - rect.top),
+        midX,
+        midY,
       }
     }
     const move = (event: PointerEvent) => {
       if (!points.has(event.pointerId)) return
       points.set(event.pointerId, { x: event.clientX, y: event.clientY })
-      if (!pinch || points.size < 2) return
+      if (!aim || points.size < 2) return
       event.preventDefault()
       const [a, b] = pair()
-      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
-      const midX = (a.x + b.x) / 2
-      const midY = (a.y + b.y) / 2
-      setPx(clampPx(pinch.px * (dist / pinch.dist)))
-      el.scrollLeft = pinch.left - (midX - pinch.x)
-      el.scrollTop = pinch.top - (midY - pinch.y)
+      aim.dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
+      aim.midX = (a.x + b.x) / 2
+      aim.midY = (a.y + b.y) / 2
+      if (!chase) chase = requestAnimationFrame(stepPinch)
     }
     const up = (event: PointerEvent) => {
       points.delete(event.pointerId)
-      if (points.size < 2) pinch = null
+      if (points.size < 2 && !chase) aim = null
     }
     const wheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return
@@ -503,6 +603,7 @@ export function ArrangeView({
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
     return () => {
+      if (chase) cancelAnimationFrame(chase)
       el.removeEventListener('pointerdown', down, true)
       el.removeEventListener('wheel', wheel)
       window.removeEventListener('pointermove', move)
@@ -1253,18 +1354,28 @@ export function ArrangeView({
             <div
               className="playhead-strip"
               data-playhead-strip=""
+              data-hit-width={playheadStripWidth(timelineView, width)}
               role="slider"
               aria-label="Playhead. Tap or drag to move it."
               aria-valuemin={0}
               aria-valuenow={Math.round(position)}
+              style={timelineView > 0 ? {
+                position: 'sticky',
+                left: 0,
+                width: playheadStripWidth(timelineView, width),
+                maxWidth: playheadStripWidth(timelineView, width),
+                boxSizing: 'border-box',
+              } : undefined}
               onPointerDown={(event) => {
                 if (event.button !== 0 && event.pointerType !== 'touch') return
                 event.stopPropagation()
                 event.preventDefault()
-                const node = event.currentTarget
                 const seek = (clientX: number) => {
-                  const rect = node.getBoundingClientRect()
-                  const sample = Math.max(0, ((clientX - rect.left) / pxRef.current) * project.sampleRate)
+                  const scrollerEl = scroller.current
+                  if (!scrollerEl) return
+                  const origin = scrollerEl.getBoundingClientRect().left + scrollerEl.clientLeft
+                  const contentX = playheadContentX(clientX, origin, scrollerEl.scrollLeft)
+                  const sample = Math.max(0, (contentX / pxRef.current) * project.sampleRate)
                   onSeek(snapSampleToMap(sample, project, subdivisionFor(project)))
                 }
                 seek(event.clientX)
@@ -1556,7 +1667,7 @@ export function ArrangeView({
           ))}
           {marquee && <div className="marquee" style={marquee} />}
           <RemoteTimeline peers={remotes} sampleRate={project.sampleRate} px={px} />
-          <div className="playhead" data-playhead="arrange" style={{ left: 0 }} />
+          <div className="playhead" data-playhead="arrange" ref={headNode} style={{ left: 0, willChange: 'transform' }} />
         </div>
         </div>
         <TimelineOverview
