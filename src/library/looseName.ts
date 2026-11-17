@@ -67,6 +67,78 @@ export function parseLooseName(stem: string): LooseName | null {
   return null
 }
 
+const CHORD_QUALITY = 'maj7|min7|m7|major|minor|dim7|sus4|sus2|maj|min|aug|sus|dim|m|7'
+
+export interface ChordToken {
+  pitchClass: number
+  quality: string
+  octave: number | null
+}
+
+export interface FamilySuffix extends ChordToken {
+  /** Filename stem with the chord token removed. Empty when the file is only the chord. */
+  base: string
+}
+
+const QUALITY_LABEL: Record<string, string> = {
+  maj: 'Maj',
+  major: 'Maj',
+  min: 'Min',
+  minor: 'Min',
+  m: 'Min',
+  maj7: 'Maj7',
+  min7: 'Min7',
+  m7: 'Min7',
+  dim: 'Dim',
+  dim7: 'Dim7',
+  aug: 'Aug',
+  sus: 'Sus',
+  sus2: 'Sus2',
+  sus4: 'Sus4',
+  '7': '7',
+}
+
+/** `maj` and `major` are one instrument. `m`, `min`, and `minor` are another. */
+export function chordQualityLabel(quality: string) {
+  const key = quality.trim().toLowerCase()
+  if (!key) return ''
+  return QUALITY_LABEL[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
+}
+
+/**
+ * `Amaj`, `C#min`, `Bbmaj7`, `F#m`, `Amin3`.
+ * A plain `C4` is a note, not a chord. `C7`, `F#7`, and `Bb7` are octave 7,
+ * not dominant chords, so a chromatic run is not pulled into a fake "7" row.
+ */
+export function parseChordToken(token: string): ChordToken | null {
+  const match = token.trim().match(new RegExp(`^([A-Ga-g])([#b])?(${CHORD_QUALITY})(-1|\\d+)?$`, 'i'))
+  if (!match) return null
+  const quality = match[3].toLowerCase()
+  if (quality === '7' && !match[4]) return null
+  let semi = PITCH[match[1].toLowerCase()]
+  if (semi == null) return null
+  const accidental = (match[2] || '').toLowerCase()
+  if (accidental === '#') semi += 1
+  if (accidental === 'b') semi -= 1
+  semi = ((semi % 12) + 12) % 12
+  const octave = match[4] ? Number(match[4]) : null
+  if (octave != null && (octave < -1 || octave > 9)) return null
+  return { pitchClass: semi, quality, octave }
+}
+
+/**
+ * `Ap Shotpolyb Amaj` → base `Ap Shotpolyb`, root A, quality maj.
+ * The separator is a space or a hyphen, so a word that merely ends in a letter stays whole.
+ */
+export function parseFamilySuffix(stem: string): FamilySuffix | null {
+  const text = stem.trim().replace(/[_]+/g, ' ').replace(/\s+/g, ' ')
+  const bits = text.split(/[\s-]+/).filter(Boolean)
+  if (!bits.length) return null
+  const chord = parseChordToken(bits[bits.length - 1])
+  if (!chord) return null
+  return { ...chord, base: bits.slice(0, -1).join(' ') }
+}
+
 export function looseTitle(value: string) {
   const words = value.trim().split(/[\s_-]+/).filter(Boolean)
   if (!words.length) return 'Instrument'

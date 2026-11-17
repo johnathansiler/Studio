@@ -1591,13 +1591,13 @@ export function App() {
       const group = looseGroup(row.id)
       if (!group) continue
       const assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[] = []
-      const notes: { midi: number; bufferId: string; sampleRate: number }[] = []
+      const notes: { midi: number; bufferId: string; sampleRate: number; velLo?: number; velHi?: number }[] = []
       for (const member of group.members) {
         const source = decoded.find((item) => item.id === member.entry.id)
         if (!source) continue
         const id = uid('smp')
         assets.push({ id, name: source.name, sampleRate: source.sampleRate, channels: source.channels })
-        notes.push({ midi: member.midi, bufferId: id, sampleRate: source.sampleRate })
+        notes.push({ midi: member.midi, bufferId: id, sampleRate: source.sampleRate, velLo: member.velLo, velHi: member.velHi })
         consumed.add(source.id)
       }
       if (notes.length >= 2) store.adoptLibrary(trackId, samplerFromNotes(group.id, group.name, notes), assets)

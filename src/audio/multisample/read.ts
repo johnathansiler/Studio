@@ -1,7 +1,9 @@
 /**
  * 8-tap windowed-sinc reader with three bandwidths.
  * Pitching up picks a lower cutoff so the resample stays band-limited.
+ * A file near twice the engine rate uses a longer polyphase lowpass instead.
  */
+import { polyphaseKernel, sampleKernel, sampleKernelAt, type PolyphaseKernel } from '../quality/resample'
 
 const TAPS = 8
 const HALF = TAPS / 2
@@ -60,20 +62,56 @@ export interface ReadSpan {
   fade: number
 }
 
+/**
+ * Sample-rate ratios near 2 (a 96 kHz file in a 44.1 or 48 kHz context) need a
+ * longer kernel. The 8-tap table leaves energy above the output Nyquist, and
+ * that alias is the crackle on bright one-shots. Musical pitch stays on the
+ * short table: a few semitones is under this ratio.
+ * The long kernel is built once per cutoff. A wobbling rate stays in one bucket
+ * so the audio thread does not rebuild it.
+ */
+const STEEP_RATE = 1.45
+const STEEP_HALF = 48
+
+function steepFc(rate: number) {
+  const scale = Math.max(1, rate)
+  const bucket = Math.ceil(scale * 8) / 8
+  return Math.min(0.45, 0.45 / bucket)
+}
+
+let steepCache: { fc: number; kernel: PolyphaseKernel } | null = null
+
+function steepKernel(rate: number) {
+  const fc = steepFc(rate)
+  if (steepCache && steepCache.fc === fc) return steepCache.kernel
+  const kernel = polyphaseKernel(fc, STEEP_HALF)
+  steepCache = { fc, kernel }
+  return kernel
+}
+
+/** One output sample from a source that is playing faster than the engine. */
+export function readBandlimitedAt(sampleAt: (index: number) => number, length: number, pos: number, rate: number) {
+  if (length < 2 || !Number.isFinite(pos)) return 0
+  return sampleKernelAt(steepKernel(rate), sampleAt, pos)
+}
+
+export function readBandlimited(channel: Float32Array, pos: number, rate: number, lo = 0, hi = channel.length) {
+  if (channel.length < 2 || !Number.isFinite(pos)) return 0
+  return sampleKernel(steepKernel(rate), channel, pos, lo, hi)
+}
+
 /** Fractional read. `pos` is in source frames. */
 export function readFrame(channel: Float32Array, pos: number, rate: number, span: ReadSpan) {
+  if (!span.loop && rate >= STEEP_RATE) return readBandlimited(channel, pos, rate)
   return readFrameAt((index) => channel[index] || 0, channel.length, pos, rate, span)
 }
 
 /** Same reader as readFrame, for a sample that is not one contiguous buffer. */
 export function readFrameAt(sampleAt: (index: number) => number, length: number, pos: number, rate: number, span: ReadSpan) {
   if (length < 2 || !Number.isFinite(pos)) return 0
-  const band = bandForRate(rate)
-  const phase = pos - Math.floor(pos)
-  const row = kernels()[band * PHASES + Math.min(PHASES - 1, Math.max(0, Math.floor(phase * PHASES)))]
-  const origin = Math.floor(pos) - (HALF - 1)
-  let sample = 0
-  for (let tap = 0; tap < TAPS; tap++) sample += row[tap] * take(sampleAt, length, origin + tap, span)
+  let sample = rate >= STEEP_RATE
+    ? readBandlimitedAt((index) => take(sampleAt, length, index, span), length, pos, rate)
+    : readShort(sampleAt, length, pos, rate, span)
   if (span.loop && span.fade > 1 && span.loopEnd > span.loopStart) {
     const fadeStart = span.loopEnd - span.fade
     if (pos >= fadeStart && pos < span.loopEnd) {
@@ -86,15 +124,20 @@ export function readFrameAt(sampleAt: (index: number) => number, length: number,
   return sample
 }
 
-function readPlainAt(sampleAt: (index: number) => number, length: number, pos: number, rate: number) {
+function readShort(sampleAt: (index: number) => number, length: number, pos: number, rate: number, span: ReadSpan) {
   const band = bandForRate(rate)
   const phase = pos - Math.floor(pos)
   const row = kernels()[band * PHASES + Math.min(PHASES - 1, Math.max(0, Math.floor(phase * PHASES)))]
   const origin = Math.floor(pos) - (HALF - 1)
   let sample = 0
-  const idle: ReadSpan = { loop: false, loopStart: 0, loopEnd: 0, fade: 0 }
-  for (let tap = 0; tap < TAPS; tap++) sample += row[tap] * take(sampleAt, length, origin + tap, idle)
+  for (let tap = 0; tap < TAPS; tap++) sample += row[tap] * take(sampleAt, length, origin + tap, span)
   return sample
+}
+
+function readPlainAt(sampleAt: (index: number) => number, length: number, pos: number, rate: number) {
+  if (rate >= STEEP_RATE) return readBandlimitedAt(sampleAt, length, pos, rate)
+  const idle: ReadSpan = { loop: false, loopStart: 0, loopEnd: 0, fade: 0 }
+  return readShort(sampleAt, length, pos, rate, idle)
 }
 
 function take(sampleAt: (index: number) => number, length: number, index: number, span: ReadSpan) {

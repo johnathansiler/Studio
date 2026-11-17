@@ -1,5 +1,6 @@
 /** Beat Machine pad voices. The same rules run in `core/dsp/src/voice.rs`. */
 
+import { readBandlimited } from '../multisample/read'
 import { wasmDspRequested } from '../wasm/flag'
 
 export const MAX_PADS = 16
@@ -317,11 +318,13 @@ export class SamplePool {
       }
     }
     const wobble = wobbleOf(voice.wow, voice.flutter, voice.time)
+    const playRate = voice.rateTime * voice.ratePitch * wobble
+    const at = region.reverse ? end - 1 - voice.cursor : start + voice.cursor
     const raw = voice.stretch
       ? stretchRead(buffer, start, end, voice.cursor, voice.ratePitch * wobble, region.reverse)
-      : region.reverse
-        ? readLinear(buffer, end - 1 - voice.cursor)
-        : readLinear(buffer, start + voice.cursor)
+      : voice.rateTime >= 1.45
+        ? readBandlimited(buffer, at, playRate, start, end)
+        : readLinear(buffer, at)
     let sample = raw * edgeGain(voice.cursor, span, region.fadeIn, region.fadeOut)
     if (voice.holdLeft <= 0) {
       voice.held = sample

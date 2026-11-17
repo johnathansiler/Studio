@@ -1,6 +1,12 @@
-/** Windowed-sinc resampler. Sample-rate conversion stays band-limited. */
+/**
+ * Windowed-sinc resampler. Sample-rate conversion stays band-limited.
+ * The kernel is a polyphase table: one build per cutoff, then a multiply per tap.
+ * A direct sinc on every output sample stalls the main thread on a phone when a
+ * 96 kHz file is fitted to 44.1 or 48 kHz. The table matches that filter.
+ */
 
 const BESSEL_TERMS = 12
+const PHASES = 256
 
 function bessel0(x: number) {
   let sum = 1
@@ -17,6 +23,81 @@ function sinc(x: number) {
   if (Math.abs(x) < 1e-8) return 1
   const p = Math.PI * x
   return Math.sin(p) / p
+}
+
+export interface PolyphaseKernel {
+  half: number
+  taps: number
+  phases: number
+  rows: Float32Array
+}
+
+const kernels = new Map<string, PolyphaseKernel>()
+
+/** Kaiser-windowed lowpass, normalized per phase. `fc` is cycles per source sample. */
+export function polyphaseKernel(fc: number, half: number): PolyphaseKernel {
+  const radius = Math.max(8, Math.min(128, half | 0))
+  const cutoff = Math.min(0.49, Math.max(0.02, Math.round(fc * 10000) / 10000))
+  const key = `${radius}|${cutoff}`
+  const cached = kernels.get(key)
+  if (cached) return cached
+  const taps = radius * 2 + 1
+  const rows = new Float32Array(PHASES * taps)
+  const beta = 8.6
+  const i0 = bessel0(beta)
+  for (let phase = 0; phase < PHASES; phase++) {
+    const frac = phase / PHASES
+    let sum = 0
+    const base = phase * taps
+    for (let tap = 0; tap < taps; tap++) {
+      const k = tap - radius
+      const x = k - frac
+      const ratio = k / radius
+      const inside = 1 - ratio * ratio
+      const win = inside > 0 ? bessel0(beta * Math.sqrt(inside)) / i0 : 0
+      const weight = 2 * cutoff * sinc(2 * cutoff * x) * win
+      rows[base + tap] = weight
+      sum += weight
+    }
+    if (sum !== 0) for (let tap = 0; tap < taps; tap++) rows[base + tap] /= sum
+  }
+  const kernel = { half: radius, taps, phases: PHASES, rows }
+  kernels.set(key, kernel)
+  return kernel
+}
+
+/**
+ * One source-position read. Samples outside `[lo, hi)` are zero, so a slice
+ * does not borrow the neighboring region and the file edges do not jump.
+ */
+export function sampleKernel(kernel: PolyphaseKernel, channel: Float32Array, pos: number, lo = 0, hi = channel.length) {
+  const length = channel.length
+  if (length < 1 || !Number.isFinite(pos)) return 0
+  const origin = Math.floor(pos)
+  const row = Math.min(kernel.phases - 1, Math.max(0, Math.floor((pos - origin) * kernel.phases)))
+  const base = row * kernel.taps
+  const start = origin - kernel.half
+  const rows = kernel.rows
+  const left = Math.max(0, lo)
+  const right = Math.min(length, hi)
+  let acc = 0
+  const from = start < left ? left - start : 0
+  const to = start + kernel.taps > right ? right - start : kernel.taps
+  for (let tap = from; tap < to; tap++) acc += channel[start + tap] * rows[base + tap]
+  return acc
+}
+
+/** Same kernel for a sample that is not one contiguous buffer. */
+export function sampleKernelAt(kernel: PolyphaseKernel, sampleAt: (index: number) => number, pos: number) {
+  if (!Number.isFinite(pos)) return 0
+  const origin = Math.floor(pos)
+  const row = Math.min(kernel.phases - 1, Math.max(0, Math.floor((pos - origin) * kernel.phases)))
+  const base = row * kernel.taps
+  const start = origin - kernel.half
+  const rows = kernel.rows
+  let acc = 0
+  for (let tap = 0; tap < kernel.taps; tap++) acc += (sampleAt(start + tap) || 0) * rows[base + tap]
+  return acc
 }
 
 /**
@@ -37,24 +118,10 @@ export function resampleSinc(input: Float32Array, outLen: number, taps = 96): Fl
   const half = Math.max(8, Math.min(128, taps | 0))
   const scale = input.length / output.length
   const fc = Math.min(0.45, 0.45 / Math.max(1, scale))
-  const beta = 8.6
-  const i0 = bessel0(beta)
+  const kernel = polyphaseKernel(fc, half)
   for (let i = 0; i < output.length; i++) {
     const center = (i + 0.5) * scale - 0.5
-    const iCenter = Math.floor(center)
-    let acc = 0
-    let norm = 0
-    for (let k = -half; k <= half; k++) {
-      const idx = iCenter + k
-      const x = idx - center
-      const ratio = half <= 0 ? 0 : k / half
-      const inside = 1 - ratio * ratio
-      const win = inside > 0 ? bessel0(beta * Math.sqrt(inside)) / i0 : 0
-      const kernel = 2 * fc * sinc(2 * fc * x) * win
-      if (idx >= 0 && idx < input.length) acc += (input[idx] || 0) * kernel
-      norm += kernel
-    }
-    output[i] = norm !== 0 ? acc / norm : 0
+    output[i] = sampleKernel(kernel, input, center)
   }
   return output
 }

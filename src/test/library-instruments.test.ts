@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { selectLayers } from '../audio/multisample/map'
 import { midiVelocity } from '../audio/multisample/types'
 import { browseLibraryRows } from '../library/browse'
-import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, planSignKeys, playbackKeys, searchInstruments, tokenizeStem } from '../library/group'
+import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, planSignKeys, playbackKeys, searchInstruments, summarizeInstrument, tokenizeStem } from '../library/group'
+import { cleanLibraryFiles } from '../library/project'
 import { programFromLibraryInstrument } from '../library/instrumentProgram'
 import { createLibraryApi, type LibraryEnv } from '../../server/library.ts'
 import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
@@ -415,5 +416,92 @@ describe('loose note files', () => {
     const low = selectLayers(program, { note: bass[0]!.lo, velocity: midiVelocity(0.8), keyswitch: null, roundRobin: {}, trigger: 'attack' })
     const high = selectLayers(program, { note: bass[0]!.hi, velocity: midiVelocity(0.8), keyswitch: null, roundRobin: {}, trigger: 'attack' })
     expect(low.layers[0]?.zone.root).not.toBe(high.layers[0]?.zone.root)
+  })
+
+  it('groups chord one-shots by instrument and maps each chord to its root', () => {
+    const chords = ['Amaj', 'Amin', 'Cmaj', 'Cmin', 'Emaj', 'Emin']
+    const shotb = chords.map((chord) => row(`1 Shot Polys/Ap Shotpolyb ${chord}.wav`, {
+      pack: '1 Shot Polys', type: 'synth', category: 'synth', note: 'C4', root: 'C',
+    }))
+    const shotc = ['Amaj', 'Cmaj', 'Emaj'].map((chord) => row(`1 Shot Polys/Ap Shotpolyc ${chord}.wav`, {
+      pack: '1 Shot Polys', type: 'synth', category: 'synth', note: 'C4', root: 'C',
+    }))
+    const kick = row('Drums/kick.wav', { pack: 'Kit', type: 'one-shot', category: 'kick', note: 'C1' })
+    const solo = row('One Shots/Rim click.wav', { pack: 'Kit', type: 'one-shot', category: 'perc', note: 'C4' })
+    const lone = row('One Shots/Only Bmaj.wav', { pack: 'Kit', type: 'synth', category: 'synth', note: 'C4' })
+    const instruments = groupLibraryInstruments([...shotb, ...shotc, kick, solo, lone])
+    const major = instruments.find((item) => item.name === '1 Shot Polys - Ap Shotpolyb Maj')
+    const minor = instruments.find((item) => item.name === '1 Shot Polys - Ap Shotpolyb Min')
+    const polyc = instruments.find((item) => item.name === '1 Shot Polys - Ap Shotpolyc Maj')
+    expect(major?.layers).toHaveLength(3)
+    expect(minor?.layers).toHaveLength(3)
+    expect(major?.notes).toBe(3)
+    expect(new Set(major?.layers.map((layer) => layer.midi))).toEqual(new Set([
+      noteMidi('A3'), noteMidi('C3'), noteMidi('E3'),
+    ]))
+    expect(major?.layers.every((layer) => layer.velLo === 1 && layer.velHi === 127)).toBe(true)
+    expect(minor?.layers.every((layer) => layer.velLo === 1 && layer.velHi === 127)).toBe(true)
+    expect(major?.layers.some((layer) => layer.midi === 60)).toBe(false)
+    expect(major?.previewMidi).not.toBe(60)
+    expect(polyc?.notes).toBe(3)
+    expect(instruments.some((item) => item.layers.some((layer) => layer.key.endsWith('kick.wav') || layer.key.endsWith('Rim click.wav') || layer.key.endsWith('Only Bmaj.wav')))).toBe(false)
+    const program = programFromLibraryInstrument(major!)
+    const minorProgram = programFromLibraryInstrument(minor!)
+    const loud = selectLayers(program, { note: noteMidi('A3')!, velocity: midiVelocity(0.95), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    const quiet = selectLayers(program, { note: noteMidi('A3')!, velocity: midiVelocity(0.2), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    const third = selectLayers(program, { note: noteMidi('E3')!, velocity: midiVelocity(0.95), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    const softMinor = selectLayers(minorProgram, { note: noteMidi('A3')!, velocity: midiVelocity(0.2), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    expect(loud.layers[0]?.sample.id).toContain('Amaj')
+    expect(quiet.layers[0]?.sample.id).toContain('Amaj')
+    expect(quiet.layers[0]?.sample.id).not.toContain('Amin')
+    expect(softMinor.layers[0]?.sample.id).toContain('Amin')
+    expect(third.layers[0]?.sample.id).toContain('Emaj')
+    expect(loud.layers[0]?.zone.root).toBe(noteMidi('A3'))
+    expect(loud.layers[0]?.zone.lovel).toBe(1)
+    expect(loud.layers[0]?.zone.hivel).toBe(127)
+    const saved = cleanLibraryFiles([{ bufferId: 'buf_old', key: '1 Shot Polys/Ap Shotpolyb Amin.wav' }])
+    expect(saved).toEqual([{ bufferId: 'buf_old', key: '1 Shot Polys/Ap Shotpolyb Amin.wav' }])
+    const keys = instruments.flatMap((item) => item.layers.map((layer) => layer.key))
+    for (const chord of chords) expect(keys).toContain(`1 Shot Polys/Ap Shotpolyb ${chord}.wav`)
+    const covered = new Set([...major!.layers, ...minor!.layers].map((layer) => layer.key))
+    const index = buildLibraryIndex(shotb, shotb.map(() => []))
+    const rows = browseLibraryRows(
+      index,
+      { total: shotb.length, ids: null },
+      [summarizeInstrument(major!), summarizeInstrument(minor!)],
+      { text: '', type: '', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null },
+      covered,
+    )
+    expect(rows.filter((item) => item.kind === 'sound')).toHaveLength(0)
+    expect(rows.filter((item) => item.kind === 'instrument').map((item) => item.kind === 'instrument' ? item.instrument.name : '')).toEqual([
+      '1 Shot Polys - Ap Shotpolyb Maj',
+      '1 Shot Polys - Ap Shotpolyb Min',
+    ])
+    const aliased = groupLibraryInstruments([
+      row('Keys/Stack Amaj.wav', { pack: 'Keys', type: 'synth', category: 'synth', note: 'C4' }),
+      row('Keys/Stack Cmajor.wav', { pack: 'Keys', type: 'synth', category: 'synth', note: 'C4' }),
+      row('Keys/Stack Em.wav', { pack: 'Keys', type: 'synth', category: 'synth', note: 'C4' }),
+      row('Keys/Stack Gminor.wav', { pack: 'Keys', type: 'synth', category: 'synth', note: 'C4' }),
+    ])
+    expect(aliased.map((item) => item.name).sort()).toEqual(['Keys - Stack Maj', 'Keys - Stack Min'])
+    expect(aliased.find((item) => item.name.endsWith('Maj'))?.notes).toBe(2)
+    expect(aliased.find((item) => item.name.endsWith('Min'))?.notes).toBe(2)
+
+    const octave7 = groupLibraryInstruments([
+      row('Keys/Piano Pack 01 C3.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+      row('Keys/Piano Pack 01 E4.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+      row('Keys/Piano Pack 01 C7.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+      row('Keys/Piano Pack 01 D7.wav', { pack: 'Keys', type: 'multisample note', category: 'keys', note: '' }),
+    ])
+    expect(octave7).toHaveLength(1)
+    expect(octave7[0]?.name.toLowerCase()).not.toMatch(/\b7$/)
+    expect(new Set(octave7[0]?.layers.map((layer) => layer.midi))).toEqual(new Set([
+      noteMidi('C3'), noteMidi('E4'), noteMidi('C7'), noteMidi('D7'),
+    ]))
+    const looseOctave = groupLibraryInstruments([
+      row('Keys/Piano Pack 01 C7.wav', { pack: 'Keys', type: 'synth', category: 'keys', note: 'C4' }),
+      row('Keys/Piano Pack 01 D7.wav', { pack: 'Keys', type: 'synth', category: 'keys', note: 'C4' }),
+    ])
+    expect(looseOctave.some((item) => /\b7$/.test(item.name))).toBe(false)
   })
 })

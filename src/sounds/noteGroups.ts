@@ -1,13 +1,15 @@
 import { fillKeyboard, mapKeyRanges } from '../harbor/zones'
 import { makeProgram, makeSample, makeZone, type SamplerProgram } from '../audio/multisample/types'
 import { favoriteSounds, replaceFavorites, type FavoriteSound } from '../library/favorites'
-import { looseMidi, looseTitle, parseLooseName, type LooseName } from '../library/looseName'
+import { chordQualityLabel, looseMidi, looseTitle, parseFamilySuffix, parseLooseName, type LooseName } from '../library/looseName'
 import { recentSounds, replaceRecent, type RecentSound } from '../library/recent'
 import type { SoundEntry } from './types'
 
 export interface LooseMember {
   entry: SoundEntry
   midi: number
+  velLo?: number
+  velHi?: number
 }
 
 export interface LooseGroup {
@@ -180,11 +182,33 @@ class Union {
 export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
   groups.clear()
   memberToGroup.clear()
-  const notes: { entry: SoundEntry; parsed: LooseName; folder: string; role: string; midi: number }[] = []
+  const notes: { entry: SoundEntry; parsed: LooseName; folder: string; role: string; midi: number; quality: string }[] = []
   const keep = new Set<SoundEntry>()
   for (const entry of entries) {
     if (entry.type === 'loop') {
       keep.add(entry)
+      continue
+    }
+    const family = parseFamilySuffix(stemOf(entry.path, entry.name)) || parseFamilySuffix(entry.name)
+    if (family) {
+      const folder = folderOf(entry.path)
+      const quality = chordQualityLabel(family.quality)
+      const base = family.base.toLowerCase() || roleKey(entry, { midi: null, pitchClass: family.pitchClass, role: '' }, folder)
+      const role = `${base} ${quality}`.trim().toLowerCase()
+      const octave = family.octave ?? octaveFor(entry, folder, role)
+      const midi = looseMidi(family.pitchClass, octave)
+      if (midi == null) {
+        keep.add(entry)
+        continue
+      }
+      notes.push({
+        entry,
+        parsed: { midi, pitchClass: null, role },
+        folder,
+        role,
+        midi,
+        quality,
+      })
       continue
     }
     const parsed = parseLooseName(stemOf(entry.path, entry.name)) || parseLooseName(entry.name)
@@ -199,7 +223,7 @@ export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
       keep.add(entry)
       continue
     }
-    notes.push({ entry, parsed, folder, role, midi })
+    notes.push({ entry, parsed, folder, role, midi, quality: '' })
   }
   const union = new Union(notes.length)
   for (let i = 0; i < notes.length; i++) {
@@ -220,18 +244,22 @@ export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
   const listed = [...keep]
   for (const bucket of buckets.values()) {
     const pitches = new Set(bucket.map((item) => item.midi))
-    if (bucket.length < 2 || pitches.size < 2) {
+    const chordFamily = bucket.filter((item) => item.quality).length >= 2
+    if ((bucket.length < 2 || pitches.size < 2) && !chordFamily) {
       for (const item of bucket) listed.push(item.entry)
       continue
     }
     const role = bucket.find((item) => item.parsed.role)?.parsed.role || bucket[0].role
     const folderName = bucket[0].folder.split('/').filter(Boolean).pop() || ''
     const pack = bucket[0].entry.pack || ''
-    const name = looseTitle(role || folderName || pack || 'Instrument')
+    const titled = looseTitle(role || folderName || pack || 'Instrument')
+    const packTitle = looseTitle(pack)
+    const chordGroup = bucket.some((item) => item.quality)
+    const name = chordGroup && packTitle && !titled.toLowerCase().includes(packTitle.toLowerCase())
+      ? `${packTitle} - ${titled}`
+      : titled
     const id = hashId([name, bucket[0].folder, pack, role, ...bucket.map((item) => item.entry.id).sort()].join('\n'))
-    const byMidi = new Map<number, (typeof bucket)[number]>()
-    for (const item of bucket) if (!byMidi.has(item.midi)) byMidi.set(item.midi, item)
-    const members = [...byMidi.values()].map((item) => ({ entry: item.entry, midi: item.midi }))
+    const members = rootMembers(bucket)
     const group: LooseGroup = { id, name, role, folder: bucket[0].folder, pack, members }
     groups.set(id, group)
     for (const item of bucket) memberToGroup.set(item.entry.id, id)
@@ -251,29 +279,48 @@ export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
   return listed
 }
 
-export function samplerFromNotes(id: string, name: string, notes: { midi: number; bufferId: string; sampleRate: number }[]): SamplerProgram {
-  const unique = new Map<number, { midi: number; bufferId: string; sampleRate: number }>()
-  for (const note of notes) if (!unique.has(note.midi)) unique.set(note.midi, note)
-  const rows = [...unique.values()].sort((a, b) => a.midi - b.midi)
-  const spans = mapKeyRanges(rows.map((row) => row.midi))
+/** One sample per root. Chord quality is a separate instrument, so every zone hears the full velocity range. */
+function rootMembers(bucket: { entry: SoundEntry; midi: number; quality: string }[]): LooseMember[] {
+  const byMidi = new Map<number, { entry: SoundEntry; midi: number }>()
+  for (const item of bucket) {
+    const prev = byMidi.get(item.midi)
+    if (!prev || item.entry.id.localeCompare(prev.entry.id) < 0) byMidi.set(item.midi, item)
+  }
+  return [...byMidi.values()].map((item) => ({ entry: item.entry, midi: item.midi }))
+}
+
+export function samplerFromNotes(id: string, name: string, notes: { midi: number; bufferId: string; sampleRate: number; velLo?: number; velHi?: number }[]): SamplerProgram {
+  const rows = notes
+    .map((note) => ({ ...note, velLo: note.velLo ?? 1, velHi: note.velHi ?? 127 }))
+    .sort((a, b) => a.midi - b.midi || a.velLo - b.velLo)
+  const bands = new Map<string, typeof rows>()
+  for (const row of rows) {
+    const id = `${row.velLo}|${row.velHi}`
+    const list = bands.get(id) ?? []
+    if (!list.some((item) => item.midi === row.midi)) list.push(row)
+    bands.set(id, list)
+  }
   const samples = rows.map((row) => makeSample({
     id: `smp:${row.bufferId}`,
     bufferId: row.bufferId,
     sampleRate: row.sampleRate,
     url: '',
   }))
-  const zones = rows.map((row) => {
-    const span = spans.get(row.midi) ?? { lokey: 0, hikey: 127 }
-    return makeZone({
-      id: `zone:${row.bufferId}`,
-      sampleId: `smp:${row.bufferId}`,
-      lokey: span.lokey,
-      hikey: span.hikey,
-      lovel: 1,
-      hivel: 127,
-      root: row.midi,
-      trigger: 'attack',
-      loopMode: 'one-shot',
+  const zones = [...bands.values()].flatMap((band) => {
+    const spans = mapKeyRanges(band.map((row) => row.midi))
+    return band.map((row) => {
+      const span = spans.get(row.midi) ?? { lokey: 0, hikey: 127 }
+      return makeZone({
+        id: `zone:${row.bufferId}`,
+        sampleId: `smp:${row.bufferId}`,
+        lokey: span.lokey,
+        hikey: span.hikey,
+        lovel: row.velLo,
+        hivel: row.velHi,
+        root: row.midi,
+        trigger: 'attack',
+        loopMode: 'one-shot',
+      })
     })
   })
   return fillKeyboard(makeProgram({

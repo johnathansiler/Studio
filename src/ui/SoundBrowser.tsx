@@ -616,13 +616,13 @@ export function SoundBrowser({
       const group = looseGroup(entry.id)
       if (group) {
         const assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[] = []
-        const notes: { midi: number; bufferId: string; sampleRate: number }[] = []
+        const notes: { midi: number; bufferId: string; sampleRate: number; velLo?: number; velHi?: number }[] = []
         for (const member of group.members) {
           const decoded = await loadEntry(member.entry)
           if (!decoded.channels[0]?.length) continue
           const id = `loose_${member.entry.id}`
           assets.push({ id, name: member.entry.name, sampleRate: decoded.sampleRate, channels: decoded.channels })
-          notes.push({ midi: member.midi, bufferId: id, sampleRate: decoded.sampleRate })
+          notes.push({ midi: member.midi, bufferId: id, sampleRate: decoded.sampleRate, velLo: member.velLo, velHi: member.velHi })
         }
         if (notes.length < 2) {
           store.toast('That instrument did not have enough notes.', 'warn')

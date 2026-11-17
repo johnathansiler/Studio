@@ -166,3 +166,169 @@ describe('grouped library instruments on a phone', () => {
     }
   }, 60000)
 })
+
+describe('chord shots group into one library row', () => {
+  const chords = ['Amaj', 'Amin', 'Cmaj', 'Cmin', 'Emaj', 'Emin']
+  const shotCatalog = {
+    version: 1,
+    generated_at: '2026-11-17T00:00:00Z',
+    count: chords.length + 4,
+    pending: '',
+    entries: [
+      ...chords.map((chord) => ({
+        key: `1 Shot Polys/Ap Shotpolyb ${chord}.wav`,
+        size: 120,
+        format: 'wav',
+        pack: '1 Shot Polys',
+        type: 'synth',
+        category: 'synth',
+        instrument: 'shotpoly',
+        genre: [],
+        bpm: null,
+        musical_key: '',
+        root: 'C',
+        note: 'C4',
+        mood: [],
+        tags: [],
+        license: 'private',
+        search: `shotpolyb ${chord}`,
+      })),
+      ...['Amaj', 'Cmaj', 'Emaj'].map((chord) => ({
+        key: `1 Shot Polys/Ap Shotpolyc ${chord}.wav`,
+        size: 120,
+        format: 'wav',
+        pack: '1 Shot Polys',
+        type: 'synth',
+        category: 'synth',
+        instrument: 'shotpoly',
+        genre: [],
+        bpm: null,
+        musical_key: '',
+        root: 'C',
+        note: 'C4',
+        mood: [],
+        tags: [],
+        license: 'private',
+        search: `shotpolyc ${chord}`,
+      })),
+      {
+        key: 'Drums/kick.wav',
+        size: 90,
+        format: 'wav',
+        pack: 'Kit',
+        type: 'one-shot',
+        category: 'kick',
+        instrument: 'kick',
+        genre: [],
+        bpm: null,
+        musical_key: '',
+        root: 'C',
+        note: 'C1',
+        mood: [],
+        tags: [],
+        license: 'private',
+        search: 'kick drum',
+      },
+    ],
+  }
+  const shotGzip = gzipSync(Buffer.from(JSON.stringify(shotCatalog)))
+
+  async function routeShot(route: Route, url: string) {
+    const target = route.request().url()
+    if (target.includes('/api/library/sign') || (target.includes('/api/library') && !target.includes('/instruments'))) {
+      if (target.includes('/sign')) {
+        const body = route.request().postDataJSON() as { keys?: string[] }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ready: true,
+            expiresIn: 900,
+            urls: (body.keys ?? ['catalog/catalog.json.gz']).map((key) => ({
+              key,
+              url: key.endsWith('.gz') ? `${url}/library-test/catalog.json.gz` : `${url}/library-test/audio.wav`,
+            })),
+          }),
+        })
+        return
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true }) })
+      return
+    }
+    if (target.includes('/api/library/instruments')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ total: 0, offset: 0, limit: 200, instruments: [] }) })
+      return
+    }
+    if (target.includes('/library-test/catalog')) {
+      await route.fulfill({ status: 200, contentType: 'application/octet-stream', body: shotGzip })
+      return
+    }
+    if (target.includes('/library-test/audio')) {
+      await route.fulfill({ status: 200, contentType: 'audio/wav', body: wav })
+      return
+    }
+    await route.continue()
+  }
+
+  async function shotPage(browser: Browser, url: string, viewport: { width: number; height: number }, touch: boolean) {
+    const page = await browser.newPage({ viewport, hasTouch: touch, isMobile: touch, deviceScaleFactor: 1 })
+    await page.setViewportSize(viewport)
+    await page.route('**/*', (route) => routeShot(route, url))
+    await page.goto(url, { waitUntil: 'networkidle' })
+    await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+    const size = await page.evaluate(() => `${window.innerWidth}x${window.innerHeight}`)
+    if (await page.getByRole('button', { name: 'Browse', exact: true }).count()) {
+      await page.getByRole('button', { name: 'Browse', exact: true }).click()
+    } else if (!(await page.locator('[data-playlist-browser="open"]').count())) {
+      await page.getByRole('button', { name: 'Browser', exact: true }).click()
+    }
+    const browserPane = page.locator('[data-playlist-browser="open"]')
+    await browserPane.waitFor()
+    const tab = browserPane.getByRole('button', { name: 'My Library', exact: true })
+    if ((await tab.getAttribute('aria-pressed')) !== 'true') await tab.click()
+    const lock = page.getByLabel('Library passphrase')
+    if (await lock.isVisible().catch(() => false)) {
+      await lock.fill('harbor-key')
+      await lock.press('Enter')
+    }
+    try {
+      await page.getByLabel('Search my library').waitFor({ timeout: 8000 })
+    } catch (error) {
+      const text = await page.locator('body').innerText()
+      throw new Error(`${size} ${error instanceof Error ? error.message : 'search'} :: ${text.replace(/\s+/g, ' ').slice(0, 700)}`)
+    }
+    await page.getByLabel('Search my library').fill('Shotpoly')
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyb Maj', exact: true }).count()).toBe(1)
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyb Min', exact: true }).count()).toBe(1)
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyc Maj', exact: true }).count()).toBe(1)
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyb', exact: true }).count()).toBe(0)
+    await expect.poll(async () => page.getByText('Amaj').count()).toBe(0)
+    await expect.poll(async () => page.getByText('synth · C4').count()).toBe(0)
+    await expect.poll(async () => page.locator('[data-library-instrument]').first().innerText()).toContain('C3')
+    return page
+  }
+
+  it('shows one chord instrument per family on a phone and on a desktop', async () => {
+    mkdirSync('/opt/cursor/artifacts', { recursive: true })
+    const port = 4474
+    const url = `http://127.0.0.1:${port}`
+    const child = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let browser: Browser | null = null
+    try {
+      await waitForServer(url, child)
+      browser = await chromium.launch({ headless: true })
+      const phone = await shotPage(browser, url, { width: 390, height: 844 }, true)
+      await phone.screenshot({ path: '/opt/cursor/artifacts/grouped-library-390.png' })
+      await phone.close()
+      const desk = await shotPage(browser, url, { width: 1440, height: 900 }, false)
+      await desk.screenshot({ path: '/opt/cursor/artifacts/grouped-library-1440.png' })
+      await desk.close()
+    } finally {
+      await browser?.close()
+      child.kill('SIGTERM')
+    }
+  }, 90000)
+})
