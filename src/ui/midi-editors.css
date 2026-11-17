@@ -157,7 +157,7 @@
   align-items: center;
   align-content: flex-start;
   gap: 4px;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   width: auto;
   max-width: 100%;
   min-width: max-content;
@@ -170,6 +170,16 @@
   border: 0;
   background: transparent;
   scrollbar-width: none;
+}
+/* Wide headers keep Roll/Step/Drums/Score beside the tool row. A flex-basis of
+   auto made that row wrap away and leave only a sliver of the piano. */
+@media (min-width: 561px) {
+  .shell .piano .roll-head .scale-bar,
+  .shell .midi-dock .roll-head .scale-bar {
+    flex: 1 1 0%;
+    min-width: 0;
+    width: auto;
+  }
 }
 /* Portrait phones have no room beside Close. The four labels take the whole row. */
 @media (max-width: 560px) {
