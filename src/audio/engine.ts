@@ -393,7 +393,8 @@ export class AudioEngine {
     const source = preview ? `${Math.round(preview.sourceRate)} Hz` : 'idle'
     const played = preview ? `${Math.round(preview.outputRate)} Hz` : 'idle'
     const load = stats ? `${Math.round(stats.average * 100)}% peak ${Math.round(stats.peak * 100)}%` : 'not reported'
-    const underrun = stats ? `${(stats.underrun * 100).toFixed(2)}%` : 'not reported'
+    const underrunRatio = stats ? stats.underrun : playbackUnderrun(ctx)
+    const underrun = underrunRatio == null ? 'not reported' : `${(underrunRatio * 100).toFixed(2)}%`
     return [
       `Context ${rate}`,
       `State ${state}`,
@@ -2090,10 +2091,9 @@ export class AudioEngine {
     try { this.renderCapacity?.stop?.() } catch { /* the previous context is gone */ }
     this.renderCapacity = null
     this.renderStats = null
-    const Host = (globalThis as { AudioRenderCapacity?: new () => RenderCapacity }).AudioRenderCapacity
-    if (typeof Host !== 'function') return
+    const capacity = (ctx as AudioContext & { renderCapacity?: RenderCapacity }).renderCapacity
+    if (!capacity || typeof capacity.start !== 'function') return
     try {
-      const capacity = new Host()
       capacity.onupdate = (event) => {
         const row = event?.renderCapacity
         if (!row) return
@@ -2105,7 +2105,6 @@ export class AudioEngine {
       }
       capacity.start({ updateInterval: 1 })
       this.renderCapacity = capacity
-      void ctx
     } catch {
       this.renderCapacity = null
     }
@@ -5693,6 +5692,17 @@ interface RenderCapacity {
 
 function numberOr(value: number | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+/** Chrome reports underruns on `playbackStats`. There is no global `AudioRenderCapacity`. */
+function playbackUnderrun(ctx: AudioContext | null) {
+  if (!ctx) return null
+  const stats = (ctx as AudioContext & { playbackStats?: { underrunDuration?: number; totalDuration?: number } }).playbackStats
+  if (!stats) return null
+  const total = numberOr(stats.totalDuration)
+  const under = numberOr(stats.underrunDuration)
+  if (!(total > 0)) return 0
+  return under / total
 }
 
 function openContext(hint: BufferHint) {
