@@ -135,6 +135,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .roll-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   min-width: 0;

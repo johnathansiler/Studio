@@ -60,7 +60,7 @@ export function ScoreView({ store }: { store: ProjectStore }) {
           store.putScoreNote(track.id, clip.id, beat, pitch)
         }}
       >
-        <div dangerouslySetInnerHTML={{ __html: svg }} />
+        <div className="score-sheet" dangerouslySetInnerHTML={{ __html: svg }} />
       </div>
     </div>
   )
