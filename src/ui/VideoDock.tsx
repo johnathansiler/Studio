@@ -7,10 +7,11 @@ import { mediaStatus } from '../model/media'
 import { parseCollabTarget } from '../model/negotiate'
 import { CALL_COPY, copyOf } from './chrome'
 import { collabChoosing, connectionLine, linkLooksFailed, personConnection, selfConnection, worstConnection } from './collabTab'
-import { SETUP_PLAIN } from './collabCopy'
+import { COLLAB_START_LINE, SETUP_PLAIN } from './collabCopy'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
+import { ButtonTray } from './ButtonTray'
 import { useScreenOverlay } from './screenOverlay'
 import { VersionsList } from './VersionsList'
 import type { Project } from '../model/types'
@@ -261,39 +262,44 @@ export function VideoDock({
       )}
       {choosing ? (
         <div className="collab-start" data-collab-start="open">
-          {startNote && <p className="hint">{startNote}</p>}
-          {joinForm ? (
-            <form
-              className="collab-join"
-              onSubmit={(event) => {
-                event.preventDefault()
-                submitJoin()
-              }}
-            >
-              <label className="collab-field">
-                Your name
-                <input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} autoComplete="name" />
-              </label>
-              <label className="collab-field">
-                Invite code or link
-                <input
-                  value={joinDraft}
-                  onChange={(event) => setJoinDraft(event.target.value)}
-                  autoCapitalize="characters"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              </label>
-              {joinNote && <p className="hint" role="status">{joinNote}</p>}
-              <button type="submit" className="text-btn primary">Join</button>
-              <button type="button" className="text-btn" onClick={() => { setJoinForm(false); setJoinNote('') }}>Back</button>
-            </form>
-          ) : (
-            <>
-              <TipButton className="text-btn primary" label={call('create').label} hint={call('create').hint} onClick={onCreate} />
-              <TipButton id="join-with-code" className="text-btn" label={call('join').label} hint={call('join').hint} onClick={() => setJoinForm(true)} />
-            </>
-          )}
+          <section className="collab-start-sheet" aria-label="Collab">
+            <p className="collab-lede" data-collab-lede="">{COLLAB_START_LINE}</p>
+            {startNote && <p className="hint" role="status">{startNote}</p>}
+            {joinForm ? (
+              <form
+                className="collab-join"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  submitJoin()
+                }}
+              >
+                <label className="collab-field">
+                  Your name
+                  <input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} autoComplete="name" />
+                </label>
+                <label className="collab-field">
+                  Invite code or link
+                  <input
+                    value={joinDraft}
+                    onChange={(event) => setJoinDraft(event.target.value)}
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                </label>
+                {joinNote && <p className="hint" role="status">{joinNote}</p>}
+                <ButtonTray className="collab-actions" role="group" aria-label="Session">
+                  <button type="submit" className="text-btn primary">Join</button>
+                  <button type="button" className="text-btn" onClick={() => { setJoinForm(false); setJoinNote('') }}>Back</button>
+                </ButtonTray>
+              </form>
+            ) : (
+              <ButtonTray className="collab-actions" role="group" aria-label="Session">
+                <TipButton className="text-btn primary" label={call('create').label} hint={call('create').hint} onClick={onCreate} />
+                <TipButton id="join-with-code" className="text-btn" label={call('join').label} hint={call('join').hint} onClick={() => setJoinForm(true)} />
+              </ButtonTray>
+            )}
+          </section>
         </div>
       ) : (
         <div className={`stage ${featured ? 'speaker' : 'gallery'}`}>

@@ -136,6 +136,12 @@
 .shell.phone.land[data-collab="open"] .tool-slot.phone-dock-slot:not(:empty) {
   display: none;
 }
+/* The live room still fills the screen. Before a session, Menu, Browse, and Tools stay. */
+.shell.phone[data-collab="open"]:has(.dock[data-collab-phase="start"]) .tool-slot.phone-dock-slot,
+.shell.phone[data-collab="open"]:has(.dock[data-collab-phase="start"]):not(.land) .tool-slot.phone-dock-slot:not(:empty),
+.shell.phone.land[data-collab="open"]:has(.dock[data-collab-phase="start"]) .tool-slot.phone-dock-slot:not(:empty) {
+  display: flex;
+}
 .shell[data-collab="open"] {
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
@@ -191,9 +197,42 @@
   max-width: 100%;
   overflow: hidden;
 }
-.shell[data-collab="open"] .collab-start,
-.shell[data-collab="open"] .collab-join {
+.shell[data-collab="open"] .collab-start {
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 24px 16px 16px;
+  overflow: auto;
+  box-sizing: border-box;
+}
+.collab-start-sheet {
+  box-sizing: border-box;
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--tray-radius, 18px);
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset);
+}
+.collab-lede {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 520;
+  line-height: 1.35;
+  text-align: left;
+}
+.shell[data-collab="open"] .collab-join {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -201,18 +240,30 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  min-height: 0;
-  padding: 16px;
-  overflow: auto;
+  padding: 0;
+  flex: 0 0 auto;
+  overflow: visible;
 }
-.shell[data-collab="open"] .collab-start .text-btn,
-.shell[data-collab="open"] .collab-join .text-btn {
-  width: 100%;
-  min-height: 48px;
-  min-width: 44px;
-  padding: 10px 14px;
-  white-space: normal;
-  font-size: 16px;
+.shell[data-collab="open"] .collab-actions.btn-tray {
+  align-self: flex-start;
+  width: max-content;
+  max-width: 100%;
+  justify-content: flex-start;
+}
+.shell[data-collab="open"] .collab-actions .text-btn {
+  width: auto;
+  flex: 0 0 auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  min-width: max(40px, max-content);
+  padding: 0 14px;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1;
+}
+.shell.phone.land[data-collab="open"] .collab-start {
+  padding-top: 12px;
 }
 .collab-field {
   display: flex;
