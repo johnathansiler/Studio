@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { selectLayers } from '../audio/multisample/map'
 import { midiVelocity } from '../audio/multisample/types'
 import { parseLooseName } from '../library/looseName'
-import { presentSoundEntries, samplerFromNotes } from '../sounds/noteGroups'
+import { looseGroup, presentSoundEntries, samplerFromNotes } from '../sounds/noteGroups'
 import type { SoundEntry } from '../sounds/types'
 import { groupInstruments } from '../harbor/program'
 import { parseHarborEntry } from '../harbor/parse'
@@ -92,13 +92,30 @@ describe('device-local note grouping', () => {
       ...chords.map((chord) => sound(`packs/1 Shot Polys/Ap Shotpolyb ${chord}.wav`, { pack: '1 Shot Polys', category: 'synth', role: 'one_shot' })),
       ...['Amaj', 'Cmaj'].map((chord) => sound(`packs/1 Shot Polys/Ap Shotpolyc ${chord}.wav`, { pack: '1 Shot Polys', category: 'synth', role: 'one_shot' })),
       sound('packs/1 Shot Polys/kick.wav', { pack: '1 Shot Polys', category: 'kick', role: 'drum_one_shot' }),
+      sound('packs/1 Shot Polys/Only Bmaj.wav', { pack: '1 Shot Polys', category: 'synth', role: 'one_shot' }),
     ])
-    const polyb = listed.filter((entry) => entry.name === '1 Shot Polys - Ap Shotpolyb')
-    const polyc = listed.filter((entry) => entry.name === '1 Shot Polys - Ap Shotpolyc')
-    expect(polyb).toHaveLength(1)
-    expect(polyb[0]?.type).toBe('instrument')
+    const major = listed.filter((entry) => entry.name === '1 Shot Polys - Ap Shotpolyb Maj')
+    const minor = listed.filter((entry) => entry.name === '1 Shot Polys - Ap Shotpolyb Min')
+    const polyc = listed.filter((entry) => entry.name === '1 Shot Polys - Ap Shotpolyc Maj')
+    expect(major).toHaveLength(1)
+    expect(minor).toHaveLength(1)
+    expect(major[0]?.type).toBe('instrument')
     expect(polyc).toHaveLength(1)
     expect(listed.some((entry) => entry.name === 'kick')).toBe(true)
-    expect(listed.some((entry) => /Amaj/.test(entry.name))).toBe(false)
+    expect(listed.some((entry) => entry.name === 'Only Bmaj')).toBe(true)
+    expect(listed.some((entry) => entry.type === 'instrument' && /Amaj/.test(entry.name))).toBe(false)
+    const group = looseGroup(major[0]!.id)
+    const program = samplerFromNotes(group!.id, group!.name, group!.members.map((member) => ({
+      midi: member.midi,
+      bufferId: member.entry.id,
+      sampleRate: 48000,
+      velLo: member.velLo,
+      velHi: member.velHi,
+    })))
+    const loud = selectLayers(program, { note: group!.members.find((member) => member.entry.id.includes('Amaj'))!.midi, velocity: midiVelocity(0.95), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    const quiet = selectLayers(program, { note: group!.members.find((member) => member.entry.id.includes('Amaj'))!.midi, velocity: midiVelocity(0.2), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    expect(loud.layers[0]?.sample.bufferId).toContain('Amaj')
+    expect(quiet.layers[0]?.sample.bufferId).toBe(loud.layers[0]?.sample.bufferId)
+    expect(program.zones.every((zone) => zone.lovel === 1 && zone.hivel === 127)).toBe(true)
   })
 })

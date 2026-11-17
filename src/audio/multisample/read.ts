@@ -1,7 +1,9 @@
 /**
  * 8-tap windowed-sinc reader with three bandwidths.
  * Pitching up picks a lower cutoff so the resample stays band-limited.
+ * A file near twice the engine rate uses a longer polyphase lowpass instead.
  */
+import { polyphaseKernel, sampleKernel, sampleKernelAt, type PolyphaseKernel } from '../quality/resample'
 
 const TAPS = 8
 const HALF = TAPS / 2
@@ -65,43 +67,42 @@ export interface ReadSpan {
  * longer kernel. The 8-tap table leaves energy above the output Nyquist, and
  * that alias is the crackle on bright one-shots. Musical pitch stays on the
  * short table: a few semitones is under this ratio.
+ * The long kernel is built once per cutoff. A wobbling rate stays in one bucket
+ * so the audio thread does not rebuild it.
  */
 const STEEP_RATE = 1.45
 const STEEP_HALF = 48
 
-function steepSinc(x: number) {
-  if (Math.abs(x) < 1e-8) return 1
-  const p = Math.PI * x
-  return Math.sin(p) / p
+function steepFc(rate: number) {
+  const scale = Math.max(1, rate)
+  const bucket = Math.ceil(scale * 8) / 8
+  return Math.min(0.45, 0.45 / bucket)
+}
+
+let steepCache: { fc: number; kernel: PolyphaseKernel } | null = null
+
+function steepKernel(rate: number) {
+  const fc = steepFc(rate)
+  if (steepCache && steepCache.fc === fc) return steepCache.kernel
+  const kernel = polyphaseKernel(fc, STEEP_HALF)
+  steepCache = { fc, kernel }
+  return kernel
 }
 
 /** One output sample from a source that is playing faster than the engine. */
 export function readBandlimitedAt(sampleAt: (index: number) => number, length: number, pos: number, rate: number) {
   if (length < 2 || !Number.isFinite(pos)) return 0
-  const scale = Math.max(1, rate)
-  const fc = Math.min(0.45, 0.45 / scale)
-  const origin = Math.floor(pos)
-  let acc = 0
-  let norm = 0
-  for (let k = -STEEP_HALF; k <= STEEP_HALF; k++) {
-    const idx = origin + k
-    const x = idx - pos
-    const ratio = k / STEEP_HALF
-    const inside = 1 - ratio * ratio
-    const win = inside > 0 ? 0.5 + 0.5 * Math.cos(Math.PI * ratio) : 0
-    const kernel = 2 * fc * steepSinc(2 * fc * x) * win
-    acc += (sampleAt(idx) || 0) * kernel
-    norm += kernel
-  }
-  return norm !== 0 ? acc / norm : 0
+  return sampleKernelAt(steepKernel(rate), sampleAt, pos)
 }
 
 export function readBandlimited(channel: Float32Array, pos: number, rate: number) {
-  return readBandlimitedAt((index) => channel[index] || 0, channel.length, pos, rate)
+  if (channel.length < 2 || !Number.isFinite(pos)) return 0
+  return sampleKernel(steepKernel(rate), channel, pos)
 }
 
 /** Fractional read. `pos` is in source frames. */
 export function readFrame(channel: Float32Array, pos: number, rate: number, span: ReadSpan) {
+  if (!span.loop && rate >= STEEP_RATE) return readBandlimited(channel, pos, rate)
   return readFrameAt((index) => channel[index] || 0, channel.length, pos, rate, span)
 }
 

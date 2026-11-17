@@ -3,8 +3,10 @@
  * Note, velocity, round-robin, and duration tokens come off the filename.
  * Articulation words stay, so Normal and Staccato are different instruments.
  * Dynamics stay on the instrument as velocity layers.
+ * Chord quality is an instrument too: Maj and Min are separate rows.
+ * Velocity only changes loudness.
  */
-import { looseMidi, parseChordToken, parseFamilySuffix, parseLooseName } from './looseName.ts'
+import { chordQualityLabel, looseMidi, parseChordToken, parseFamilySuffix, parseLooseName } from './looseName.ts'
 
 export interface InstrumentLayer {
   key: string
@@ -150,10 +152,12 @@ interface RawSample {
   looseNumbers: number[]
   /** A one-shot whose name is a note. A single file stays a row; two or more become one instrument. */
   looseFile: boolean
-  /** Chord suffix such as maj or min. Same root, different quality, stays a velocity layer. */
+  /** Chord suffix such as maj or min. Quality is its own instrument, not a velocity layer. */
   family: boolean
-  /** Stem with the chord token removed, shared by every key of the instrument. */
+  /** Stem with the chord token removed, shared by every key of one quality. */
   familyBase: string
+  /** Display quality such as Maj or Min. Empty when the file is not a chord shot. */
+  quality: string
 }
 
 export function noteMidi(token: string): number | null {
@@ -355,6 +359,7 @@ function emptyRaw(row: CatalogRow, midi: number | null, pitchClass: number | nul
     looseFile: false,
     family: false,
     familyBase: '',
+    quality: '',
   }
 }
 
@@ -385,27 +390,6 @@ function baseOctave(category: string, folder: string) {
 function fileStem(key: string) {
   const file = key.split('/').pop() || key
   return file.replace(/\.[a-z0-9]+$/i, '')
-}
-
-const CHORD_RANK: Record<string, number> = {
-  dim: 15,
-  m: 30,
-  min: 30,
-  minor: 30,
-  min7: 35,
-  m7: 35,
-  sus: 50,
-  sus2: 50,
-  sus4: 52,
-  aug: 55,
-  '7': 60,
-  maj: 80,
-  major: 80,
-  maj7: 85,
-}
-
-function chordRank(quality: string) {
-  return CHORD_RANK[quality] ?? 50
 }
 
 function parseRaw(row: CatalogRow): RawSample | null {
@@ -514,15 +498,13 @@ function parseRaw(row: CatalogRow): RawSample | null {
   let bareClass: number | null = null
   let familyBase = ''
   let familyNote = false
+  let quality = ''
   if (family) {
     const last = words[words.length - 1]
     if (last && parseChordToken(last)) words.pop()
     familyNote = true
     familyBase = family.base
-    if (!velocityId) {
-      velocityId = family.quality
-      velocityRank = chordRank(family.quality)
-    }
+    quality = chordQualityLabel(family.quality)
     // A catalog note of C4 on every file is a default, not the chord root.
     if (family.octave != null) {
       const heard = looseMidi(family.pitchClass, family.octave)
@@ -548,6 +530,7 @@ function parseRaw(row: CatalogRow): RawSample | null {
     looseFile: false,
     family: familyNote,
     familyBase,
+    quality,
   }
 }
 
@@ -776,11 +759,12 @@ function buildOne(pack: string, folder: string, tokens: string[], samples: RawSa
   const midis = [...new Set(shown.map((layer) => layer.midi))].sort((a, b) => a - b)
   const preview = closestToC4(chosen.filter((sample) => !sample.release).length ? chosen.filter((sample) => !sample.release) : chosen)
   if (!preview) return null
-  const key = groupKey(pack, folder, tokens)
+  const quality = sharedQuality(source)
+  const key = quality ? `${groupKey(pack, folder, tokens)}\n${quality}` : groupKey(pack, folder, tokens)
   let id = hashId(key)
   while (ids.has(id)) id += 'x'
   ids.add(id)
-  const named = familyName(pack, folder, source) ?? displayName(pack, folder, tokens, source.length)
+  const named = familyName(pack, folder, source, quality) ?? displayName(pack, folder, tokens, source.length)
   const velocities = new Set(shown.map((layer) => `${layer.velLo}-${layer.velHi}`))
   let roundRobins = 1
   const bySlot = new Map<string, number>()
@@ -862,16 +846,21 @@ function applyIndexSeries(items: { raw: RawSample; stem: string }[]) {
   })
 }
 
-function familyName(pack: string, folder: string, samples: RawSample[]) {
+function sharedQuality(samples: RawSample[]) {
+  const labels = [...new Set(samples.map((sample) => sample.quality).filter(Boolean))]
+  return labels.length === 1 ? labels[0] : ''
+}
+
+function familyName(pack: string, folder: string, samples: RawSample[], quality: string) {
   const bases = [...new Set(samples.map((sample) => sample.familyBase))]
   if (!samples.every((sample) => sample.family) || bases.length !== 1) return null
   const base = titleWords(bases[0] || '')
   const folderTitle = titleWords(meaningfulFolders(pack, folder).slice(-1)[0] || '')
   const packTitle = titleWords(cleanPack(pack))
-  const label = base || folderTitle
-  const name = packTitle && label && !label.toLowerCase().includes(packTitle.toLowerCase())
-    ? `${packTitle} - ${label}`
-    : (label || packTitle)
+  const titled = [base || folderTitle, quality].filter(Boolean).join(' ')
+  const name = packTitle && titled && !titled.toLowerCase().includes(packTitle.toLowerCase())
+    ? `${packTitle} - ${titled}`
+    : (titled || packTitle)
   if (!name) return null
   return { name, code: '' }
 }
@@ -950,7 +939,8 @@ export function groupLibraryInstruments(entries: CatalogRow[]): LibraryInstrumen
   assignBareOctaves(pending)
   const groups = new Map<string, { pack: string; folder: string; tokens: string[]; samples: RawSample[] }>()
   for (const item of pending) {
-    const key = groupKey(item.pack, item.folder, item.raw.nameTokens)
+    const tokenKey = groupKey(item.pack, item.folder, item.raw.nameTokens)
+    const key = item.raw.quality ? `${tokenKey}\n${item.raw.quality}` : tokenKey
     const group = groups.get(key) ?? { pack: item.pack, folder: item.folder, tokens: item.raw.nameTokens, samples: [] }
     group.samples.push(item.raw)
     groups.set(key, group)

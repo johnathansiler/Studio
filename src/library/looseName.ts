@@ -80,6 +80,31 @@ export interface FamilySuffix extends ChordToken {
   base: string
 }
 
+const QUALITY_LABEL: Record<string, string> = {
+  maj: 'Maj',
+  major: 'Maj',
+  min: 'Min',
+  minor: 'Min',
+  m: 'Min',
+  maj7: 'Maj7',
+  min7: 'Min7',
+  m7: 'Min7',
+  dim: 'Dim',
+  dim7: 'Dim7',
+  aug: 'Aug',
+  sus: 'Sus',
+  sus2: 'Sus2',
+  sus4: 'Sus4',
+  '7': '7',
+}
+
+/** `maj` and `major` are one instrument. `m`, `min`, and `minor` are another. */
+export function chordQualityLabel(quality: string) {
+  const key = quality.trim().toLowerCase()
+  if (!key) return ''
+  return QUALITY_LABEL[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
+}
+
 /** `Amaj`, `C#min`, `Bbmaj7`, `F#m`, `Amin3`. A plain `C4` is a note, not a chord. */
 export function parseChordToken(token: string): ChordToken | null {
   const match = token.trim().match(new RegExp(`^([A-Ga-g])([#b])?(${CHORD_QUALITY})(-1|\\d+)?$`, 'i'))

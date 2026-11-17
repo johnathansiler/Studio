@@ -1,7 +1,7 @@
 import { fillKeyboard, mapKeyRanges } from '../harbor/zones'
 import { makeProgram, makeSample, makeZone, type SamplerProgram } from '../audio/multisample/types'
 import { favoriteSounds, replaceFavorites, type FavoriteSound } from '../library/favorites'
-import { looseMidi, looseTitle, parseFamilySuffix, parseLooseName, type LooseName } from '../library/looseName'
+import { chordQualityLabel, looseMidi, looseTitle, parseFamilySuffix, parseLooseName, type LooseName } from '../library/looseName'
 import { recentSounds, replaceRecent, type RecentSound } from '../library/recent'
 import type { SoundEntry } from './types'
 
@@ -192,7 +192,9 @@ export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
     const family = parseFamilySuffix(stemOf(entry.path, entry.name)) || parseFamilySuffix(entry.name)
     if (family) {
       const folder = folderOf(entry.path)
-      const role = family.base.toLowerCase() || roleKey(entry, { midi: null, pitchClass: family.pitchClass, role: '' }, folder)
+      const quality = chordQualityLabel(family.quality)
+      const base = family.base.toLowerCase() || roleKey(entry, { midi: null, pitchClass: family.pitchClass, role: '' }, folder)
+      const role = `${base} ${quality}`.trim().toLowerCase()
       const octave = family.octave ?? octaveFor(entry, folder, role)
       const midi = looseMidi(family.pitchClass, octave)
       if (midi == null) {
@@ -205,7 +207,7 @@ export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
         folder,
         role,
         midi,
-        quality: family.quality,
+        quality,
       })
       continue
     }
@@ -257,7 +259,7 @@ export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
       ? `${packTitle} - ${titled}`
       : titled
     const id = hashId([name, bucket[0].folder, pack, role, ...bucket.map((item) => item.entry.id).sort()].join('\n'))
-    const members = velocityMembers(bucket)
+    const members = rootMembers(bucket)
     const group: LooseGroup = { id, name, role, folder: bucket[0].folder, pack, members }
     groups.set(id, group)
     for (const item of bucket) memberToGroup.set(item.entry.id, id)
@@ -277,26 +279,14 @@ export function presentSoundEntries(entries: SoundEntry[]): SoundEntry[] {
   return listed
 }
 
-function velocityMembers(bucket: { entry: SoundEntry; midi: number; quality: string }[]): LooseMember[] {
-  const byMidi = new Map<number, { entry: SoundEntry; midi: number; quality: string }[]>()
+/** One sample per root. Chord quality is a separate instrument, so every zone hears the full velocity range. */
+function rootMembers(bucket: { entry: SoundEntry; midi: number; quality: string }[]): LooseMember[] {
+  const byMidi = new Map<number, { entry: SoundEntry; midi: number }>()
   for (const item of bucket) {
-    const list = byMidi.get(item.midi) ?? []
-    if (!list.some((row) => row.quality === item.quality && row.entry.id === item.entry.id)) list.push(item)
-    byMidi.set(item.midi, list)
+    const prev = byMidi.get(item.midi)
+    if (!prev || item.entry.id.localeCompare(prev.entry.id) < 0) byMidi.set(item.midi, item)
   }
-  const members: LooseMember[] = []
-  for (const list of byMidi.values()) {
-    const unique = new Map<string, (typeof list)[number]>()
-    for (const item of list) if (!unique.has(item.quality || item.entry.id)) unique.set(item.quality || item.entry.id, item)
-    const rows = [...unique.values()].sort((a, b) => a.quality.localeCompare(b.quality) || a.entry.id.localeCompare(b.entry.id))
-    rows.forEach((item, index) => {
-      const count = rows.length
-      const lo = count === 1 ? 1 : index === 0 ? 1 : Math.floor((index * 127) / count) + 1
-      const hi = count === 1 ? 127 : index === count - 1 ? 127 : Math.floor(((index + 1) * 127) / count)
-      members.push({ entry: item.entry, midi: item.midi, velLo: lo, velHi: Math.max(lo, hi) })
-    })
-  }
-  return members
+  return [...byMidi.values()].map((item) => ({ entry: item.entry, midi: item.midi }))
 }
 
 export function samplerFromNotes(id: string, name: string, notes: { midi: number; bufferId: string; sampleRate: number; velLo?: number; velHi?: number }[]): SamplerProgram {

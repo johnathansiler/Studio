@@ -298,8 +298,10 @@ describe('chord shots group into one library row', () => {
       throw new Error(`${size} ${error instanceof Error ? error.message : 'search'} :: ${text.replace(/\s+/g, ' ').slice(0, 700)}`)
     }
     await page.getByLabel('Search my library').fill('Shotpoly')
-    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyb' }).count()).toBe(1)
-    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyc' }).count()).toBe(1)
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyb Maj', exact: true }).count()).toBe(1)
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyb Min', exact: true }).count()).toBe(1)
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyc Maj', exact: true }).count()).toBe(1)
+    await expect.poll(async () => page.getByRole('button', { name: 'Play 1 Shot Polys - Ap Shotpolyb', exact: true }).count()).toBe(0)
     await expect.poll(async () => page.getByText('Amaj').count()).toBe(0)
     await expect.poll(async () => page.getByText('synth · C4').count()).toBe(0)
     await expect.poll(async () => page.locator('[data-library-instrument]').first().innerText()).toContain('C3')
