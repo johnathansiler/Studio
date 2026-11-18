@@ -4101,6 +4101,81 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   color: var(--accent-ink);
   border-color: transparent;
 }
+.tempo-tap {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tempo-entry {
+  position: fixed;
+  z-index: 440;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  box-sizing: border-box;
+  margin: 0;
+  width: 176px;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #18241d;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.tempo-entry-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-align: center;
+  color: var(--muted);
+}
+.tempo-entry-input {
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-0);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.tempo-entry-input::-webkit-outer-spin-button,
+.tempo-entry-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.tempo-entry-error {
+  margin: 0;
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+}
+.tempo-entry-actions { display: flex; gap: 6px; }
+.tempo-entry-actions button {
+  flex: 1 1 0;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 14px;
+  font-weight: 650;
+}
+.tempo-entry-actions button.ok {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
 .transport.simple .t-main .t-word { font-size: 12px; }
 .transport.simple .sync-pill { flex: 1 0 100%; }
 .shell.phone:not(.land) .tool-slot:has(.command-strip.tucked) {

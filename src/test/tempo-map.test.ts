@@ -163,7 +163,7 @@ describe('smart tempo', () => {
     expect(adaptProjectTempo(project, 100)).toBe(100)
     expect(project.tempo).toBe(100)
     expect(project.tempoMap[0].bpm).toBe(100)
-    expect(conformStretchPatch(100, 'tape')).toEqual({ sourceBpm: 100, followTempo: true, mode: 'pro' })
+    expect(conformStretchPatch(100, 'tape')).toEqual({ sourceBpm: 100, followTempo: true, tempoMode: 'follow', mode: 'pro' })
     expect(conformStretchPatch(100, 'voice').mode).toBe('voice')
   })
 

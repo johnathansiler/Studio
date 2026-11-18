@@ -4,6 +4,7 @@ import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectra
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
 import { queueClipStretch } from '../audio/stretch/commit'
+import { clampLockBpm, clipTempoPatch, tempoDrivesLength } from '../model/clipTempo'
 import { TUNE_INSERT_PRESET } from '../audio/plugins/autoTune'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
@@ -138,6 +139,7 @@ import { createSection, deleteSectionContents, duplicateSectionContents, moveSec
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { applyFreeze } from '../audio/bounce'
 import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead, stampMidiAtBeat } from '../model/playheadPlace'
+import { TEMPO_MAX, TEMPO_MIN } from '../model/tap'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
 import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -1840,7 +1842,7 @@ export class ProjectStore {
   }
 
   setTempo(tempo: number, group = false) {
-    const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
+    const value = clamp(Math.round(tempo * 10) / 10, TEMPO_MIN, TEMPO_MAX)
     const apply = () => {
       this.project.tempo = value
       const first = this.project.tempoMap?.find((point) => point.beat <= 1e-3)
@@ -1879,7 +1881,7 @@ export class ProjectStore {
   private retimeFollow() {
     for (const track of this.project.tracks) {
       for (const clip of track.clips) {
-        if (!clip.stretch?.followTempo) continue
+        if (!tempoDrivesLength(clip.stretch)) continue
         clip.durationSamples = timelineSamples(clip, this.project)
       }
     }
@@ -3475,8 +3477,18 @@ export class ProjectStore {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       if (!clip) return
       const base = clip.stretch ?? defaultStretch(clip.durationSamples)
-      clip.stretch = { ...base, ...patch, markers: patch.markers ?? base.markers }
-      if (clip.stretch.followTempo) {
+      const modePatch = patch.tempoMode ? clipTempoPatch(base, patch.tempoMode, this.project.tempo, clip.durationSamples) : null
+      const next: ClipStretch = { ...base, ...modePatch, ...patch, markers: patch.markers ?? base.markers }
+      if (patch.followTempo === false && patch.tempoMode == null) delete next.tempoMode
+      if (next.tempoMode === 'lock') {
+        next.followTempo = false
+        next.lockBpm = clampLockBpm(patch.lockBpm ?? modePatch?.lockBpm ?? next.lockBpm ?? this.project.tempo)
+      } else if (next.tempoMode === 'follow' || next.tempoMode === 'half' || next.tempoMode === 'double') {
+        next.followTempo = true
+      }
+      if ((next.followTempo || next.tempoMode === 'lock') && !next.sourceBpm) next.sourceBpm = this.detectClipBpm(clip)
+      clip.stretch = next
+      if (tempoDrivesLength(clip.stretch)) {
         if (!clip.stretch.sourceBpm) clip.stretch.sourceBpm = this.detectClipBpm(clip)
         clip.durationSamples = timelineSamples(clip, this.project)
       }
@@ -3493,12 +3505,14 @@ export class ProjectStore {
       const duration = Math.max(64, Math.round(source * (clamp(percent, 12.5, 800) / 100)))
       const scale = clip.durationSamples > 0 ? duration / clip.durationSamples : 1
       clip.durationSamples = duration
-      clip.stretch = {
+      const stretch = {
         ...base,
         sourceSamples: source,
         followTempo: false,
         markers: base.markers.map((marker) => ({ ...marker, target: marker.target * scale })),
       }
+      delete stretch.tempoMode
+      clip.stretch = stretch
       this.commitClip(clip)
     })
   }
@@ -3577,7 +3591,7 @@ export class ProjectStore {
       for (const track of this.project.tracks) {
         for (const clip of track.clips) {
           if (!ids.has(clip.id)) continue
-          if (clip.stretch?.followTempo) clip.durationSamples = timelineSamples(clip, this.project)
+          if (tempoDrivesLength(clip.stretch)) clip.durationSamples = timelineSamples(clip, this.project)
           this.commitClip(clip)
         }
       }

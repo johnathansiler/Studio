@@ -634,7 +634,7 @@ describe('limiter, mixer, and tempo', () => {
     store.setTempo(400)
     expect(store.project.tempo).toBe(300)
     store.setTempo(10)
-    expect(store.project.tempo).toBe(30)
+    expect(store.project.tempo).toBe(20)
   })
 })
 

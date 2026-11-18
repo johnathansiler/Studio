@@ -19,10 +19,11 @@ export function adaptProjectTempo(project: Project, bpm: number): number {
 }
 
 /** Pitch-preserving stretch settings that lock the clip to the song tempo. */
-export function conformStretchPatch(bpm: number, mode: StretchMode | undefined): { sourceBpm: number; followTempo: true; mode: StretchMode } {
+export function conformStretchPatch(bpm: number, mode: StretchMode | undefined): { sourceBpm: number; followTempo: true; tempoMode: 'follow'; mode: StretchMode } {
   return {
     sourceBpm: clampTempo(bpm),
     followTempo: true,
+    tempoMode: 'follow',
     mode: mode === 'tape' || !mode ? 'pro' : mode,
   }
 }
