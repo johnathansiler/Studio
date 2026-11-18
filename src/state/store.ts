@@ -139,6 +139,7 @@ import { createSection, deleteSectionContents, duplicateSectionContents, moveSec
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { applyFreeze } from '../audio/bounce'
 import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead, stampMidiAtBeat } from '../model/playheadPlace'
+import { TEMPO_MAX, TEMPO_MIN } from '../model/tap'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
 import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -1841,7 +1842,7 @@ export class ProjectStore {
   }
 
   setTempo(tempo: number, group = false) {
-    const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
+    const value = clamp(Math.round(tempo * 10) / 10, TEMPO_MIN, TEMPO_MAX)
     const apply = () => {
       this.project.tempo = value
       const first = this.project.tempoMap?.find((point) => point.beat <= 1e-3)
