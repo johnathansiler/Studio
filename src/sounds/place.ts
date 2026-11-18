@@ -3,7 +3,7 @@ import { interactiveAudioContext } from '../audio/micTap'
 import { normalizePeak } from '../audio/level'
 import { bpmFromName, fitLoopBeats } from '../audio/loopSeam'
 import { resampleSinc } from '../audio/quality/resample'
-import { defaultStretch, detectBpm, renderTempoFollow, samplesAtBeat, tempoMapOf, timelineSamples } from '../audio/stretch/engine'
+import { defaultStretch, detectBpm, timelineSamples } from '../audio/stretch/engine'
 import type { StretchMode } from '../model/types'
 import { quartersPerBar } from '../model/time'
 import { uid, type AudioAsset, type AudioClip, type Project } from '../model/types'
@@ -25,24 +25,30 @@ function fitLength(channel: Float32Array, length: number) {
   return out
 }
 
-/** Drums keep their attacks. Everything else uses the phase vocoder so pitch stays put. */
+/**
+ * Drums keep their attacks. A pitched loop uses the phase vocoder so the note stays put.
+ * An 808 bass is a note even when the file is also tagged beat, drum, kick, or BD.
+ * Hats, snares, claps, shakers, cowbells, and tambourines stay on the beats stretcher,
+ * including plurals and names like SHAKER1, and even when the kit is an 808.
+ */
 export function stretchModeFor(entry: SoundEntry): StretchMode {
-  const tags = `${entry.name} ${entry.tags.join(' ')}`.toLowerCase()
-  if (/\b(drum|kick|snare|hat|perc|beat|clap|shaker)\b/.test(tags)) return 'beats'
+  const hay = `${entry.name} ${entry.path} ${entry.category ?? ''} ${entry.tags.join(' ')}`.toLowerCase()
+  if (attackLoop(hay)) return 'beats'
+  if (/\b(bass|sub|tonal|pads?|keys|pianos?|vocals?|vox|melod(?:y|ies)|chords?)\b/.test(hay)) return 'pro'
+  if (/808/.test(hay)) return 'pro'
+  if (drumLoop(hay)) return 'beats'
   return 'pro'
 }
 
-function beatAtSample(sample: number, project: Project) {
-  const map = tempoMapOf(project.tempo, project.tempoMap, project.automation)
-  const rate = project.sampleRate
-  let lo = 0
-  let hi = Math.max(1, (Math.max(0, sample) / rate) * (project.tempo / 60) + 8)
-  for (let i = 0; i < 24; i++) {
-    const mid = (lo + hi) / 2
-    if (samplesAtBeat(mid, rate, project.tempo, map) < sample) lo = mid
-    else hi = mid
-  }
-  return (lo + hi) / 2
+/** A transient instrument. Checked before the 808 bass rule so a hat in an 808 kit stays a drum. */
+function attackLoop(hay: string): boolean {
+  if (/\b(hats?|snares?|claps?|shakers?|cymbals?|rims?|cowbells?|tambourines?)\b/.test(hay)) return true
+  return /shaker/.test(hay)
+}
+
+/** Drum-machine and kit words, including the plurals the catalog actually uses. */
+function drumLoop(hay: string): boolean {
+  return /\b(drums?|kicks?|snares?|hats?|percussion|percs?|beats?|claps?|shakers?|cymbals?|rims?|toms?|cowbells?|tambourines?)\b/.test(hay)
 }
 
 /**
@@ -60,7 +66,9 @@ export function loopBpm(entry: SoundEntry, channel?: Float32Array, sampleRate?: 
 
 /**
  * Build the asset and clip for the playhead.
- * A loop follows the song tempo only when the catalog recorded a BPM.
+ * A loop with a catalog tempo follows the song (Follow). The file tempo stays
+ * on the clip so half, double, and lock can still change it. Preview playback
+ * is separate and stays at the file tempo.
  */
 export function placeSound(options: {
   entry: SoundEntry
@@ -78,7 +86,7 @@ export function placeSound(options: {
   const bpm = loopBpm(options.entry, lead, rate)
   const mode = stretchModeFor(options.entry)
   const stretch = bpm
-    ? { ...defaultStretch(lead.length, mode), followTempo: true, sourceBpm: bpm }
+    ? { ...defaultStretch(lead.length, mode), followTempo: true, tempoMode: 'follow' as const, sourceBpm: bpm }
     : defaultStretch(lead.length, mode)
   const clip: AudioClip = {
     id: options.clipId || uid('clip'),
@@ -110,22 +118,22 @@ export function placeSound(options: {
   }
 }
 
-/** Speaker preview. Loops are stretched to the project tempo before they play. */
+/**
+ * Speaker preview at the file tempo.
+ * Only the sample rate is fitted. Stretching a 105 BPM 808 to the song tempo
+ * in the browser preview is what made the bass crunch. The clip on the track
+ * follows the song; this button does not.
+ */
 export function previewChannelsFor(
-  entry: SoundEntry,
+  _entry: SoundEntry,
   channels: Float32Array[],
   fileRate: number,
   project: Project,
-  startSample = 0,
+  _startSample = 0,
 ): Float32Array[] {
-  const matched = matchProjectRate(channels, fileRate, project.sampleRate)
-  const lead = matched[0]
-  const bpm = lead ? loopBpm(entry, lead, project.sampleRate) : null
-  if (!lead?.length || !bpm) return matched
-  const map = tempoMapOf(project.tempo, project.tempoMap, project.automation)
-  const startBeat = beatAtSample(startSample, project)
-  const mode = stretchModeFor(entry)
-  return matched.map((channel) => renderTempoFollow(channel, project.sampleRate, bpm, project.tempo, map, startBeat, mode))
+  void _entry
+  void _startSample
+  return matchProjectRate(channels, fileRate, project.sampleRate)
 }
 
 export function audioTrackFor(project: Project, selectedId: string | null, droppedId?: string | null) {

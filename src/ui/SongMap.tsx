@@ -10,6 +10,7 @@ import {
   tempoAtBeat,
   tempoAtSample,
 } from '../model/tempoMap'
+import { tempoFollowsProject } from '../model/clipTempo'
 import type { ProjectStore } from '../state/store'
 import './songMap.css'
 
@@ -48,16 +49,24 @@ export function SmartTempoBar({ store }: { store: ProjectStore }) {
     }
   }, [store, offer])
   if (!offer) return null
+  const clip = store.project.tracks.find((track) => track.id === offer.trackId)?.clips.find((item) => item.id === offer.clipId)
+  const follows = tempoFollowsProject(clip?.stretch)
   return (
     <div ref={bar} className="smart-tempo" role="group" aria-label="Smart tempo" data-smart-tempo="">
-      <span>This clip is about {offer.bpm.toFixed(1)} BPM.</span>
+      <span>
+        {follows
+          ? `This loop is ${offer.bpm.toFixed(1)} BPM and is already following the song.`
+          : `This clip is about ${offer.bpm.toFixed(1)} BPM.`}
+      </span>
       <button type="button" title="Set the song tempo to this clip" onClick={() => store.adaptClipTempo(offer.trackId, offer.clipId)}>
         Use for song
       </button>
-      <button type="button" title="Stretch this clip to the song tempo without changing its pitch" onClick={() => store.conformClipTempo(offer.trackId, offer.clipId)}>
-        Fit to song
-      </button>
-      <button type="button" title="Leave the song tempo and the clip as they are" onClick={() => store.dismissSmartTempo()}>
+      {follows ? null : (
+        <button type="button" title="Stretch this clip to the song tempo without changing its pitch" onClick={() => store.conformClipTempo(offer.trackId, offer.clipId)}>
+          Fit to song
+        </button>
+      )}
+      <button type="button" title={follows ? 'Leave the song tempo as it is' : 'Leave the song tempo and the clip as they are'} onClick={() => store.dismissSmartTempo()}>
         Not now
       </button>
     </div>

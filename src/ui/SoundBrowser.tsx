@@ -983,7 +983,7 @@ export function SoundBrowser({
         })}
         {shownSounds.map((entry) => {
           const on = playing === entry.id
-          const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
+          const playHint = entry.type === 'loop' ? 'Play on the speakers at the file tempo.' : 'Play this sound on the speakers.'
           const credit = [entry.license, entry.attributionText, entry.source || 'Source not listed', entry.licenseUrl, entry.tags.length ? entry.tags.join(', ') : ''].filter(Boolean).join(' · ')
           const hosted = entry.origin === 'private' ? 'On this device. Not uploaded.' : 'Hugging Face.'
           const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [entry.origin === 'private' ? 'Private' : '', KIND_LABEL[entry.type], entry.publisher, entry.pack ? packLabel(entry.pack) : '', entry.license, entry.attributionText, entry.category && entry.category !== entry.type ? entry.category : '', entry.role ? roleLabel(entry.role) : ''].filter(Boolean).join(' · ')

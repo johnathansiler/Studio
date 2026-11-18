@@ -8,6 +8,7 @@ import { handleAnalysisMessage } from '../analysis/worker'
 import { createEmptyProject, uid, type MidiNote, type Project } from '../model/types'
 import { decodeWavPCM } from '../model/wav'
 import { SOUND_DATASET_BASE } from '../sounds/contract'
+import { timelineSamples } from '../audio/stretch/engine'
 import { placeSound } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import { AnalysisSheet } from '../ui/AnalysisSheet'
@@ -353,6 +354,10 @@ describe('felt piano library loops', () => {
       startSample: 0,
     })
     expect(placed).toBeTruthy()
+    if (placed!.clip.stretch) {
+      placed!.clip.stretch.followTempo = true
+      placed!.clip.durationSamples = timelineSamples(placed!.clip, project)
+    }
     const music = project.tracks.find((track) => track.name === 'Music')!
     music.clips = [placed!.clip]
     const ratio = placed!.clip.durationSamples / (placed!.clip.stretch?.sourceSamples || 1)
@@ -399,6 +404,10 @@ describe('felt piano library loops', () => {
       project,
       startSample: 0,
     })
+    if (placed!.clip.stretch) {
+      placed!.clip.stretch.followTempo = true
+      placed!.clip.durationSamples = timelineSamples(placed!.clip, project)
+    }
     const music = project.tracks.find((track) => track.name === 'Music')!
     music.clips = [placed!.clip]
     const result = analyzeTrack(project, 'Music', placed!.clip.bufferId, placed!.asset)
