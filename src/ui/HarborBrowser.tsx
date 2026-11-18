@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent } from 'react'
+import { useProjectVersion } from './playbackUi'
 import { soundCache } from '../sounds/cache'
 import { decodeSoundBytes, trackIdFromDrop } from '../sounds/place'
 import { filterHarborLoops, loopInstruments, loopKeys } from '../harbor/filter'
@@ -58,7 +59,7 @@ export function HarborBrowser({
   /** Tests pass a catalog so the panel can render without the network. */
   initial?: HarborCatalog
 }) {
-  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useProjectVersion(store)
   useSyncExternalStore(subscribeFavorites, favoriteSounds, favoriteSounds)
   const [catalog, setCatalog] = useState<HarborCatalog>(initial ?? { version: '', instruments: [], loops: [], entries: [] })
   const [loading, setLoading] = useState(!initial)

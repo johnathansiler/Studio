@@ -30,6 +30,7 @@ import { setRollOwnsKeys } from '../model/keyboardPlay'
 import { performanceOwnsMidi, stepOwnsMidi } from '../midi/remember'
 import { keyCommitsNote } from '../model/stepEntry'
 import { displayedPlayhead, pianoPlayheadBeat, transportMoving } from '../model/transportSync'
+import { subscribeFrame } from '../audio/ticker'
 import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { attachGlissando } from './glissando'
@@ -131,9 +132,11 @@ export function PianoRoll({
   const notesButton = useRef<HTMLSpanElement>(null)
   const [head, setHead] = useState(engine.positionSamples)
   const [rolling, setRolling] = useState(transportMoving(engine.status))
+  const headRef = useRef<HTMLDivElement>(null)
   useEffect(() => engine.subscribe(() => {
-    setHead(engine.positionSamples)
-    setRolling(transportMoving(engine.status))
+    const moving = transportMoving(engine.status)
+    setRolling((prev) => (prev === moving ? prev : moving))
+    if (!moving) setHead(engine.positionSamples)
   }), [engine])
   const followPlayhead = store.midiEditor().follow
   const loopLocalEnd = clip ? projectSampleBeat(store.project, store.project.loopEndSample) - clip.startBeat : 0
@@ -150,6 +153,29 @@ export function PianoRoll({
   pxRef.current = pxBeat
   const rollRef = useRef<HTMLDivElement>(null)
   const rulerScrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => subscribeFrame(() => {
+    const node = headRef.current
+    const moving = transportMoving(engine.status)
+    if (!node || !clip) return moving
+    const sample = typeof engine.visualSample === 'function' ? engine.visualSample() : engine.positionSamples
+    const beat = pianoPlayheadBeat(projectSampleBeat(store.project, displayedPlayhead(sample, store.project)), clip, drawnBeats)
+    if (beat == null) {
+      node.style.visibility = 'hidden'
+      return moving
+    }
+    node.style.visibility = ''
+    node.style.left = `${Math.max(0, beat * pxRef.current)}px`
+    if (followPlayhead) {
+      const rollNode = rollRef.current
+      if (rollNode && rollNode.clientWidth >= 8) {
+        const x = beat * pxRef.current
+        const view = rollNode.clientWidth
+        const left = rollNode.scrollLeft
+        if (x < left + 24 || x > left + view - 36) rollNode.scrollLeft = Math.max(0, x - view * 0.35)
+      }
+    }
+    return moving
+  }), [engine, clip, store, drawnBeats, followPlayhead])
   useLayoutEffect(() => {
     if (!followPlayhead || !rolling || playBeat == null) return
     const rollNode = rollRef.current
@@ -996,9 +1022,7 @@ export function PianoRoll({
                   />
                 )
               })}
-              {playBeat != null && (
-                <div className="roll-playhead" data-playhead="piano" style={{ left: Math.max(0, playBeat * pxBeat) }} />
-              )}
+              <div ref={headRef} className="roll-playhead" data-playhead="piano" style={{ left: Math.max(0, (playBeat ?? 0) * pxBeat), visibility: playBeat == null ? 'hidden' : undefined }} />
               <RemoteRollCursors peers={remotes} clipId={clip.id} pxBeat={pxBeat} />
               {box && (
                 <div

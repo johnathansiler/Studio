@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { FEATURES } from '../features'
 import { controlLaw, formatPan } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
@@ -39,6 +39,8 @@ import { DrumRoll } from './DrumRoll'
 import { PatternSend } from './PatternSend'
 import { SnapControl } from './SnapControl'
 import { patternPlayBeat } from '../model/patternMidi'
+import { useProjectVersion } from './playbackUi'
+import { subscribeFrame } from '../audio/ticker'
 import './channel-rack.css'
 
 type RackEngine = {
@@ -70,16 +72,36 @@ async function loadRowSample(store: ProjectStore, sampleId: string) {
   }
 }
 
-function usePlaySample(engine: RackEngine) {
+/** Step highlights follow the bar. The playhead line itself is moved outside React. */
+function usePlaySample(engine: RackEngine, store: ProjectStore) {
   const [live, setLive] = useState<number | null>(null)
   useEffect(() => {
     if (!engine.subscribe) return
+    let step = Number.NaN
     const read = () => {
-      setLive(engine.positionSamples)
+      const sample = engine.positionSamples
+      const beat = projectSampleBeat(store.project, displayedPlayhead(sample, store.project))
+      const next = Math.floor(beat / STEP_BEAT)
+      if (next === step && (engine.status === 'playing' || engine.status === 'recording')) return
+      step = next
+      setLive(sample)
     }
     read()
     return engine.subscribe(read)
-  }, [engine])
+  }, [engine, store])
+  useEffect(() => subscribeFrame(() => {
+    const node = document.querySelector<HTMLElement>('[data-playhead="rack"]')
+    if (!node) return false
+    const moving = engine.status === 'playing' || engine.status === 'recording'
+    const sample = moving && engine.currentTimelineSample ? engine.currentTimelineSample() : engine.positionSamples
+    const project = store.project
+    const beat = projectSampleBeat(project, displayedPlayhead(sample, project))
+    const count = Math.max(1, store.activePattern()?.steps ?? 16)
+    const width = Math.max(STEP_BEAT, count * STEP_BEAT)
+    const left = `${(patternPlayBeat(beat, count) / width) * 100}%`
+    if (node.style.left !== left) node.style.left = left
+    return moving
+  }), [engine, store])
   return live ?? engine.positionSamples
 }
 
@@ -412,11 +434,11 @@ function Picker({
 }
 
 export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectStore; engine: RackEngine; page?: 'steps' | 'mix' }) {
-  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useProjectVersion(store)
   const beatState = selectBeats(store)
   const project = beatState.project
   const pattern = beatState.pattern
-  const sample = usePlaySample(engine)
+  const sample = usePlaySample(engine, store)
   const [graph, setGraph] = useState(false)
   const [graphMode, setGraphMode] = useState<GraphMode>('velocity')
   const [editOpen, setEditOpen] = useState(false)

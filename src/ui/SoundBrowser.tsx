@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useProjectVersion } from './playbackUi'
 import { fetchInstrument, type LibraryEntry } from '../audio/multisample/library'
 import { libraryBaseUrl } from '../audio/multisample/source'
 import type { SamplePack } from '../audio/multisample/types'
@@ -339,7 +340,7 @@ export function SoundBrowser({
   /** Sounds, Instruments, or Loops tab. Hides the kind menu. */
   lockType?: SoundQuery['type']
 }) {
-  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useProjectVersion(store)
   const sounds = selectSounds(store)
   const [result, setResult] = useState<CatalogResult>(initial ?? { entries: [], status: 'missing' })
   const [starters] = useState<LibraryEntry[]>([])

@@ -123,7 +123,8 @@ export function AnchoredMenu({
       { width: window.innerWidth, height: window.innerHeight },
       clearTop,
     )
-    const phone = !!document.querySelector('.shell.phone')
+    /* menu-anchored keeps the dropdown on the wide phone shell. A separate change owns menu direction. */
+    const phone = !!document.querySelector('.shell.phone:not(.menu-anchored)')
     setMode(fills ? (phone ? 'sheet' : 'fill') : 'dock')
   }, [open, fill, mode, children, tray])
 

@@ -97,7 +97,9 @@ export function syncPhoneSheetFrame(root?: ParentNode | null) {
     ? Math.max(0, window.innerHeight - bar.top)
     : 0
   const room = Math.max(0, window.innerHeight - top - bottomInset)
-  const reserve = 48
+  /* Wide Fold lanes are taller than the old 48px reserve. Keep the ruler,
+     playhead strip, one header, and the overview bar above the sheet. */
+  const reserve = shell.classList.contains('phone-wide') ? 220 : 48
   const cap = Math.max(96, room - reserve)
   const height = room > 0 && room < 320 ? cap : Math.round(Math.min(cap, Math.max(200, room * 0.7)))
   target.style.setProperty('--phone-chrome-top', `${Math.round(top)}px`)
