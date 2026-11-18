@@ -1,3 +1,4 @@
+import { tempoDrivesLength } from '../model/clipTempo'
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
 import { bodyLength, clipHasWaveBody, fadeCurve, type WaveEdit } from './wave/edit'
 import { cachedWaveBody, renderWaveRange } from './wave/render'
@@ -5274,7 +5275,7 @@ export class AudioEngine {
     if (stretchSlot(stretchCacheKey(clip, this.project))?.quality === 'hq') return false
     const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     if (preferStretchCache(phone, this.rack.cpu)) return false
-    if (clip.stretch.followTempo || clip.stretch.markers.length >= 2) return false
+    if (tempoDrivesLength(clip.stretch) || clip.stretch.markers.length >= 2) return false
     return sourceSamplesOf(clip) <= this.sampleRate * 3
   }
 

@@ -1,5 +1,5 @@
 import { applyIntegerDetent, dragNumeric } from './dragNumeric'
-import { roundTempo } from './tap'
+import { roundTempo, TEMPO_MAX, TEMPO_MIN } from './tap'
 
 /** Pixels of movement before a press becomes a tempo drag. A shorter move stays a tap. */
 export const TEMPO_DRAG_SLOP = 10
@@ -22,9 +22,9 @@ export function tempoDragIntent(dx: number, dy: number, slop = TEMPO_DRAG_SLOP):
   return 'drag'
 }
 
-/** Song tempo for an upward drag of `dy` pixels, on the same 30–300 scale as typing. */
+/** Song tempo for an upward drag of `dy` pixels, on the same 20–300 scale as typing. */
 export function tempoFromDrag(origin: number, dy: number, perPx = TEMPO_DRAG_PER_PX, fine = false, release = false) {
-  if (perPx === TEMPO_DRAG_PER_PX) return roundTempo(dragNumeric({ origin, deltaPx: dy, min: 30, max: 300, fine, release }), false)
+  if (perPx === TEMPO_DRAG_PER_PX) return roundTempo(dragNumeric({ origin, deltaPx: dy, min: TEMPO_MIN, max: TEMPO_MAX, fine, release }), false)
   const raw = origin + dy * perPx
   const next = fine ? raw : release ? Math.round(raw) : applyIntegerDetent(raw)
   return roundTempo(next, false)

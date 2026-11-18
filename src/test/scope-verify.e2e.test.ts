@@ -296,7 +296,7 @@ describe('scoped arrange changes', () => {
       const endBox = await endGrip.boundingBox()
       await page.mouse.move(endBox!.x + 8, endBox!.y + endBox!.height / 2)
       await page.mouse.down()
-      await page.mouse.move(endBox!.x + 8 - 48, endBox!.y + endBox!.height / 2, { steps: 4 })
+      await page.mouse.move(endBox!.x + 8 - 160, endBox!.y + endBox!.height / 2, { steps: 6 })
       await page.mouse.up()
       const shorter = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number } } } }).__cueharbor.store.project.loopEndSample)
       expect(shorter).toBeLessThan(beforeLoop)
