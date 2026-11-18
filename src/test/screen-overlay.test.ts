@@ -164,6 +164,7 @@ async function assertOverlay(page: Page) {
         right: box.right,
         bottom: box.bottom,
         phoneSheet: node.classList.contains('phone-sheet') || node.classList.contains('guide-sheet'),
+        menuDrop: node.getAttribute('data-menu-edge') === 'top',
         pads: node.getAttribute('data-pads') === 'plugin',
       }
     })
@@ -191,7 +192,7 @@ async function assertOverlay(page: Page) {
   })
   for (const tab of result.tabHits) expect(tab.ok, tab.label).toBe(true)
   expect(result.boxes.length).toBeGreaterThan(0)
-  const sheets = result.phone ? result.boxes.filter((box) => box.phoneSheet) : []
+  const sheets = result.boxes.filter((box) => box.menuDrop || (result.phone && box.phoneSheet))
   const full = result.boxes.filter((box) => !sheets.includes(box))
   for (const box of sheets) {
     expect(box.top).toBeGreaterThanOrEqual(result.viewBottom - 2)

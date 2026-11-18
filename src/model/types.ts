@@ -144,6 +144,13 @@ export type LaunchMode = 'trigger' | 'gate' | 'toggle' | 'repeat'
 export type FollowAction = 'none' | 'next' | 'prev' | 'any' | 'other' | 'stop'
 export type StretchMode = 'pro' | 'beats' | 'tonal' | 'voice' | 'speech' | 'tape'
 
+/**
+ * How an audio clip's playback tempo relates to the song.
+ * Follow matches the song. Half and double stay at that ratio when the song changes.
+ * Lock holds one BPM. Missing means Follow when followTempo is on, and the file tempo when it is off.
+ */
+export type ClipTempoMode = 'follow' | 'half' | 'double' | 'lock'
+
 /** Source sample locked to a musical beat. Targets are beats from the clip start. */
 export interface WarpMarker {
   id: string
@@ -161,6 +168,13 @@ export interface ClipStretch {
   formant?: boolean
   followTempo: boolean
   sourceBpm: number | null
+  /**
+   * Follow, half, and double ride the song tempo. Lock holds lockBpm.
+   * Omitted on older projects: followTempo on is Follow, followTempo off is the file tempo.
+   */
+  tempoMode?: ClipTempoMode
+  /** Playback tempo while tempoMode is lock. */
+  lockBpm?: number | null
   markers: WarpMarker[]
 }
 

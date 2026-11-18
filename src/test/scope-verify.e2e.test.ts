@@ -73,7 +73,7 @@ describe('scoped arrange changes', () => {
           const node = document.querySelector('#shell-menu')?.closest('.anchored-menu')
           return !!node && node.getAttribute('data-menu-size') !== 'pending'
         })
-        const close = page.locator('.anchored-menu:has(#shell-menu) > .overlay-close')
+        const close = page.locator('.anchored-menu:has(#shell-menu) .overlay-close')
         const docked = page.locator('.anchored-menu:has(#shell-menu)[data-menu-size="dock"]')
         const sheet = (await close.count()) > 0
         if (sheet) {
@@ -160,7 +160,7 @@ describe('scoped arrange changes', () => {
         expect(await shortcuts.isVisible()).toBe(true)
         if (size.width === 390 && size.height === 844) {
           await page.screenshot({ path: `${artifacts}/main-menu-390x844.png` })
-          await page.locator('[data-screen-overlay] > .overlay-close').click()
+          await page.locator('.anchored-menu:has(#shell-menu) .overlay-close').click()
           await menu.waitFor({ state: 'detached' })
           await page.getByRole('button', { name: 'Tools', exact: true }).click()
           const scroll = page.locator('#tool-choices').getByRole('button', { name: /^Scroll/ })
