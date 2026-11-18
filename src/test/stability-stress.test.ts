@@ -931,6 +931,7 @@ describe('edit latency', () => {
     const pattern = {
       id: 'pat',
       name: 'Pattern',
+      color: '#f97316',
       steps: 4,
       swing: 0,
       channels: [{
@@ -1065,7 +1066,7 @@ describe('edit latency', () => {
     installHost()
     const project = createEmptyProject(48000)
     const engine = new AudioEngine()
-    const sign = (engine as unknown as { graphSignature(project: typeof project): string }).graphSignature
+    const sign = (engine as unknown as { graphSignature(project: ReturnType<typeof createEmptyProject>): string }).graphSignature
     const before = sign.call(engine, project)
     project.tracks[0].monitor = true
     expect(sign.call(engine, project)).not.toBe(before)
