@@ -1,4 +1,4 @@
-import { clipTempoMode } from '../../model/clipTempo'
+import { clipTempoMode, tempoDrivesLength } from '../../model/clipTempo'
 import { renderClipChannels, timelineSamples, type StretchQuality } from './engine'
 import type { AudioClip, Project } from '../../model/types'
 
@@ -79,8 +79,22 @@ export function stretchSlot(key: string): StretchSlot | null {
 }
 
 /**
+ * Store the committed render now.
+ * A tempo-driven loop plays this buffer first. A later preview swap restarts
+ * the source and clicks, so nothing is announced.
+ */
+function commitTempoStretch(key: string, render: () => Float32Array[], clipId: string): Float32Array[] {
+  const existing = slots.get(key)
+  if (existing?.quality === 'hq' && existing.channels) return existing.channels
+  const channels = render()
+  slots.set(key, { token: ++token, quality: 'hq', channels, clipId })
+  return channels
+}
+
+/**
  * Preview is available immediately. The offline phase-vocoder render replaces it
  * on a later turn, and listeners can swap playback to that buffer.
+ * Tempo-driven clips do not use this path. Their first buffer is the committed render.
  */
 export function scheduleStretchCommit(
   key: string,
@@ -114,6 +128,10 @@ export function queueClipStretch(clip: AudioClip, channels: Float32Array[], proj
   const frozenProject = clockSnapshot(project)
   const key = stretchCacheKey(frozenClip, frozenProject)
   currentKey.set(frozenClip.id, key)
+  if (tempoDrivesLength(frozenClip.stretch)) {
+    commitTempoStretch(key, () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'), frozenClip.id)
+    return key
+  }
   scheduleStretchCommit(
     key,
     () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'),
@@ -129,6 +147,9 @@ export function readStretch(key: string, channels: Float32Array[], clip: AudioCl
   const frozenKey = stretchCacheKey(frozenClip, frozenProject)
   const cacheKey = key === frozenKey ? key : frozenKey
   currentKey.set(frozenClip.id, cacheKey)
+  if (tempoDrivesLength(frozenClip.stretch)) {
+    return commitTempoStretch(cacheKey, () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'), frozenClip.id)
+  }
   const hit = slots.get(cacheKey)
   if (hit?.quality === 'hq' && hit.channels) return hit.channels
   if (hit?.channels) return hit.channels
