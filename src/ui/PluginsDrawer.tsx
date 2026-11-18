@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useProjectVersion } from './playbackUi'
 import { isSoundPlugin } from '../instruments/scaler/chain'
 import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
@@ -93,7 +94,7 @@ export function PluginsDrawer({
   menuOpen?: boolean
   onClose?: () => void
 }) {
-  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useProjectVersion(store)
   const trackId = store.selectedTrackId
   const [menu, setMenu] = useState(menuOpen)
   const [groupId, setGroupId] = useState('instruments')

@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react'
 import { lastPreloadFailure } from './chunkReload'
+import { afterAudioFrame, playbackUiDeferred } from './playbackUi'
 
 declare const __CUEHARBOR_SESSION__: boolean
 
@@ -163,8 +164,14 @@ export function preloadView(id: string) {
   if (started.has(id)) return
   const load = loads[id]
   if (!load) return
-  started.add(id)
-  void load().catch(() => { started.delete(id) })
+  const run = () => {
+    if (started.has(id)) return
+    started.add(id)
+    void load().catch(() => { started.delete(id) })
+  }
+  // Evaluating a view chunk on the click that opened it stalls the transport.
+  if (playbackUiDeferred()) afterAudioFrame(run)
+  else run()
 }
 
 /** Views a phone is likely to open after Arrange. */

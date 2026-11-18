@@ -28,7 +28,17 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
   const [playhead, setPlayhead] = useState(engine.positionSamples)
   const [selected, setSelected] = useState<string | null>(null)
   const dragRef = useRef<{ cancel: () => void } | null>(null)
-  useEffect(() => engine.subscribe?.(() => setPlayhead(engine.positionSamples)), [engine])
+  useEffect(() => {
+    let step = Number.NaN
+    return engine.subscribe?.(() => {
+      const sample = engine.positionSamples
+      const beat = projectSampleBeat(store.project, displayedPlayhead(sample, store.project))
+      const next = Math.floor(beat / STEP_BEAT)
+      if (next === step) return
+      step = next
+      setPlayhead(sample)
+    })
+  }, [engine, store])
   if (!pattern) return null
   const notes = patternToLaneNotes(pattern)
   const count = Math.max(1, pattern.steps)

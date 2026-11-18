@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
+import { useProjectVersion } from './playbackUi'
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import { applyPadKitSamples, ensureDefaultKit } from '../instruments/pads/load'
@@ -89,7 +90,7 @@ export function PadsPanel({
   chopStartsOpen?: boolean
   vintageStartsOpen?: boolean
 }) {
-  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useProjectVersion(store)
   useScreenOverlay(() => {
     store.closePads()
     void releaseOrientation()

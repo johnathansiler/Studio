@@ -18,10 +18,16 @@ export const DRUM_PEAK = 0.25
 export const DEDUPE_SEC = 0.008
 export const MAX_LIVE_VOICES = 16
 
-/** How far ahead the transport places notes. A wake later than this has already missed them. */
-export const SCHEDULER_HORIZON_SEC = 0.35
-/** Loop passes one wake may build. A tiny cycle cannot pin the main thread. */
-export const MAX_SCHEDULE_PASSES = 8
+/**
+ * How far ahead the transport places notes, in seconds.
+ * A main-thread stall shorter than this cannot open a gap. It is look-ahead,
+ * not output latency: each event is still placed on its own audio-clock time.
+ */
+export const SCHEDULER_HORIZON_SEC = 3
+/** One pass schedules at most this much, so a refill wake stays off the long-task list. */
+export const SCHEDULER_CHUNK_SEC = 0.35
+/** Loop passes one wake may build. Enough for a short cycle to fill the horizon. */
+export const MAX_SCHEDULE_PASSES = 32
 /** A note this late still sounds, on the next quantum. Later than this, it is dropped. */
 export const LATE_SLIP_SEC = 0.02
 /** Pad and key worklet messages kept while the audio thread is not pulling. */

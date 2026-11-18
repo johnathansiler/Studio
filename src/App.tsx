@@ -35,6 +35,7 @@ import { looseGroup, presentSoundEntries, samplerFromNotes } from './sounds/note
 import type { SoundEntry } from './sounds/types'
 
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
+import { afterAudioFrame, bindAudioWake, setPlaybackUi } from './ui/playbackUi'
 import { ArrangeView } from './ui/ArrangeView'
 import type { TrackChoice } from './model/addTrack'
 import { collectRecordInputs } from './midi/inputs'
@@ -225,7 +226,10 @@ export function App() {
     }
     publishAwareness.current = publish
     const stopStore = store.subscribe(publish)
-    const stopEngine = engine.subscribe(publish)
+    const stopEngine = engine.subscribe(() => {
+      setPlaybackUi(engine.status === 'playing' || engine.status === 'recording')
+      publish()
+    })
     const stopSession = session.subscribe(publish)
     const stopPoke = onPresencePoke(publish)
     publish()
@@ -482,12 +486,35 @@ export function App() {
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
     engine.followTrack(store.selectedTrackId)
-    const unsub = store.subscribe(() => {
-      engine.sync(store.project, (id) => store.buffers.get(id))
-      engine.followTrack(store.selectedTrackId)
-      engine.setLaunches(store.launched)
-      engine.setLaunchAt(store.launchAt)
-      engine.setLaunchGen(store.launchGen)
+    const audioStamp = { current: store.editStamp() }
+    const bufferCount = { current: store.buffers.size }
+    const launchRef = { current: store.launched }
+    const atRef = { current: store.launchAt }
+    const genRef = { current: store.launchGen }
+    const modeRef = { current: store.transportMode }
+    const trackRef = { current: store.selectedTrackId }
+    bindAudioWake(() => {
+      if (engine.status === 'playing' || engine.status === 'recording') engine.wakeTransport()
+    })
+    const applyStore = () => {
+      const playing = engine.status === 'playing' || engine.status === 'recording'
+      const projectChanged = store.editStamp() !== audioStamp.current || store.buffers.size !== bufferCount.current
+      const launchChanged = store.launched !== launchRef.current || store.launchAt !== atRef.current || store.launchGen !== genRef.current || store.transportMode !== modeRef.current
+      const trackChanged = store.selectedTrackId !== trackRef.current
+      audioStamp.current = store.editStamp()
+      bufferCount.current = store.buffers.size
+      launchRef.current = store.launched
+      atRef.current = store.launchAt
+      genRef.current = store.launchGen
+      modeRef.current = store.transportMode
+      trackRef.current = store.selectedTrackId
+      if (projectChanged || launchChanged) {
+        engine.sync(store.project, (id) => store.buffers.get(id))
+        engine.setLaunches(store.launched)
+        engine.setLaunchAt(store.launchAt)
+        engine.setLaunchGen(store.launchGen)
+      }
+      if (trackChanged) engine.followTrack(store.selectedTrackId)
       if (session.state.status === 'live') {
         window.clearTimeout(publishTimer.current)
         publishTimer.current = window.setTimeout(() => session.publishEdits(), 40)
@@ -496,9 +523,7 @@ export function App() {
           roomTimer.current = window.setTimeout(() => roomSave.current(), 600)
         }
       }
-      const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
       const pending = store.takePendingTransport()
-      const playing = engine.status === 'playing' || engine.status === 'recording'
       if (session.state.role !== 'guest' && pending) {
         const sessionLaunch = FEATURES.session && store.transportMode === 'session'
         if (!playing && sessionLaunch && Object.values(store.launched).some(Boolean)) {
@@ -521,16 +546,24 @@ export function App() {
           } else if (playing && pending.action === 'back') engine.adoptArrangement()
         }
       }
-      if (key !== launchKey.current) {
-        launchKey.current = key
-        if (FEATURES.session && session.state.role === 'guest') {
-          if (store.transportMode === 'arrangement') {
-            if (playing && engine.currentMode() === 'session') engine.adoptArrangement()
-          } else if (playing && engine.currentMode() !== 'session') engine.adoptSession()
-          else if (playing) engine.kickSession()
+      if (launchChanged) {
+        const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
+        if (key !== launchKey.current) {
+          launchKey.current = key
+          if (FEATURES.session && session.state.role === 'guest') {
+            if (store.transportMode === 'arrangement') {
+              if (playing && engine.currentMode() === 'session') engine.adoptArrangement()
+            } else if (playing && engine.currentMode() !== 'session') engine.adoptSession()
+            else if (playing) engine.kickSession()
+          }
         }
       }
       setVersion((value) => value + 1)
+    }
+    const unsub = store.subscribe(() => {
+      const playing = engine.status === 'playing' || engine.status === 'recording'
+      if (playing) afterAudioFrame(applyStore)
+      else applyStore()
     })
     const followTimer = window.setInterval(() => {
       if (session.state.role === 'guest') return
@@ -539,6 +572,7 @@ export function App() {
     }, 40)
     return () => {
       unsub()
+      bindAudioWake(null)
       window.clearInterval(followTimer)
     }
   }, [store, engine, session])
@@ -1717,11 +1751,15 @@ async function importDropped(files: FileList) {
   }
 
   function showView(view: 'arrange' | 'mix' | 'beats' | 'session') {
-    const next = preferArrangeView(view)
-    dismissForTab()
-    setMenuOpen(false)
-    setSurface('studio')
-    store.setView(next)
+    const run = () => {
+      const next = preferArrangeView(view)
+      dismissForTab()
+      setMenuOpen(false)
+      setSurface('studio')
+      store.setView(next)
+    }
+    if (engine.status === 'playing' || engine.status === 'recording') afterAudioFrame(run)
+    else run()
   }
 
   function closePiano() {
@@ -2081,15 +2119,20 @@ async function importDropped(files: FileList) {
           menuRef={menuButtonRef}
           onView={showView}
           onMenu={() => {
-            setSoundsOpen(false)
-            if (unstuckOpen) {
-              engine.stopPreview()
-              setUnstuckOpen(false)
+            const run = () => {
+              setSoundsOpen(false)
+              if (unstuckOpen) {
+                engine.stopPreview()
+                setUnstuckOpen(false)
+              }
+              document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+              setMenuOpen((open) => !open)
             }
-            document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
-            setMenuOpen((open) => !open)
+            if (engine.status === 'playing' || engine.status === 'recording') afterAudioFrame(run)
+            else run()
           }}
           onWarm={(view) => {
+            if (engine.status === 'playing' || engine.status === 'recording') return
             if (view === 'menu') preloadView('menu')
             else if (view === 'mix') preloadView('mix')
             else if (view === 'session') preloadView('session')
