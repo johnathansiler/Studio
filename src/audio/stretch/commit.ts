@@ -1,3 +1,4 @@
+import { clipTempoMode } from '../../model/clipTempo'
 import { renderClipChannels, timelineSamples, type StretchQuality } from './engine'
 import type { AudioClip, Project } from '../../model/types'
 
@@ -45,8 +46,9 @@ export function followClockToken(project: Project) {
   for (const track of project.tracks) {
     for (const clip of track.clips) {
       const stretch = clip.stretch
-      if (!stretch?.followTempo || !(stretch.sourceBpm && stretch.sourceBpm > 0)) continue
-      clips += `${clip.id}:${clip.startSample}:${clip.durationSamples}:${clip.offsetSamples}:${stretch.sourceSamples}:${stretch.sourceBpm};`
+      const mode = clipTempoMode(stretch)
+      if (mode === 'free' || !(stretch?.sourceBpm && stretch.sourceBpm > 0)) continue
+      clips += `${clip.id}:${clip.startSample}:${clip.durationSamples}:${clip.offsetSamples}:${stretch.sourceSamples}:${stretch.sourceBpm}:${mode}:${stretch.lockBpm ?? 0};`
     }
   }
   return `${project.tempo}|${project.sampleRate}|${points}|${clips}`
