@@ -1,0 +1,244 @@
+/* Header rows and lanes share one height and one ruler block.
+   The viewfinder and the timeline spacer share one grid row, so the
+   columns start at the same offset even when the chip wraps. */
+
+.arrange {
+  --lane-row: calc(var(--lane-h, 96px) * var(--lane-zoom, 1));
+  --ruler-stack: calc(var(--map-h, 68px) + var(--ruler-h, 40px) + var(--playhead-strip, 0px));
+}
+
+.arrange:has(> .track-viewfinder-slot) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.arrange:has(> .track-viewfinder-slot) > .track-viewfinder-slot {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  width: 100%;
+}
+
+.arrange:has(> .track-viewfinder-slot) > .timeline-add-spacer {
+  grid-column: 2;
+  grid-row: 1;
+  height: auto;
+  min-height: 100%;
+  max-height: none;
+  align-self: stretch;
+  flex: none;
+}
+
+.arrange:has(> .track-viewfinder-slot) > .heads-col,
+.arrange:has(> .track-viewfinder-slot) > .timeline-col {
+  min-height: 0;
+  height: 100%;
+}
+
+.arrange:has(> .track-viewfinder-slot) > .heads-col {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.arrange:has(> .track-viewfinder-slot) > .timeline-col {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.shell.fold .arrange {
+  overflow: hidden;
+}
+
+.shell.fold .arrange .heads,
+.shell:not(.phone) .arrange .heads {
+  overflow: hidden;
+  height: 100%;
+  min-height: 0;
+}
+
+.shell.fold .arrange .heads-scroll,
+.shell:not(.phone) .arrange .heads-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.shell.fold .arrange .timeline-scroll,
+.shell:not(.phone) .arrange .timeline-scroll {
+  overflow: auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.arrange .heads-scroll > .ruler-gap {
+  box-sizing: border-box;
+  height: var(--ruler-stack);
+  min-height: var(--ruler-stack);
+  max-height: var(--ruler-stack);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  flex: none;
+}
+
+.arrange .timeline-inner > .song-map {
+  box-sizing: border-box;
+  height: var(--map-h, 68px);
+  min-height: var(--map-h, 68px);
+  max-height: var(--map-h, 68px);
+  margin: 0;
+}
+
+.arrange .timeline-inner > .ruler {
+  box-sizing: border-box;
+  height: var(--ruler-h, 40px);
+  min-height: var(--ruler-h, 40px);
+  max-height: var(--ruler-h, 40px);
+  top: var(--map-h, 68px);
+  margin: 0;
+}
+
+.arrange .timeline-inner > .playhead-strip {
+  box-sizing: border-box;
+  height: var(--playhead-strip, 0px);
+  min-height: var(--playhead-strip, 0px);
+  max-height: var(--playhead-strip, 0px);
+  margin: 0;
+}
+
+.arrange .heads-scroll > .head,
+.arrange .timeline-inner > .lane {
+  box-sizing: border-box;
+  height: var(--lane-row);
+  min-height: var(--lane-row);
+  margin: 0;
+  flex: none;
+}
+
+/* Add Track follows the last header inside the same scroller as the lanes.
+   A matching spacer keeps the two scroll heights equal, so the button scrolls
+   away instead of covering Mute, Solo, and Arm when a sheet shortens the view. */
+.arrange {
+  --add-track-h: 44px;
+}
+
+.arrange .heads-scroll > .track-add,
+.arrange .timeline-inner > .column-tail {
+  box-sizing: border-box;
+  height: var(--add-track-h);
+  min-height: var(--add-track-h);
+  max-height: var(--add-track-h);
+  flex: none;
+}
+
+.arrange .timeline-inner > .column-tail {
+  pointer-events: none;
+}
+
+.shell.phone.land .column-tail {
+  display: none;
+  height: 0;
+  min-height: 0;
+  max-height: 0;
+}
+
+.shell.phone:not(.land) .arrange .heads {
+  overflow: hidden;
+}
+
+.shell.phone:not(.land) .arrange .heads-scroll {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  height: auto;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Wide phone shell: same portrait stack, slightly larger targets, a wider header, more timeline. */
+.shell.phone.phone-wide:not(.land) .arrange {
+  /* Taller than the phone on a tall Fold, still short enough that the demo tracks clear Add Track at 700px. */
+  --lane-h: clamp(96px, 12vh, 112px);
+  grid-template-columns: clamp(210px, 28vw, 300px) minmax(0, 1fr);
+}
+
+.shell.phone.phone-wide:not(.land) .arrange .heads-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.shell.phone.phone-wide:not(.land) .arrange .heads.heads {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+}
+
+.shell.phone.phone-wide:not(.land) .arrange .head,
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+}
+
+.shell.phone.phone-wide:not(.land) .phone-top .views > button,
+.shell.phone.phone-wide:not(.land) .phone-top .views > button.collab-tab,
+.shell.phone.phone-wide:not(.land) .phone-top .transport.simple .t-main .t-btn,
+.shell.phone.phone-wide:not(.land) .phone-tabs > button,
+.shell.phone.phone-wide:not(.land) .phone-hit,
+.shell.phone.phone-wide:not(.land) .track-add .add-track-btn {
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+}
+
+.shell.phone.phone-wide:not(.land) .phone-top .transport.simple .t-main.btn-tray,
+.shell.phone.phone-wide:not(.land) .phone-context.btn-tray {
+  gap: 4px;
+}
+
+.shell.phone.phone-wide:not(.land) .arrange {
+  --add-track-h: 52px;
+}
+
+.shell.phone.phone-wide:not(.land) .arrange .heads-scroll > .track-add,
+.shell.phone.phone-wide:not(.land) .arrange .track-add .add-track-btn {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Mute, Solo, Arm, and the track menu share the header column evenly. */
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  gap: 4px;
+}
+
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls > .mini,
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls > .track-more,
+.shell.phone.phone-wide:not(.land) .arrange .head .pl-head .track-controls > button {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  padding: 0 2px;
+}
+
+/* A zoomed lane is shorter than 44px of controls. Keep the buttons inside the lane. */
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-compact] .head .pl-head .track-controls > .mini,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-compact] .head .pl-head .track-controls > .track-more,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-compact] .head .pl-head .track-controls > button,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-scale="tight"] .head .pl-head .track-controls > .mini,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-scale="tight"] .head .pl-head .track-controls > .track-more,
+.shell.phone.phone-wide:not(.land) .arrange[data-lane-scale="tight"] .head .pl-head .track-controls > button {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}

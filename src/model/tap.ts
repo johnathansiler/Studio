@@ -30,8 +30,12 @@ export function emptyTap(whole = false): TapMemory {
   return { taps: [], whole, pointerAt: null, echoAt: null }
 }
 
+/** Typed, dragged, and stored song tempo. A tap still lands at 30–300 because its gap is 0.2–2s. */
+export const TEMPO_MIN = 20
+export const TEMPO_MAX = 300
+
 export function roundTempo(bpm: number, whole: boolean) {
-  const clamped = Math.min(300, Math.max(30, bpm))
+  const clamped = Math.min(TEMPO_MAX, Math.max(TEMPO_MIN, bpm))
   if (whole) return Math.round(clamped)
   return Math.round(clamped * 10) / 10
 }
@@ -93,7 +97,7 @@ export function noteTapRelease(memory: TapMemory, at: number): TapMemory {
  * different clock on some browsers, so every tap looked like a 2s gap.
  * BPM is 60 / the mean of the last 1–8 intervals (60000 / the mean in ms).
  * A gap over 2s starts over. An interval under 0.2s is a double trigger.
- * The result is rounded to 0.1 and clamped to 30–300.
+ * The result is rounded to 0.1. The interval window keeps a tap inside 30–300.
  */
 export function pushTap(memory: TapMemory, at: number, source: TapSource = 'pointer'): TapResult {
   const pointerAt = memory.pointerAt

@@ -17,6 +17,7 @@ import './ui/choiceTray.css'
 import './ui/mainMenu.css'
 import './ui/trackColumn.css'
 import './ui/equalGrid.css'
+import './ui/arrangeRows.css'
 
 scheduleWasmPreload()
 installPreloadReload()

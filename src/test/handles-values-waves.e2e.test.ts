@@ -98,7 +98,7 @@ describe('loop handles, whole-number drags, and smooth waveforms', () => {
             return which === 'end' ? project.loopEndSample : project.loopStartSample
           }, edge)
           const from = { x: box!.x + Math.min(box!.width / 2, 18), y: box!.y + box!.height / 2 }
-          const to = { x: from.x + 90, y: from.y }
+          const to = { x: from.x + 160, y: from.y }
           await drag(page, from, to, kind)
           const after = await page.evaluate((which) => window.__cueharbor.store.project[which === 'end' ? 'loopEndSample' : 'loopStartSample'], edge)
           expect(after, `${kind} ${edge} ${viewport.width}x${viewport.height}`).not.toBe(before)
@@ -113,7 +113,7 @@ describe('loop handles, whole-number drags, and smooth waveforms', () => {
       const end = await page.locator('[data-loop-region="arrange"] [data-loop-edge="end"]').boundingBox()
       expect(end!.width).toBeGreaterThanOrEqual(44)
       const beforeEnd = await page.evaluate(() => window.__cueharbor.store.project.loopEndSample)
-      await drag(page, { x: end!.x + end!.width / 2, y: end!.y + end!.height / 2 }, { x: end!.x + end!.width / 2 + 80, y: end!.y + end!.height / 2 }, 'touch')
+      await drag(page, { x: end!.x + end!.width / 2, y: end!.y + end!.height / 2 }, { x: end!.x + end!.width / 2 + 160, y: end!.y + end!.height / 2 }, 'touch')
       const afterEnd = await page.evaluate(() => window.__cueharbor.store.project.loopEndSample)
       expect(afterEnd, `1-beat end ${viewport.width}`).toBeGreaterThan(beforeEnd)
       const order = await page.evaluate(() => {

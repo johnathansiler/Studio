@@ -62,6 +62,8 @@ export function PlaylistBrowser({
   sheet?: boolean
 }) {
   const land = useLandscape()
+  /* A tall Fold is landscape in aspect but uses the portrait sheet. Only the short phone landscape parks the close control in the tab row. */
+  const sheetLand = land && (typeof window === 'undefined' || window.innerHeight <= 520)
   const project = store.project
   const opened = readBrowsePlace()
   const [query, setQuery] = useState(tab === 'clips' ? opened.clipText : opened.patternText)
@@ -269,7 +271,7 @@ export function PlaylistBrowser({
       {phone && (
         <header className="browser-sheet-title sheet-head">
           <strong data-browser-title={tab}>{SECTION_TITLE[tab]}</strong>
-          {!(sheet && land) && <SheetClose className="browser-close" onClick={onClose} />}
+          {!(sheet && sheetLand) && <SheetClose className="browser-close" onClick={onClose} />}
         </header>
       )}
       <div className="browser-tabs btn-tray">
@@ -280,7 +282,7 @@ export function PlaylistBrowser({
             </button>
           ))}
         </div>
-        {(!phone || (sheet && land)) && <SheetClose className="browser-close" onClick={onClose} />}
+        {(!phone || (sheet && sheetLand)) && <SheetClose className="browser-close" onClick={onClose} />}
       </div>
       {sheet ? <div className="bottom-sheet-body">{catalog}</div> : catalog}
     </aside>

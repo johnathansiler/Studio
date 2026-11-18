@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
-import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, type TapMemory, type TapSource } from '../model/tap'
+import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, TEMPO_MIN, TEMPO_MAX, type TapMemory, type TapSource } from '../model/tap'
+import { TEMPO_HOLD_MS, tempoEntryBpm, tempoEntryIssue } from '../model/tempoEntry'
 import { dragNumeric } from '../model/dragNumeric'
 import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
@@ -17,6 +18,7 @@ import { TRANSPORT_COPY, copyOf } from './chrome'
 import { ButtonTray } from './ButtonTray'
 import { DeleteTrackConfirm, applyTrackDelete, arrangeEditTarget } from './equalGrid'
 import { TipButton } from './Hint'
+import { TempoEntry } from './TempoEntry'
 import { armFinePress, markIntegerLand } from './integerTick'
 import './loopRegion.css'
 import './remoteFixes.css'
@@ -148,7 +150,12 @@ export function TransportBar({
   const tapping = useRef(false)
   const flashTimer = useRef(0)
   const [editingTempo, setEditingTempo] = useState(false)
+  const [entryError, setEntryError] = useState<string | null>(null)
   const editTimer = useRef(0)
+  const entryOpen = useRef(false)
+  const pendingClick = useRef<{ at: number } | null>(null)
+  const holdTimer = useRef(0)
+  const lastPointer = useRef('')
   const tempoWrap = useRef<HTMLDivElement>(null)
   const tempo = live ?? project.tempo
   const tempoCopy = copyOf(TRANSPORT_COPY, 'tempo')
@@ -247,6 +254,7 @@ export function TransportBar({
   useEffect(() => () => {
     window.clearTimeout(flashTimer.current)
     window.clearTimeout(editTimer.current)
+    window.clearTimeout(holdTimer.current)
     drag.current?.stopScroll?.()
     delete document.documentElement.dataset.tempoDrag
     store.endTempoGroup()
@@ -269,7 +277,7 @@ export function TransportBar({
       const fine = event.shiftKey
       const current = shown.current
       const deltaPx = (event.deltaY < 0 ? 1 : -1) * (fine ? 4 : 10)
-      const next = dragNumeric({ origin: current, deltaPx, min: 30, max: 300, fine, release: !fine })
+      const next = dragNumeric({ origin: current, deltaPx, min: TEMPO_MIN, max: TEMPO_MAX, fine, release: !fine })
       markIntegerLand(node, current, next)
       memory.current = emptyTap()
       publish(next, true)
@@ -284,9 +292,20 @@ export function TransportBar({
     delete document.documentElement.dataset.tempoDrag
   }
 
+  function clearHold() {
+    window.clearTimeout(holdTimer.current)
+    holdTimer.current = 0
+  }
+
   function onTempoDown(event: ReactPointerEvent, tap: boolean) {
     if (store.remoteFollow || event.button !== 0) return
+    if (entryOpen.current) {
+      closeEntry()
+      return
+    }
     endTempoScroll(drag.current)
+    clearHold()
+    lastPointer.current = event.pointerType
     const node = event.currentTarget
     const pointerId = event.pointerId
     const state = {
@@ -299,10 +318,19 @@ export function TransportBar({
       tap,
       fine: false,
       applied: false,
+      opened: false,
       stopScroll: null as (() => void) | null,
       cancelFine: (() => undefined) as () => void,
     }
     drag.current = state
+    holdTimer.current = window.setTimeout(() => {
+      if (drag.current !== state || state.mode !== 'pending') return
+      state.mode = 'ignore'
+      state.opened = true
+      state.cancelFine()
+      try { navigator.vibrate?.(10) } catch { /* this device has no haptic */ }
+      openEntry()
+    }, TEMPO_HOLD_MS)
     state.cancelFine = armFinePress(event.pointerType, () => {
       if (drag.current !== state || state.mode === 'ignore') return
       state.fine = true
@@ -317,6 +345,7 @@ export function TransportBar({
       if (state.mode === 'pending') {
         const intent = tempoDragIntent(dx, dy)
         if (intent === 'pending') return
+        clearHold()
         if (intent === 'scroll') {
           state.mode = 'ignore'
           state.cancelFine()
@@ -359,9 +388,17 @@ export function TransportBar({
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
       state.cancelFine()
+      clearHold()
       if (drag.current !== state) return
       drag.current = null
       endTempoScroll(state)
+      if (state.opened) {
+        if (ev.cancelable) ev.preventDefault()
+        const field = fieldRef.current
+        field?.focus()
+        field?.select()
+        return
+      }
       if (state.mode === 'drag') {
         if (ev.type === 'pointercancel') publish(state.origin, true)
         else {
@@ -376,6 +413,10 @@ export function TransportBar({
         return
       }
       if (ev.type === 'pointercancel' || state.mode === 'ignore' || !state.tap) return
+      if (ev.pointerType === 'mouse') {
+        pendingClick.current = { at: state.at }
+        return
+      }
       pulse()
       armExactTempo(applyTap(state.at, 'pointer'))
       memory.current = noteTapRelease(memory.current, performance.now())
@@ -390,19 +431,71 @@ export function TransportBar({
     }
   }
 
-  function commitDraft(text: string) {
-    if (tapping.current || drag.current?.mode === 'drag' || suppressFocus.current) return
+  function closeEntry() {
+    entryOpen.current = false
+    pendingClick.current = null
     draftRef.current = null
     setDraft(null)
-    const trimmed = text.trim()
-    if (!trimmed) return
-    const value = Number(trimmed)
-    if (!Number.isFinite(value)) return
-    const next = roundTempo(value, false)
-    if (next === store.project.tempo && next === shown.current) return
+    setEntryError(null)
+    setEditingTempo(false)
+  }
+
+  function openEntry() {
+    if (store.remoteFollow) return
+    window.clearTimeout(editTimer.current)
+    if (entryOpen.current) {
+      const field = fieldRef.current
+      field?.focus()
+      field?.select()
+      return
+    }
+    memory.current = emptyTap()
+    draftRef.current = null
+    entryOpen.current = true
+    flushSync(() => {
+      setDraft(null)
+      setEntryError(null)
+      setEditingTempo(true)
+    })
+    const field = fieldRef.current
+    field?.focus()
+    field?.select()
+  }
+
+  function applyTyped(text: string) {
+    const bpm = tempoEntryBpm(text)
+    if (bpm == null) {
+      setEntryError(tempoEntryIssue(text) ?? 'Use a tempo from 20 to 300')
+      fieldRef.current?.focus()
+      return
+    }
     memory.current = emptyTap()
     store.endTempoGroup()
-    publish(value, false)
+    publish(bpm, false)
+    entryOpen.current = false
+    setEntryError(null)
+    setEditingTempo(false)
+  }
+
+  function onTempoClick(event: { detail: number; preventDefault: () => void }) {
+    if (entryOpen.current) {
+      event.preventDefault()
+      const field = fieldRef.current
+      field?.focus()
+      field?.select()
+      return
+    }
+    if (event.detail >= 2 && lastPointer.current === 'mouse') {
+      pendingClick.current = null
+      openEntry()
+      return
+    }
+    const pending = pendingClick.current
+    pendingClick.current = null
+    if (!pending) return
+    pulse()
+    armExactTempo(applyTap(pending.at, 'pointer'))
+    memory.current = noteTapRelease(memory.current, performance.now())
   }
 
   const running = status === 'playing' || status === 'recording' || status === 'counting-in'
@@ -415,61 +508,19 @@ export function TransportBar({
   void session
   function armExactTempo(result: { bpm: number | null; ignored: boolean } | null) {
     window.clearTimeout(editTimer.current)
-    if (!shouldOpenExactTempo(result) || store.remoteFollow) return
-    editTimer.current = window.setTimeout(() => setEditingTempo(true), 1500)
+    if (!shouldOpenExactTempo(result) || store.remoteFollow || entryOpen.current) return
+    editTimer.current = window.setTimeout(() => openEntry(), 1500)
   }
-  const tempoLabel = `Tap Tempo. ${formatTempo(tempo)} BPM. Tap to set tempo. Drag up or down to change the tempo. Pause after one tap to type an exact tempo.`
-  const tempoField = editingTempo ? (
-        <label className="t-btn bpm-readout tempo-edit">
-          <span className="tempo-kicker">Tap</span>
-          <input
-          ref={fieldRef}
-          className="tempo-figure"
-          type="number"
-          inputMode="decimal"
-          min={30}
-          max={300}
-          step={0.1}
-          title={tempoCopy.hint}
-          aria-label={`${tempoCopy.label}. Type an exact tempo.`}
-          disabled={store.remoteFollow}
-          value={draft ?? formatTempo(tempo)}
-          onFocus={(event) => {
-            if (suppressFocus.current) {
-              event.currentTarget.blur()
-              return
-            }
-            draftRef.current = event.currentTarget.value
-            setDraft(event.currentTarget.value)
-            event.currentTarget.select()
-          }}
-          onChange={(event) => {
-            draftRef.current = event.currentTarget.value
-            setDraft(event.currentTarget.value)
-          }}
-          onBlur={(event) => {
-            commitDraft(event.currentTarget.value)
-            setEditingTempo(false)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.currentTarget.blur()
-              return
-            }
-            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-            event.preventDefault()
-            const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowUp' ? 1 : -1)
-            bump(delta)
-          }}
-          onPointerDown={(event) => onTempoDown(event, false)}
-        />
-        </label>
-  ) : (
+  const tempoLabel = `Tap Tempo. ${formatTempo(tempo)} BPM. Tap to set tempo. Drag up or down to change the tempo. Hold or double-click to type an exact tempo.`
+  const tempoText = draft ?? formatTempo(tempo)
+  const tempoField = (
         <button
           type="button"
           className={`t-btn bpm-readout tempo-tap${flash ? ' flash' : ''}`}
-          title="Tap to set tempo. Drag up or down to change it. Pause after one tap to type an exact tempo."
+          title={tempoCopy.hint}
           aria-label={tempoLabel}
+          aria-expanded={editingTempo}
+          aria-haspopup="dialog"
           disabled={store.remoteFollow}
           onKeyDown={(event) => {
             if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
@@ -478,6 +529,14 @@ export function TransportBar({
             bump(delta)
           }}
           onPointerDown={(event) => onTempoDown(event, true)}
+          onClick={onTempoClick}
+          onDoubleClick={(event) => {
+            if (lastPointer.current !== 'mouse') return
+            event.preventDefault()
+            pendingClick.current = null
+            openEntry()
+          }}
+          onContextMenu={(event) => event.preventDefault()}
         >
           <span className="tempo-kicker">Tap</span>
           <span className="tempo-figure">{formatTempo(tempo)}</span>
@@ -576,7 +635,26 @@ export function TransportBar({
         <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
           {phone ? <TransportGlyph id="record" /> : <span className="t-word">Record</span>}
         </TipButton>
-        <div className="tempo-cluster" role="group" aria-label="Tap Tempo" ref={tempoWrap}>{tempoField}</div>
+        <div className="tempo-cluster" role="group" aria-label="Tap Tempo" ref={tempoWrap}>
+          {tempoField}
+          {editingTempo ? (
+            <TempoEntry
+              anchorRef={tempoWrap}
+              value={tempoText}
+              error={entryError}
+              disabled={store.remoteFollow}
+              inputRef={fieldRef}
+              onChange={(value) => {
+                draftRef.current = value
+                setDraft(value)
+                setEntryError(tempoEntryIssue(value))
+              }}
+              onApply={applyTyped}
+              onDismiss={closeEntry}
+              onBump={bump}
+            />
+          ) : null}
+        </div>
       </ButtonTray>
       {extrasHost ? createPortal(extras, extrasHost) : extras}
       {contextualDelete}

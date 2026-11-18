@@ -11,7 +11,7 @@ describe('tempo drag', () => {
     expect(tempoDragIntent(-(TEMPO_DRAG_SLOP + 4), 2)).toBe('scroll')
   })
 
-  it('raises tempo when the finger moves up and clamps to 30–300', () => {
+  it('raises tempo when the finger moves up and clamps to 20–300', () => {
     expect(tempoFromDrag(120, 30)).toBe(123)
     expect(tempoFromDrag(120, -20)).toBe(118)
     expect(tempoFromDrag(120, 8)).toBe(121)
@@ -20,7 +20,7 @@ describe('tempo drag', () => {
     expect(tempoFromDrag(120, 24, undefined, true, true)).toBeCloseTo(120.6)
     expect(tempoFromDrag(120, 8, undefined, true)).toBe(120.2)
     expect(tempoFromDrag(120, 10000)).toBe(300)
-    expect(tempoFromDrag(40, -10000)).toBe(30)
+    expect(tempoFromDrag(40, -10000)).toBe(20)
   })
 
   it('groups a drag into one undo and drops a cancelled drag that returns to the start', () => {

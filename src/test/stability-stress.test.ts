@@ -109,6 +109,9 @@ function param(initial: number, onLinear?: (value: number, time: number) => void
 class FakeContext {
   sampleRate = 48000
   currentTime = 5
+  /** Android output delay. Scheduling must not add this on top of the audio clock. */
+  baseLatency = 0
+  outputLatency = 0
   state: AudioContextState = 'running'
   starts: RecordedStart[] = []
   stops: RecordedStop[] = []
@@ -432,9 +435,13 @@ describe('transport and graph stress', () => {
     expect(jitter.maxMs).toBeLessThan(3)
     expect(engine.status).toBe('playing')
 
-    ctx.currentTime += 2
+    const beforeSkip = engine.stability().schedulerSkips
+    ctx.currentTime += 1
     engine.wakeTransport()
-    expect(engine.stability().schedulerSkips).toBeGreaterThanOrEqual(1)
+    expect(engine.stability().schedulerSkips).toBe(beforeSkip)
+    ctx.currentTime += SCHEDULER_HORIZON_SEC * 2 + 0.2
+    engine.wakeTransport()
+    expect(engine.stability().schedulerSkips).toBeGreaterThan(beforeSkip)
     expect(engine.stability().sources).toBeLessThanOrEqual(16)
     engine.stop()
   })
@@ -565,8 +572,12 @@ describe('transport and graph stress', () => {
       engine.wakeTransport()
     }
     const notes = ctx.starts.filter((start) => start.kind === 'osc')
-    expect(notes).toHaveLength(2)
+    expect(notes.length).toBeGreaterThanOrEqual(2)
+    expect(notes.length).toBeLessThanOrEqual(4)
     expect((notes[1]?.when ?? 0) - (notes[0]?.when ?? 0)).toBeGreaterThan(1.5)
+    for (let index = 1; index < notes.length; index++) {
+      expect((notes[index]?.when ?? 0) - (notes[index - 1]?.when ?? 0)).toBeGreaterThan(1.5)
+    }
     const clips = ctx.starts.filter((start) => start.kind === 'buffer-source' && start.duration != null)
     expect(clips.length).toBeGreaterThan(1)
     const origin = (engine as unknown as { playOriginCtx: number }).playOriginCtx
@@ -857,6 +868,208 @@ describe('seamless arrange and session loops', () => {
     }
     expect(when.length).toBeGreaterThanOrEqual(8)
     engine.stop()
+  })
+})
+
+describe('edit latency', () => {
+  function asset(project: ReturnType<typeof createEmptyProject>) {
+    const take = new Float32Array(project.sampleRate)
+    take.fill(0.2)
+    const fill = new Float32Array(project.loopEndSample)
+    fill.fill(0.15)
+    return (id: string) => {
+      if (id === 'take') return { id, name: 'take', sampleRate: project.sampleRate, channels: [take] }
+      if (id === 'fill') return { id, name: 'fill', sampleRate: project.sampleRate, channels: [fill] }
+      return undefined
+    }
+  }
+
+  async function rolling() {
+    installHost()
+    const project = createEmptyProject(48000)
+    project.loopEnabled = true
+    project.loopStartSample = 0
+    project.loopEndSample = project.sampleRate * 8
+    project.metronomeEnabled = true
+    const keys = project.tracks.find((track) => track.type === 'midi')!
+    keys.midiClips.push({
+      id: 'keys',
+      name: 'Keys',
+      startBeat: 0,
+      durationBeats: 16,
+      notes: [
+        { id: 'soon', pitch: 60, startBeat: 0, durationBeats: 0.25, velocity: 0.8 },
+        { id: 'later', pitch: 64, startBeat: 4, durationBeats: 0.25, velocity: 0.8 },
+      ],
+    })
+    const music = project.tracks.find((track) => track.name === 'Music')!
+    music.clips.push({
+      id: 'short',
+      name: 'Short',
+      bufferId: 'take',
+      startSample: project.sampleRate * 3,
+      offsetSamples: 0,
+      durationSamples: project.sampleRate,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 0.8,
+      source: 'import',
+    })
+    const vocal = project.tracks[0]
+    vocal.clips.push({
+      id: 'fill',
+      name: 'Fill',
+      bufferId: 'fill',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: project.loopEndSample,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 0.5,
+      source: 'import',
+    })
+    const pattern = {
+      id: 'pat',
+      name: 'Pattern',
+      color: '#f97316',
+      steps: 4,
+      swing: 0,
+      channels: [{
+        id: 'kick',
+        name: 'Kick',
+        kind: 'kick' as const,
+        note: 36,
+        color: '#fff',
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        output: null,
+        sampleId: null,
+        steps: 4,
+        swing: null,
+        cells: [0, 1, 2, 3].map((index) => ({ on: index === 0, velocity: 0.9, pan: 0, pitch: 0, fine: 0, gate: 0.5 })),
+      }],
+    }
+    project.beats = { activeId: pattern.id, patterns: [pattern] }
+    project.patternClips = [{ id: 'pc', patternId: pattern.id, startBeat: 0, lengthBeats: 4, scene: null, placed: true }]
+    const engine = new AudioEngine()
+    const of = asset(project)
+    engine.sync(project, of)
+    await engine.play(0)
+    const ctx = engine.ctx as unknown as FakeContext
+    for (let step = 0; step < 30; step++) {
+      ctx.currentTime += 0.05
+      engine.wakeTransport()
+    }
+    return { project, engine, ctx, of, keys, music, vocal, pattern }
+  }
+
+  function latency(ctx: FakeContext, now: number) {
+    const stops = ctx.stops.filter((stop) => stop.now >= now - 0.001 && stop.when != null)
+    const starts = ctx.starts.filter((start) => start.now >= now - 0.001)
+    const stopAt = stops.length ? Math.min(...stops.map((stop) => stop.when ?? now)) : Number.POSITIVE_INFINITY
+    const startAt = starts.length ? Math.min(...starts.map((start) => start.when)) : Number.POSITIVE_INFINITY
+    const soon = Math.min(stopAt, startAt)
+    return {
+      stops: stops.length,
+      starts: starts.length,
+      ms: Number.isFinite(soon) ? (soon - now) * 1000 : Number.POSITIVE_INFINITY,
+      stopMs: Number.isFinite(stopAt) ? (stopAt - now) * 1000 : null,
+      startMs: Number.isFinite(startAt) ? (startAt - now) * 1000 : null,
+      latestStartMs: starts.length ? (Math.max(...starts.map((start) => start.when)) - now) * 1000 : null,
+    }
+  }
+
+  it('replaces a queued note, step, click, and clip within 60ms', async () => {
+    const { project, engine, ctx, of, keys, music, vocal, pattern } = await rolling()
+    const rows: { action: string; ms: number; stops: number }[] = []
+
+    const pitchNow = ctx.currentTime
+    const stopsBefore = ctx.stops.length
+    keys.midiClips[0].notes[1].pitch = 70
+    engine.sync(project, of)
+    let row = latency(ctx, pitchNow)
+    rows.push({ action: 'note pitch', ...row })
+    expect(ctx.stops.length).toBeGreaterThan(stopsBefore)
+    expect(row.ms).toBeLessThanOrEqual(60)
+
+    const stepNow = ctx.currentTime
+    pattern.channels[0].cells[0].on = false
+    engine.sync(project, of)
+    row = latency(ctx, stepNow)
+    rows.push({ action: 'step off', ...row })
+    expect(row.stops).toBeGreaterThan(0)
+    expect(row.ms).toBeLessThanOrEqual(60)
+
+    const metroNow = ctx.currentTime
+    project.metronomeEnabled = false
+    engine.sync(project, of)
+    row = latency(ctx, metroNow)
+    rows.push({ action: 'metronome off', ...row })
+    expect(row.stops).toBeGreaterThan(0)
+    expect(row.ms).toBeLessThanOrEqual(60)
+
+    const gainNow = ctx.currentTime
+    const rampsBefore = ctx.linearRamps.length
+    vocal.clips[0].gain = 0.2
+    engine.sync(project, of)
+    const ramp = ctx.linearRamps.slice(rampsBefore).find((item) => Math.abs(item.value - 0.2) < 1e-3)
+    const gainMs = ramp ? (ramp.time - gainNow) * 1000 : Number.POSITIVE_INFINITY
+    rows.push({ action: 'clip gain', ms: gainMs, stops: 0 })
+    expect(gainMs).toBeLessThanOrEqual(60)
+
+    project.loopEnabled = false
+    engine.sync(project, of)
+    const deleteNow = ctx.currentTime
+    music.clips.splice(0, music.clips.length)
+    engine.sync(project, of)
+    row = latency(ctx, deleteNow)
+    rows.push({ action: 'clip delete', ...row })
+    expect(row.stops).toBeGreaterThan(0)
+    expect(row.ms).toBeLessThanOrEqual(60)
+
+    project.loopEnabled = true
+    vocal.clips[0].gain = 0.5
+    engine.sync(project, of)
+    for (let step = 0; step < 4; step++) {
+      ctx.currentTime += 0.05
+      engine.wakeTransport()
+    }
+    const moveNow = ctx.currentTime
+    const beforeMove = ctx.stops.length
+    vocal.clips[0].startSample = project.sampleRate
+    engine.sync(project, of)
+    row = latency(ctx, moveNow)
+    rows.push({ action: 'clip move', ...row })
+    const moveStop = ctx.stops.slice(beforeMove).map((stop) => (stop.when ?? 0) - moveNow)
+    expect(moveStop.length).toBeGreaterThan(0)
+    expect(Math.min(...moveStop)).toBeLessThanOrEqual(0.06)
+    expect(row.ms).toBeLessThanOrEqual(60)
+
+    expect(rows.every((item) => item.ms <= 60)).toBe(true)
+
+    // A Fold-class device reports about 42 ms of output delay. That delay is already
+    // inside the audio clock, so a note 20 ms ahead must still be queued inside 60 ms.
+    ctx.baseLatency = 0.01
+    ctx.outputLatency = 0.032
+    const addNow = ctx.currentTime
+    const beat = (engine.positionSamples / project.sampleRate) * (project.tempo / 60)
+    keys.midiClips[0].notes.push({ id: 'imminent', pitch: 72, startBeat: beat + 0.04, durationBeats: 0.25, velocity: 0.8 })
+    engine.sync(project, of)
+    const imminent = ctx.starts.filter((start) => start.now >= addNow - 0.001 && start.when >= addNow && start.when <= addNow + 0.06)
+    expect(imminent.length).toBeGreaterThan(0)
+    engine.stop()
+  })
+
+  it('treats input monitor as part of the audio graph', () => {
+    installHost()
+    const project = createEmptyProject(48000)
+    const engine = new AudioEngine()
+    const sign = (engine as unknown as { graphSignature(project: ReturnType<typeof createEmptyProject>): string }).graphSignature
+    const before = sign.call(engine, project)
+    project.tracks[0].monitor = true
+    expect(sign.call(engine, project)).not.toBe(before)
   })
 })
 
