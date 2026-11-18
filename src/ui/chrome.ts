@@ -21,12 +21,11 @@ export const VIEW_COPY: Copy[] = [
   { id: 'arrange', label: 'Arrange', hint: 'Clips on a timeline. The tools above change what a tap does.' },
   { id: 'mix', label: 'Mix', hint: 'Level, pan, and effects for each track.' },
   ...(__CUEHARBOR_SESSION__ ? [SESSION_VIEW] : []),
-  { id: 'collab', label: 'Collab', hint: 'Call, video, and remote recording. Stays closed until you open this tab.' },
 ]
 
-/** Tabs beside Collab. Collab itself is the first tab in the bar. Session returns with FEATURES.session. */
+/** Arrange and Mix. Menu is the first segment, drawn by the switcher. Session returns with FEATURES.session. */
 export function studioViewTabs(): Copy[] {
-  return VIEW_COPY.filter((item) => item.id !== 'collab' && (FEATURES.session || item.id !== 'session'))
+  return VIEW_COPY.filter((item) => FEATURES.session || item.id !== 'session')
 }
 
 export const TRANSPORT_COPY: Copy[] = [

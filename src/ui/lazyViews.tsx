@@ -127,7 +127,6 @@ export const ProjectSheet = retryable(moduleView(() => import('./ProjectSheet'),
 export const QuantizeSheet = retryable(moduleView(() => import('./QuantizeSheet'), 'QuantizeSheet'), 'Quantize', 'sheet-pending')
 export const PatchSheet = retryable(moduleView(() => import('./PatchSheet'), 'PatchSheet'), 'Patch', 'sheet-pending')
 export const PerformPop = retryable(moduleView(() => import('./PerformPop'), 'PerformPop'), 'Perform', 'sheet-pending')
-export const VideoDock = retryable(moduleView(() => import('./VideoDock'), 'VideoDock'), 'Collab', 'collab-pending')
 export const ShellBrowser = retryable(moduleView(() => import('./PlaylistBrowser'), 'ShellBrowser'), 'Browse', 'playlist-browser')
 export const PlaylistBrowser = retryable(moduleView(() => import('./PlaylistBrowser'), 'PlaylistBrowser'), 'Browse', 'playlist-browser')
 export const TunerPop = retryable(moduleView(() => import('./AmpPop'), 'TunerPop'), 'Tuner', 'sheet-pending')
@@ -153,7 +152,6 @@ const loads: Record<string, () => Promise<unknown>> = {
   quantize: () => import('./QuantizeSheet'),
   patch: () => import('./PatchSheet'),
   perform: () => import('./PerformPop'),
-  collab: () => import('./VideoDock'),
   browse: () => import('./PlaylistBrowser'),
   tune: () => import('./AmpPop'),
 }
@@ -171,7 +169,7 @@ export function preloadView(id: string) {
 
 /** Views a phone is likely to open after Arrange. */
 export function preloadStudioIdle() {
-  for (const id of ['mix', 'menu', 'pads', 'session', 'plugins', 'piano', 'wave', 'keys', 'browse', 'collab', 'steps', 'export', 'projects']) {
+  for (const id of ['mix', 'menu', 'pads', 'session', 'plugins', 'piano', 'wave', 'keys', 'browse', 'steps', 'export', 'projects']) {
     preloadView(id)
   }
 }

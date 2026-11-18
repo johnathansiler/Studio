@@ -1,6 +1,7 @@
 import { resampleSinc } from '../quality/resample'
 import { clipHasWaveBody } from '../wave/edit'
 import { cachedWaveBody } from '../wave/render'
+import { clipTempoMode, lockedTimelineSamples, projectBeatSpan } from '../../model/clipTempo'
 import { beatAtSample, samplesAtBeat, tempoMapOf } from '../../model/tempoMap'
 import { phaseStretch } from './phase'
 import { Psola } from './voice'
@@ -168,11 +169,18 @@ export function clipNeedsStretch(clip: AudioClip, project: Project) {
 export function timelineSamples(clip: AudioClip, project: Project) {
   const stretch = clip.stretch
   const source = sourceSamplesOf(clip)
-  if (stretch?.followTempo && stretch.sourceBpm && stretch.sourceBpm > 0) {
+  const sourceBpm = stretch?.sourceBpm
+  const mode = clipTempoMode(stretch)
+  if (mode === 'lock' && sourceBpm && sourceBpm > 0) {
+    const target = stretch?.lockBpm && stretch.lockBpm > 0 ? stretch.lockBpm : sourceBpm
+    return lockedTimelineSamples(source, sourceBpm, target)
+  }
+  if ((mode === 'follow' || mode === 'half' || mode === 'double') && sourceBpm && sourceBpm > 0) {
     const map = tempoMapOf(project.tempo, project.tempoMap, project.automation)
     const startBeat = samplesToBeat(clip.startSample, project.sampleRate, project.tempo, map)
-    const sourceBeats = source / ((project.sampleRate * 60) / stretch.sourceBpm)
-    const end = samplesAtBeat(startBeat + sourceBeats, project.sampleRate, project.tempo, map)
+    const sourceBeats = source / ((project.sampleRate * 60) / sourceBpm)
+    const span = projectBeatSpan(sourceBeats, mode)
+    const end = samplesAtBeat(startBeat + span, project.sampleRate, project.tempo, map)
     const start = samplesAtBeat(startBeat, project.sampleRate, project.tempo, map)
     return Math.max(1, Math.round(end - start))
   }
@@ -262,10 +270,12 @@ function clipSegments(channel: Float32Array, outLen: number, clip: AudioClip, pr
   const sourceLen = channel.length
   const map = tempoMapOf(project.tempo, project.tempoMap, project.automation)
   const startBeat = samplesToBeat(clip.startSample, project.sampleRate, project.tempo, map)
-  if (stretch.followTempo && stretch.sourceBpm && stretch.sourceBpm > 0) {
-    const beats = sourceLen / ((project.sampleRate * 60) / stretch.sourceBpm)
+  const tempoMode = clipTempoMode(stretch)
+  if ((tempoMode === 'follow' || tempoMode === 'half' || tempoMode === 'double') && stretch.sourceBpm && stretch.sourceBpm > 0) {
+    const sourceBeats = sourceLen / ((project.sampleRate * 60) / stretch.sourceBpm)
+    const span = projectBeatSpan(sourceBeats, tempoMode)
     const hits = stretch.mode === 'beats' ? detectTransients(channel, project.sampleRate, 0.2) : []
-    return followSegments(sourceLen, beats, startBeat, project.sampleRate, project.tempo, map, hits)
+    return followSegments(sourceLen, span, startBeat, project.sampleRate, project.tempo, map, hits)
   }
   if (markersDeviate(clip, project) && stretch.markers.length >= 2) {
     const points = [{ source: 0, target: 0 }, ...stretch.markers, { source: sourceLen, target: beatsOf(outLen, startBeat, project) }]
@@ -282,21 +292,21 @@ function beatsOf(outLen: number, startBeat: number, project: Project) {
 
 function followSegments(
   sourceLen: number,
-  sourceBeats: number,
+  spanBeats: number,
   startBeat: number,
   sampleRate: number,
   tempo: number,
   map: TempoPoint[],
   extraSources: number[],
 ): Segment[] {
-  const beats = new Set<number>([0, sourceBeats])
+  const beats = new Set<number>([0, spanBeats])
   for (const point of map) {
     const local = point.beat - startBeat
-    if (local > 0 && local < sourceBeats) beats.add(local)
+    if (local > 0 && local < spanBeats) beats.add(local)
   }
   for (const source of extraSources) {
-    const local = (source / sourceLen) * sourceBeats
-    if (local > 0 && local < sourceBeats) beats.add(local)
+    const local = (source / sourceLen) * spanBeats
+    if (local > 0 && local < spanBeats) beats.add(local)
   }
   const ordered = [...beats].sort((a, b) => a - b)
   const segments: Segment[] = []
@@ -304,8 +314,8 @@ function followSegments(
     const b0 = ordered[i]
     const b1 = ordered[i + 1]
     segments.push({
-      src0: Math.round((b0 / sourceBeats) * sourceLen),
-      src1: Math.round((b1 / sourceBeats) * sourceLen),
+      src0: Math.round((b0 / spanBeats) * sourceLen),
+      src1: Math.round((b1 / spanBeats) * sourceLen),
       out0: Math.round(samplesAtBeat(startBeat + b0, sampleRate, tempo, map) - samplesAtBeat(startBeat, sampleRate, tempo, map)),
       out1: Math.round(samplesAtBeat(startBeat + b1, sampleRate, tempo, map) - samplesAtBeat(startBeat, sampleRate, tempo, map)),
     })
@@ -752,6 +762,7 @@ export function stretchEdge(clip: AudioClip, edge: 'start' | 'end', sample: numb
       ...stretch,
       sourceSamples: source,
       followTempo: false,
+      tempoMode: undefined,
       markers: stretch.markers.map((marker) => ({ ...marker, target: marker.target * scale })),
     },
   }

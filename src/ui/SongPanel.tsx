@@ -2,6 +2,7 @@ import { useState, type RefObject } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import type { SessionClient } from '../remote/session'
 import type { ProjectStore } from '../state/store'
+import { AudioReadout } from './AudioReadout'
 import { AutomationModeBar } from './AutomationLane'
 import { EqualGrid } from './equalGrid'
 import { TRANSPORT_COPY, copyOf } from './chrome'
@@ -60,6 +61,7 @@ export function SongPanel({
 
   return (
       <div className="song-sheet">
+        <AudioReadout report={() => (typeof engine.audioReport === 'function' ? engine.audioReport() : 'Context not open.')} />
         <EqualGrid cols={2} className="setup-actions" label="Punch and reset">
           <RecordBar
             dock

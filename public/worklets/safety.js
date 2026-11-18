@@ -8,6 +8,7 @@ const LOOK = 32
 const ATTACK = 8
 const RELEASE_SEC = 0.05
 const CEILING = 1
+const PASS = 0.45
 const SLACK = 1.0005
 const FACTOR = 16
 const PHASE_TAPS = 20
@@ -96,6 +97,22 @@ class SafetyProcessor extends AudioWorkletProcessor {
     const frames = output[0].length
     const inL = input[0]
     const inR = input[1] || inL
+    if (this.gain === 1 && this.target === 1 && blockUnderPass(inL, inR, frames, this.delayL, this.delayR, this.peaks)) {
+      for (let i = 0; i < frames; i++) {
+        const left = finite(inL ? inL[i] : 0)
+        const right = finite(inR ? inR[i] : left)
+        const slot = this.index % LOOK
+        output[0][i] = this.delayL[slot]
+        if (output[1]) output[1][i] = this.delayR[slot]
+        this.delayL[slot] = left
+        this.delayR[slot] = right
+        const absL = left < 0 ? -left : left
+        const absR = right < 0 ? -right : right
+        this.peaks[slot] = absL > absR ? absL : absR
+        this.index += 1
+      }
+      return true
+    }
     for (let i = 0; i < frames; i++) {
       const left = finite(inL ? inL[i] : 0)
       const right = finite(inR ? inR[i] : left)
@@ -134,6 +151,20 @@ class SafetyProcessor extends AudioWorkletProcessor {
 
 function finite(sample) {
   return typeof sample === 'number' && Number.isFinite(sample) ? sample : 0
+}
+
+function blockUnderPass(inL, inR, frames, delayL, delayR, peaks) {
+  for (let i = 0; i < frames; i++) {
+    const left = finite(inL ? inL[i] : 0)
+    const right = finite(inR ? inR[i] : left)
+    if ((left < 0 ? -left : left) > PASS || (right < 0 ? -right : right) > PASS) return false
+  }
+  for (let k = 0; k < delayL.length; k++) {
+    const l = delayL[k]
+    const r = delayR[k]
+    if ((l < 0 ? -l : l) > PASS || (r < 0 ? -r : r) > PASS || peaks[k] > PASS) return false
+  }
+  return true
 }
 
 registerProcessor('cueharbor-safety', SafetyProcessor)

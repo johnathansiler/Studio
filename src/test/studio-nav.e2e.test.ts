@@ -42,27 +42,31 @@ describe('studio navigation', () => {
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
         const tabs = await page.locator('.views button').evaluateAll((nodes) => nodes.map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim()))
-        expect(tabs).toEqual(['Collab', 'Arrange', 'Mix'])
+        expect(tabs).toEqual(['Menu', 'Arrange', 'Mix'])
         if (viewport.width <= 520) {
           const place = await page.evaluate(() => {
-            const slot = document.querySelector('.tool-slot')!.getBoundingClientRect()
-            const menu = document.querySelector('.menu-btn')!.getBoundingClientRect()
-            const browser = document.querySelector('[data-phone-tab="browse"]')!.getBoundingClientRect()
+            const views = document.querySelector('.views')!.getBoundingClientRect()
+            const menu = document.querySelector('.views .menu-btn')!.getBoundingClientRect()
+            const arrange = [...document.querySelectorAll('.views button')].find((node) => (node.textContent || '').includes('Arrange'))!.getBoundingClientRect()
+            const ideas = document.querySelector('[data-phone-tab="ideas"]')!.getBoundingClientRect()
             return {
               menuLeft: menu.left,
-              browserLeft: browser.left,
+              arrangeLeft: arrange.left,
               menuHeight: menu.height,
               menuWidth: menu.width,
-              inSlot: menu.top >= slot.top - 2 && menu.bottom <= slot.bottom + 2,
+              inViews: menu.top >= views.top - 2 && menu.bottom <= views.bottom + 2,
+              ideasWidth: ideas.width,
               topName: !!document.querySelector('.topbar .project-name'),
+              collab: !!document.querySelector('[data-collab-panel="open"], .collab-tab'),
             }
           })
           expect(place.topName).toBe(false)
-          expect(place.inSlot).toBe(true)
-          expect(place.menuLeft).toBeLessThan(place.browserLeft)
-          expect(place.menuHeight).toBeGreaterThanOrEqual(40)
-          expect(place.menuWidth).toBeGreaterThanOrEqual(40)
-          await page.locator('.menu-btn').click()
+          expect(place.inViews).toBe(true)
+          expect(place.collab).toBe(false)
+          expect(place.menuLeft).toBeLessThan(place.arrangeLeft)
+          expect(place.menuHeight).toBeGreaterThanOrEqual(36)
+          expect(place.ideasWidth).toBeGreaterThanOrEqual(40)
+          await page.locator('.views .menu-btn').click()
           await page.getByRole('textbox', { name: 'Project name' }).waitFor()
         } else {
           const place = await page.evaluate(() => {

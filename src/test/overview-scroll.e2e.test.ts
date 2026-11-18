@@ -304,7 +304,7 @@ describe('timeline overview and loop handles', () => {
     expect(box!.height).toBeLessThanOrEqual(rulerH + 1)
     const client = await page.context().newCDPSession(page)
     const from = { x: box!.x + box!.width - 8, y: box!.y + box!.height / 2 }
-    const to = { x: from.x - 70, y: from.y }
+    const to = { x: from.x - 160, y: from.y }
     const point = (x: number, y: number) => [{ x: Math.round(x), y: Math.round(y), id: 1 }]
     await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(from.x, from.y) })
     for (let step = 1; step <= 6; step++) {
@@ -346,9 +346,9 @@ describe('timeline overview and loop handles', () => {
         const phone = document.querySelector('.shell.phone') != null
         return {
           phone,
-          menu: boxOf(phone ? '[data-phone-tab="menu"]' : '.menu-btn'),
-          browse: boxOf(phone ? '[data-phone-tab="browse"]' : '.arrange-panels .cap-btn'),
-          tools: boxOf(phone ? '[data-phone-tab="tools"]' : '.tool-slot'),
+          menu: boxOf('.views .menu-btn'),
+          browse: boxOf('[data-phone-tab="browse"]'),
+          tools: boxOf('[data-phone-tab="tools"]'),
         }
       })
       expect(chrome.menu?.onScreen, `${viewport.width} menu`).toBe(true)
@@ -391,7 +391,7 @@ describe('timeline overview and loop handles', () => {
       })
       const box = await page.locator('[data-loop-region="arrange"] [data-loop-edge="end"]').boundingBox()
       const from = { x: box!.x + box!.width - 8, y: box!.y + box!.height / 2 }
-      const to = { x: from.x - 90, y: from.y }
+      const to = { x: from.x - 160, y: from.y }
       if (viewport.touch) {
         const client = await page.context().newCDPSession(page)
         const point = (x: number, y: number) => [{ x: Math.round(x), y: Math.round(y), id: 1 }]

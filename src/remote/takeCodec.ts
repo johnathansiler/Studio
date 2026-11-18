@@ -383,6 +383,8 @@ async function encodeOpusMediaRecorder(channels: Float32Array[], sampleRate: num
     mime = ''
   }
   if (!mime) return null
+  // Opus wants 48 kHz. That is also the Android speaker rate, so this
+  // short-lived context does not ask the HAL to resample from 44100.
   const ctx = new g.AudioContext({ sampleRate: 48000 })
   try {
     const buffer = ctx.createBuffer(prepared.channels.length, prepared.channels[0].length, 48000)

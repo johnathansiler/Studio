@@ -17,7 +17,7 @@ describe('phone context row', () => {
     expect(phoneContextKind({ sheet: 'tools', place: 'arrange', notes: true, clip: true, track: true })).toBe('arrange')
     expect(phoneContextKind({ sheet: 'browse', place: 'mix', notes: false, clip: false, track: true })).toBe('mix')
     expect(phoneContextKind({ sheet: null, place: 'mix', notes: false, clip: true, track: true })).toBe('mix')
-    expect(phoneContextKind({ sheet: null, place: 'collab', notes: false, clip: false, track: false })).toBe('collab')
+    expect(phoneContextKind({ sheet: null, place: 'other', notes: false, clip: false, track: false })).toBe('arrange')
     expect(phoneContextKind({ sheet: null, place: 'plugin', notes: true, clip: false, track: false })).toBe('notes')
     expect(phoneContextKind({ sheet: null, place: 'plugin', notes: false, clip: false, track: false })).toBe('plugin')
     expect(phoneContextKind({ sheet: null, place: 'arrange', notes: false, clip: true, track: true })).toBe('arrange')

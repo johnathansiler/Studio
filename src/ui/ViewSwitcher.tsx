@@ -1,44 +1,57 @@
+import type { RefObject } from 'react'
 import { ButtonTray } from './ButtonTray'
-import { copyOf, described, studioViewTabs, VIEW_COPY } from './chrome'
+import { described, studioViewTabs } from './chrome'
+
+const MENU_COPY = {
+  id: 'menu',
+  label: 'Menu',
+  hint: 'Project, edit, view, and settings.',
+}
 
 export function ViewSwitcher({
   active,
-  collabShown,
   phonePane,
-  collabBadge,
+  menuOpen,
+  menuRef,
   onView,
-  onCollab,
+  onMenu,
   onWarm,
 }: {
   active: 'arrange' | 'mix' | 'beats' | 'session' | null
-  collabShown: boolean
   phonePane: 'edit' | 'room'
-  collabBadge: boolean
+  menuOpen: boolean
+  menuRef?: RefObject<HTMLButtonElement | null>
   onView: (view: 'arrange' | 'mix' | 'beats' | 'session') => void
-  onCollab: () => void
-  onWarm?: (view: 'arrange' | 'mix' | 'beats' | 'session' | 'collab') => void
+  onMenu: () => void
+  onWarm?: (view: 'arrange' | 'mix' | 'beats' | 'session' | 'menu') => void
 }) {
   return (
     <ButtonTray equal className="views">
       <button
+        ref={menuRef}
         type="button"
-        className={`collab-tab ${collabShown ? 'active' : ''}`}
-        {...described(copyOf(VIEW_COPY, 'collab'))}
-        onPointerEnter={() => onWarm?.('collab')}
-        onTouchStart={() => onWarm?.('collab')}
-        onClick={onCollab}
+        className={`menu-btn${menuOpen ? ' active on' : ''}`}
+        data-view-tab="menu"
+        {...described(MENU_COPY)}
+        aria-expanded={menuOpen}
+        aria-controls="shell-menu"
+        aria-pressed={menuOpen}
+        onPointerEnter={() => onWarm?.('menu')}
+        onPointerDown={() => onWarm?.('menu')}
+        onTouchStart={() => onWarm?.('menu')}
+        onClick={onMenu}
       >
-        Collab
-        {collabBadge && <span className="collab-badge" aria-hidden />}
+        Menu
       </button>
       {studioViewTabs().map((copy) => {
         const view = copy.id as 'arrange' | 'mix' | 'beats' | 'session'
-        const on = active != null && !collabShown && (view === 'session' || phonePane !== 'room') && active === view
+        const on = active != null && (view === 'session' || phonePane !== 'room') && active === view
         return (
           <button
             key={view}
             type="button"
             className={on ? 'active' : ''}
+            data-view-tab={view}
             {...described(copy)}
             onPointerEnter={() => onWarm?.(view)}
             onTouchStart={() => onWarm?.(view)}

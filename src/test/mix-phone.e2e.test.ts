@@ -59,8 +59,8 @@ async function dragLoopEnd(page: Page) {
     }
     fire('pointerdown', x)
     fire('pointermove', x - 30)
-    fire('pointermove', x - 80)
-    fire('pointerup', x - 80)
+    fire('pointermove', x - 160)
+    fire('pointerup', x - 160)
     return {
       before,
       after: store.project.loopEndSample,

@@ -49,11 +49,9 @@ import { browserWidthFor, usePushPhase } from './ui/dockPush'
 import { clampSoundWidth, readSoundWidth } from './sounds/panel'
 import { loadScaleCatalog } from './theory'
 import { ScalerPanel } from './ui/ScalerPanel'
-import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTab'
-import './ui/collab.css'
 import { AnchoredMenu } from './ui/AnchoredMenu'
 import { ButtonTray } from './ui/ButtonTray'
-import { IdeasBulbIcon, TransportBar } from './ui/TransportBar'
+import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
 import { activeTool } from './state/tools'
@@ -61,14 +59,14 @@ import { activeTool } from './state/tools'
 import { visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
-import { CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
-import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { BOTTOM_COVER_EVENT, CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
+import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
-import { sheetHistoryPop } from './ui/arrangePanel'
+import { ARRANGE_SHEET_EVENT, sheetHistoryPop } from './ui/arrangePanel'
 import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble } from './ui/Hint'
@@ -92,7 +90,6 @@ import {
   ShellBrowser,
   StepSequencerPanel,
   TunerPop,
-  VideoDock,
   WaveEditor,
   moduleView,
   preloadStudioIdle,
@@ -243,7 +240,7 @@ export function App() {
       channel.dispose()
     }
   }, [engine, session, store])
-  const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
+  const [joinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
   const [projects, setProjects] = useState<ProjectListItem[]>([])
   const [snapshots, setSnapshots] = useState<{ key: string; savedAt: number }[]>([])
   const [projectsOpen, setProjectsOpen] = useState(false)
@@ -253,6 +250,15 @@ export function App() {
   const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    const closeMenu = () => setMenuOpen(false)
+    document.addEventListener(ARRANGE_SHEET_EVENT, closeMenu)
+    document.addEventListener(BOTTOM_COVER_EVENT, closeMenu)
+    return () => {
+      document.removeEventListener(ARRANGE_SHEET_EVENT, closeMenu)
+      document.removeEventListener(BOTTOM_COVER_EVENT, closeMenu)
+    }
+  }, [])
   const [latencyHint, setLatencyHint] = useState(() => engine.latencyChoice)
   const [latencyReadout, setLatencyReadout] = useState(() => engine.latencyReadout())
   useEffect(() => {
@@ -273,7 +279,6 @@ export function App() {
     setDock((value) => (value < 640 ? 640 : value))
   }, [rackRoll, phone])
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
-  const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
   const [pianoOpen, setPianoOpen] = useState(false)
   const shellRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
@@ -319,6 +324,9 @@ export function App() {
     // Phone already started closed. ?sounds=1 and a choice made this visit still open it.
     return panelChoice('arrangeBrowser') ?? false
   })
+  useEffect(() => {
+    if (soundsOpen || unstuckOpen) setMenuOpen(false)
+  }, [soundsOpen, unstuckOpen])
   const [shellWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
   const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
   const soundReserveRef = useRef(0)
@@ -342,7 +350,6 @@ export function App() {
   const roomTimer = useRef(0)
   const versionSave = useRef<(reason: VersionReason) => void>(() => {})
   const roomSave = useRef<() => void>(() => {})
-  const [versionTick, setVersionTick] = useState(0)
   useEffect(() => {
     const timer = window.setInterval(() => versionSave.current('timer'), 60_000)
     return () => window.clearInterval(timer)
@@ -468,8 +475,6 @@ export function App() {
     if (action === 'auto-join') {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
       session.connect({ name: joinNameNow, code: urlCode, invite: urlInvite })
-      writeSessionDock(true)
-      setCollabOpen(true)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
     engine.followTrack(store.selectedTrackId)
@@ -602,11 +607,8 @@ export function App() {
       store.setView(preferArrangeView(saved.workspace.view))
       store.setTransportMode(preferArrangeTransport(saved.workspace.transportMode))
       if (saved.workspace.selectedTrackId) store.selectTrack(saved.workspace.selectedTrackId)
-      if (saved.workspace.surface === 'artist') {
-        setSurface('studio')
-        writeSessionDock(true)
-        setCollabOpen(true)
-      } else setSurface(saved.workspace.surface)
+      if (saved.workspace.surface === 'artist') setSurface('studio')
+      else setSurface(saved.workspace.surface)
       setPhonePane(paneAfterRestore(saved.workspace.phonePane, false))
       engine.seek(saved.workspace.positionSamples || 0)
       engine.sync(store.project, (id) => store.buffers.get(id))
@@ -1256,7 +1258,6 @@ export function App() {
     }).catch(() => 'fail' as const)
     if (result !== 'ok') return
     if (reason !== 'timer') store.toast(reason === 'record' ? 'Saved a recording version' : 'Saved a version')
-    setVersionTick((value) => value + 1)
   }
 
   async function saveSharedRoom() {
@@ -1285,7 +1286,6 @@ export function App() {
 
   function openPerform(mode: 'keys' | 'drums') {
     if (mode === 'drums') {
-      hideCollab()
       setSurface('studio')
       setPhonePane('edit')
       setMenuOpen(false)
@@ -1503,14 +1503,6 @@ export function App() {
     void requestPersistentStorage()
   }
 
-  function joinCollab(input: { name: string; code: string; invite: string }) {
-    engine.unlock()
-    session.primeMediaFromGesture()
-    const name = input.name.trim() || joinName || 'Artist'
-    setJoinName(name)
-    session.connect({ name, code: input.code, invite: input.invite })
-  }
-
   function saveAs(name: string) {
     const copy = JSON.parse(JSON.stringify(store.project)) as typeof store.project
     copy.id = uid('prj')
@@ -1677,12 +1669,10 @@ async function importDropped(files: FileList) {
     if (panel !== 'piano' || phone) return
     setDock(pianoDockWidth(window.innerWidth))
   }, [panel, phone])
-  const studioTab: StudioTab = collabOpen ? 'collab' : editorView
-  const collabShown = collabPanelVisible(studioTab)
-  const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
+  const dockShown = dockVisible({ surface, panel, dockOpen: false })
   useLayoutEffect(() => {
     syncPhoneSheetFrame(shellRef.current)
-  }, [collabShown, panel, editorView, phone, land])
+  }, [panel, editorView, phone, land, menuOpen, soundsOpen, unstuckOpen])
   useLayoutEffect(() => {
     if (panel !== 'pads' && panel !== 'steps') return
     const place = () => alignPluginClose(shellRef.current)
@@ -1700,20 +1690,6 @@ async function importDropped(files: FileList) {
   useEffect(() => {
     setSoundWidth((value) => clampSoundWidth(value, window.innerWidth, soundReserve))
   }, [soundReserve])
-  const waitingGuests = session.state.participants.filter((person) => !person.admitted && person.role !== 'host').length
-  const collabBadge = collabBadgeOn({
-    tab: studioTab,
-    status: session.state.status,
-    pendingInvite: false,
-    waiting: waitingGuests,
-  })
-
-  function hideCollab() {
-    writeSessionDock(false)
-    setCollabOpen(false)
-    setPhonePane('edit')
-  }
-
   function dismissForTab() {
     onViewTab({
       keyboardOpen: store.keyboardMidi || keysLandscape,
@@ -1730,18 +1706,10 @@ async function importDropped(files: FileList) {
     })
   }
 
-  function showCollab() {
-    dismissForTab()
-    writeSessionDock(true)
-    setCollabOpen(true)
-    setSurface('studio')
-    setPhonePane('edit')
-  }
-
   function showView(view: 'arrange' | 'mix' | 'beats' | 'session') {
     const next = preferArrangeView(view)
     dismissForTab()
-    hideCollab()
+    setMenuOpen(false)
     setSurface('studio')
     store.setView(next)
   }
@@ -1890,7 +1858,6 @@ async function importDropped(files: FileList) {
   }, [store.keyboardMidi, form])
 
   function openStepSequencer(trackId: string) {
-    hideCollab()
     setSurface('studio')
     setPhonePane('edit')
     setMenuOpen(false)
@@ -1912,7 +1879,6 @@ async function importDropped(files: FileList) {
   }
 
   function onTrackAdded(id: string, choice: TrackChoice) {
-    hideCollab()
     setSurface('studio')
     setPhonePane('edit')
     store.setView('arrange')
@@ -1928,7 +1894,6 @@ async function importDropped(files: FileList) {
   }
 
   function openBeatMachine(trackId: string) {
-    hideCollab()
     setSurface('studio')
     setPhonePane('edit')
     setMenuOpen(false)
@@ -1994,7 +1959,6 @@ async function importDropped(files: FileList) {
   }
 
   function openPlugin(page: 'play' | 'write') {
-    hideCollab()
     setSurface('studio')
     setPhonePane('edit')
     setMenuOpen(false)
@@ -2007,7 +1971,7 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => setTuneOpen(false), tuneOpen)
   useScreenOverlay(() => setKnockOpen(false), knockOpen)
   useScreenOverlay(() => { engine.stopPreview(); setUnstuckOpen(false) }, unstuckOpen)
-  const shellOpen = soundsOpen && surface === 'studio' && (collabShown || editorView !== 'arrange')
+  const shellOpen = soundsOpen && surface === 'studio' && editorView !== 'arrange'
   const shellPhase = usePushPhase(shellOpen)
   useScreenOverlay(() => setAnalysisTrackId(null), analysisTrackId != null)
   useScreenOverlay(() => setPerform(null), perform != null)
@@ -2027,23 +1991,15 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeSpectral(), store.spectralTrackId != null)
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
-  const phoneArrange = phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
-  const transportShown = (surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown
-  const phonePlace: PhonePlace = collabShown
-    ? 'collab'
-    : panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack'
-      ? 'plugin'
-      : editorView === 'mix'
-        ? 'mix'
-        : surface === 'studio' && editorView === 'arrange'
-          ? 'arrange'
-          : 'other'
-  const menuButton = (
-    <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onPointerEnter={() => preloadView('menu')} onPointerDown={() => preloadView('menu')} onTouchStart={() => preloadView('menu')} onClick={() => setMenuOpen((open) => !open)}>
-      <MenuIcon />
-      <span className="menu-word">Menu</span>
-    </button>
-  )
+  const phoneArrange = phone && surface === 'studio' && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
+  const transportShown = surface === 'studio' || surface === 'artist' || session.state.status === 'live'
+  const phonePlace: PhonePlace = panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack'
+    ? 'plugin'
+    : editorView === 'mix'
+      ? 'mix'
+      : surface === 'studio' && editorView === 'arrange'
+        ? 'arrange'
+        : 'other'
   const historyButtons = (
     <HistoryButtons canUndo={store.canUndo} canRedo={store.canRedo} onUndo={() => store.undo()} onRedo={() => store.redo()} />
   )
@@ -2063,20 +2019,6 @@ async function importDropped(files: FileList) {
     setIdeasPage('write')
     setUnstuckOpen(true)
   }
-  const ideasButton = (
-    <button
-      type="button"
-      className={`ideas-bulb${unstuckOpen ? ' on' : ''}`}
-      aria-label="Ideas"
-      title="Ideas"
-      aria-pressed={unstuckOpen}
-      disabled={store.remoteFollow}
-      onClick={toggleIdeas}
-    >
-      <IdeasBulbIcon />
-    </button>
-  )
-
   if (new URLSearchParams(window.location.search).get('faces') === '1') {
     return <FaceGallery />
   }
@@ -2094,7 +2036,7 @@ async function importDropped(files: FileList) {
       data-version={version}
       data-form={form}
       data-session-dock="closed"
-      data-collab={collabShown ? 'open' : 'closed'}
+      data-collab="closed"
       data-dock={dockShown ? 'open' : 'closed'}
       data-editor={dockShown ? panel : 'none'}
       data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps') ? panel : 'none'}
@@ -2108,7 +2050,6 @@ async function importDropped(files: FileList) {
     >
       <div className={phone && !land ? 'phone-top' : 'chrome-stack'}>
       <header className="topbar">
-        {!phone && menuButton}
         {!phone && (
           <div className="brand">
             <div className="mark" aria-hidden>
@@ -2125,20 +2066,27 @@ async function importDropped(files: FileList) {
         )}
         <ViewSwitcher
           active={surface === 'studio' ? editorView : null}
-          collabShown={collabShown}
           phonePane={phonePane}
-          collabBadge={collabBadge}
+          menuOpen={menuOpen}
+          menuRef={menuButtonRef}
           onView={showView}
-          onCollab={showCollab}
+          onMenu={() => {
+            setSoundsOpen(false)
+            if (unstuckOpen) {
+              engine.stopPreview()
+              setUnstuckOpen(false)
+            }
+            document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+            setMenuOpen((open) => !open)
+          }}
           onWarm={(view) => {
-            if (view === 'mix') preloadView('mix')
+            if (view === 'menu') preloadView('menu')
+            else if (view === 'mix') preloadView('mix')
             else if (view === 'session') preloadView('session')
-            else if (view === 'collab') preloadView('collab')
           }}
         />
         {!phone && historyButtons}
-        {!phone && !transportShown && ideasButton}
-        <AnchoredMenu fill sheet={phone} open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
+        <AnchoredMenu edge="top" open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
           {menuOpen && (
           <Suspense fallback={<PendingMenu />}>
           <MainMenu
@@ -2161,9 +2109,10 @@ async function importDropped(files: FileList) {
             canRedo={store.canRedo}
             onUndo={phone ? () => { setMenuOpen(false); store.undo() } : undefined}
             onRedo={phone ? () => { setMenuOpen(false); store.redo() } : undefined}
-            onIdeas={phone && !transportShown ? () => openIdeas('write') : undefined}
+            onIdeas={!phone ? () => { setMenuOpen(false); openIdeas('write') } : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
+            audioReport={() => engine.audioReport()}
             onLatency={(hint) => {
               setLatencyHint(hint)
               void engine.setLatencyChoice(hint).then((readout) => setLatencyReadout(readout))
@@ -2179,7 +2128,6 @@ async function importDropped(files: FileList) {
               else if (action === 'loop') store.toggle('loopEnabled')
               else if (FEATURES.session && action === 'session-mode') {
                 setMenuOpen(false)
-                hideCollab()
                 setSurface('studio')
                 if (store.transportMode === 'session') store.backToArrangement()
                 else store.enterSession()
@@ -2216,8 +2164,6 @@ async function importDropped(files: FileList) {
           onReset={() => { engine.unlock(); void resetRoom() }}
           onQuickPunch={() => void quickPunch()}
           onMidi={() => { setMenuOpen(false); store.setMidiToolsOpen(true) }}
-          onIdeas={toggleIdeas}
-          bulbOn={unstuckOpen}
           session={session}
           roomRole={session.state.role}
           takeProgress={session.state.takeProgress}
@@ -2225,60 +2171,66 @@ async function importDropped(files: FileList) {
         />
       )}
       </div>
-      {phone && (
-        <>
+      {(phone || surface === 'studio') && (
+        <div className={`tool-slot ${phone ? 'phone-dock-slot' : 'studio-dock'}`} id="tool-slot" data-slot={phone ? 'phone-dock' : 'studio-dock'}>
+          {!phone && surface === 'studio' && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
+            <>
+              <ButtonTray className={`command-strip${form === 'fold' ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
+                <ToolBar
+                  context="arrange"
+                  words
+                  tucked
+                  store={store}
+                  showHint={false}
+                  extra={<SnapControl store={store} inline />}
+                  onChange={(tool) => store.setTool(tool)}
+                  onDuplicate={() => store.duplicateSelection()}
+                  onDelete={() => store.deleteSelectedClip()}
+                />
+              </ButtonTray>
+              <MidiTools store={store} engine={engine} />
+            </>
+          )}
           <div id="phone-sheet-host" className="phone-sheet-host">
-            <MidiTools store={store} engine={engine} phone />
+            {phone && <MidiTools store={store} engine={engine} phone />}
           </div>
-          <div className="tool-slot phone-dock-slot" id="tool-slot" data-slot="phone-dock">
-            <PhoneDock
-              store={store}
-              place={phonePlace}
-              menuOpen={menuOpen}
-              browseOpen={soundsOpen}
-              menuRef={menuButtonRef}
-              onMenu={() => {
-                setSoundsOpen(false)
-                document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
-                setMenuOpen((open) => !open)
-              }}
-              onBrowse={() => {
-                setMenuOpen(false)
-                setSoundsOpen((open) => !open)
-              }}
-              onWarmMenu={() => preloadView('menu')}
-              onWarmBrowse={() => preloadView('browse')}
-              onMenuAction={(action) => {
-                if (action === 'new') beginNewProject()
-                else if (action === 'open') { setMenuOpen(false); void openProjects() }
-                else if (action === 'save') { setMenuOpen(false); void persist() }
-                else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
-              }}
-              onUndo={() => store.undo()}
-              onRedo={() => store.redo()}
-              canUndo={store.canUndo}
-              canRedo={store.canRedo}
-              playheadSample={() => engine.currentTimelineSample()}
-            />
-          </div>
-        </>
-      )}
-      {!phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
-        <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          <ButtonTray className={`command-strip${(phone && !land) || form === 'fold' ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
-            <ToolBar
-              context="arrange"
-              words
-              tucked
-              store={store}
-              showHint={false}
-              extra={<><SnapControl store={store} inline /><div id="transport-extras" className="transport-extras-slot" /></>}
-              onChange={(tool) => store.setTool(tool)}
-              onDuplicate={() => store.duplicateSelection()}
-              onDelete={() => store.deleteSelectedClip()}
-            />
-          </ButtonTray>
-          <MidiTools store={store} engine={engine} />
+          <PhoneDock
+            store={store}
+            place={phonePlace}
+            menuOpen={menuOpen}
+            browseOpen={soundsOpen}
+            ideasOpen={unstuckOpen}
+            onMenu={() => {
+              setSoundsOpen(false)
+              if (unstuckOpen) {
+                engine.stopPreview()
+                setUnstuckOpen(false)
+              }
+              document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+              setMenuOpen(false)
+            }}
+            onBrowse={() => {
+              setMenuOpen(false)
+              if (unstuckOpen) {
+                engine.stopPreview()
+                setUnstuckOpen(false)
+              }
+              setSoundsOpen((open) => !open)
+            }}
+            onIdeas={toggleIdeas}
+            onWarmBrowse={() => preloadView('browse')}
+            onMenuAction={(action) => {
+              if (action === 'new') beginNewProject()
+              else if (action === 'open') { setMenuOpen(false); void openProjects() }
+              else if (action === 'save') { setMenuOpen(false); void persist() }
+              else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
+            }}
+            onUndo={() => store.undo()}
+            onRedo={() => store.redo()}
+            canUndo={store.canUndo}
+            canRedo={store.canRedo}
+            playheadSample={() => engine.currentTimelineSample()}
+          />
         </div>
       )}
       <div
@@ -2299,27 +2251,7 @@ async function importDropped(files: FileList) {
             </Suspense>
           </div>
         )}
-        {collabShown && (
-          <div className="collab-pane" data-collab-panel="open">
-            <Suspense fallback={<PendingPane className="collab-pending" label="Collab" />}>
-            <VideoDock
-              simple={false}
-              session={session}
-              engine={engine}
-              store={store}
-              versionTick={versionTick}
-              onSaveVersion={() => versionSave.current('manual')}
-              onCreate={() => {
-                engine.unlock()
-                session.primeMediaFromGesture()
-                session.connect({ name: joinName || 'Engineer', create: true })
-              }}
-              onJoinInvite={joinCollab}
-            />
-            </Suspense>
-          </div>
-        )}
-        {surface === 'studio' && !collabShown && (
+        {surface === 'studio' && (
           <div className="main-pane">
             <div className="editor">
               {editorView === 'arrange' && (
@@ -2637,14 +2569,6 @@ async function importDropped(files: FileList) {
       <Toasts store={store} />
     </div>
     </TransportActionContext.Provider>
-  )
-}
-
-function MenuIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M3 4.5h10M3 8h10M3 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
   )
 }
 

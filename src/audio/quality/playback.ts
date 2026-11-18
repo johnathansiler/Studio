@@ -1,4 +1,9 @@
+import { bakeLoopSeam } from '../loopSeam'
+import { normalizePeak } from '../level'
 import { resampleSinc } from './resample'
+
+/** Same kernel the offline render uses. A 32-tap preview folds 96 kHz files. */
+export const PREVIEW_TAPS = 96
 
 /**
  * Play a file at the device rate.
@@ -14,12 +19,11 @@ export function fitPlaybackRate(channels: Float32Array[], fromRate: number, toRa
     return { sampleRate: from || to || 48000, channels }
   }
   const outLen = Math.max(1, Math.round((lead.length * to) / from))
-  const taps = lead.length > from * 90 ? 32 : 64
   return {
     sampleRate: to,
     channels: channels.map((channel) => {
       const source = channel.length === lead.length ? channel : fitLength(channel, lead.length)
-      return resampleSinc(source, outLen, taps)
+      return resampleSinc(source, outLen, PREVIEW_TAPS)
     }),
   }
 }
@@ -47,4 +51,21 @@ export function fadePlaybackEdges(channels: Float32Array[], samples: number) {
     }
     return out
   })
+}
+
+/**
+ * Library preview at the device rate.
+ * The rate match happens before the loop join, so the sinc edges are inside
+ * the crossfade. A sub that does not meet itself does not tick every bar.
+ * Level is then brought to about −12 dBFS. A file that is already at the
+ * device rate is not resampled.
+ */
+export function prepareSpeakerPreview(channels: Float32Array[], fileRate: number, deviceRate: number, loop: boolean) {
+  const file = fileRate > 0 ? fileRate : deviceRate
+  const device = deviceRate > 0 ? deviceRate : file
+  const fitted = fitPlaybackRate(channels, file, device)
+  const joined = loop ? fitted.channels.map((channel) => bakeLoopSeam(channel, fitted.sampleRate)) : fitted.channels
+  const shaped = normalizePeak(joined)
+  const played = loop ? shaped : fadePlaybackEdges(shaped, Math.max(8, Math.round((device > 0 ? device : 48000) * 0.0015)))
+  return { sampleRate: fitted.sampleRate, channels: played }
 }

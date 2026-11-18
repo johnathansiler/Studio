@@ -188,8 +188,8 @@
 }
 
 /* Phone Arrange dock: tempo and Duplicate join the same row as the edit buttons. */
-.shell.phone .phone-context.btn-tray > .transport-extras-slot,
-.shell.phone .phone-context.btn-tray .transport-extras {
+.shell .phone-context.btn-tray > .transport-extras-slot,
+.shell .phone-context.btn-tray .transport-extras {
   display: contents !important;
 }
 
@@ -211,23 +211,19 @@
   flex-flow: row nowrap;
 }
 
-/* Arrange dock: each cell is at least 44px. A narrow phone scrolls the row
-   instead of shrinking a hit under 44. A selected Delete is an extra cell. */
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] {
-  display: grid;
-  grid-template-columns: repeat(var(--arrange-cols, 9), minmax(44px, 1fr));
-  grid-auto-rows: 44px;
+/* Arrange dock: equal cells fill the recessed tray. Height stays 44px.
+   Width shares the row so 344px does not scroll or clip a button. */
+.shell .phone-context.btn-tray[data-phone-context="arrange"] {
+  display: flex;
+  flex-flow: row nowrap;
   align-items: stretch;
   justify-content: stretch;
-  gap: 1px;
+  gap: 2px;
   width: 100%;
   max-width: 100%;
-  min-height: 44px;
+  min-height: 50px;
   height: auto;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
 }
 .shell.phone .phone-context.btn-tray[data-phone-context="arrange"]::-webkit-scrollbar { display: none; }
 /* Tempo stays inside the first seven 44px cells, so a 344px phone can hit it
@@ -250,11 +246,12 @@
   padding: 0;
 }
 
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit,
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn,
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .bpm-readout {
-  width: 100%;
-  min-width: 44px;
+.shell .phone-context.btn-tray .phone-hit,
+.shell .phone-context.btn-tray .t-btn,
+.shell .phone-context.btn-tray .bpm-readout {
+  width: 0;
+  min-width: 0;
+  flex: 1 1 0;
   height: 44px;
   min-height: 44px;
   max-height: 44px;
@@ -296,13 +293,13 @@
   border-width: 1px !important;
 }
 
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .transport-extras > .t-btn,
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .transport-extras .bpm-readout,
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit {
-  width: 100% !important;
-  min-width: 44px !important;
+.shell .phone-context.btn-tray .transport-extras > .t-btn,
+.shell .phone-context.btn-tray .phone-hit,
+.shell .phone-context.btn-tray .t-btn {
+  width: 0 !important;
+  min-width: 0 !important;
   max-width: none !important;
-  flex: none !important;
+  flex: 1 1 0 !important;
   height: 44px !important;
   min-height: 44px !important;
   max-height: 44px !important;
@@ -378,12 +375,12 @@
   flex: none;
 }
 
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn.delete .t-word,
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn.duplicate .t-word {
+.shell .phone-context.btn-tray .t-btn.delete .t-word,
+.shell .phone-context.btn-tray .t-btn.duplicate .t-word {
   display: none;
 }
 
-.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn .t-ico {
+.shell .phone-context.btn-tray .t-btn .t-ico {
   display: block;
   width: 18px;
   height: 18px;

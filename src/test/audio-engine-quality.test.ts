@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { AudioEngine } from '../audio/engine'
-import { createSafetyLimiter, holdFullScale, SAFETY_ATTACK, SAFETY_LOOK } from '../audio/master/safety'
+import { createSafetyLimiter, holdFullScale, SAFETY_ATTACK, SAFETY_LOOK, SAFETY_PASS } from '../audio/master/safety'
 import { truePeakDb } from '../audio/master/fir'
 import { renderSaw } from '../audio/liveStage'
 import { freshState, renderTone, type PlayVoice, type ToneCtx } from '../audio/rack/synth'
@@ -263,7 +263,20 @@ describe('audio engine quality', () => {
     expect(maxJump(limited, SAFETY_LOOK, SAFETY_LOOK + 80)).toBeLessThan(0.2)
     expect(readFileSync('public/worklets/safety.js', 'utf8')).toContain(`const LOOK = ${SAFETY_LOOK}`)
     expect(readFileSync('public/worklets/safety.js', 'utf8')).toContain(`const ATTACK = ${SAFETY_ATTACK}`)
+    expect(readFileSync('public/worklets/safety.js', 'utf8')).toContain(`const PASS = ${SAFETY_PASS}`)
     expect(readFileSync('public/worklets/safety.js', 'utf8')).not.toMatch(/import\s*\(/)
+    const quietBlocks = 300
+    const block = 128
+    const piece = sine(55, block / RATE, 0.2)
+    const fast = createSafetyLimiter(RATE)
+    const left = new Float32Array(block)
+    const rightOut = new Float32Array(block)
+    for (let i = 0; i < 8; i++) fast.process(piece, piece, left, rightOut)
+    const started = performance.now()
+    for (let i = 0; i < quietBlocks; i++) fast.process(piece, piece, left, rightOut)
+    const perMs = (performance.now() - started) / quietBlocks
+    const budgetMs = (block / RATE) * 1000
+    expect(perMs * 6).toBeLessThan(budgetMs)
   })
 
   it('crossfades a bypass and a chorus mix instead of stepping', () => {

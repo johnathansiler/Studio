@@ -1,5 +1,5 @@
-/* Phone bottom chrome. The tabs match Collab / Arrange / Mix.
-   The row above them keeps a small face and a 44px hit. */
+/* Bottom chrome. Browse / Tools / Ideas match the top segments.
+   The row above them is one recessed tray of equal 44px hits. */
 
 .shell.phone .tool-slot.phone-dock-slot,
 .shell.phone:not(.land) .tool-slot.phone-dock-slot:not(:empty),
@@ -19,73 +19,103 @@
   overflow: visible;
 }
 
-.shell.phone > .phone-sheet-host {
-  order: 6;
+.shell .tool-slot > .phone-sheet-host {
+  order: 0;
+  width: 100%;
+}
+
+.shell .studio-dock {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+  background: #101614;
+  border-top: 1px solid var(--line);
 }
 
 .shell.phone[data-editor="piano"] .tool-slot.phone-dock-slot {
   display: flex;
 }
 
-.shell.phone .phone-context {
-  order: 0;
+.shell .phone-context {
+  order: 1;
   display: flex;
   flex-flow: row nowrap;
   align-items: stretch;
-  justify-content: flex-start;
+  justify-content: stretch;
   gap: 2px;
   width: 100%;
   min-width: 0;
-  min-height: 44px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow:
+    inset 0 3px 10px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  overflow: hidden;
 }
 
 .shell.phone .phone-context::-webkit-scrollbar { display: none; }
 
-.shell.phone .phone-hit {
+.shell .phone-context .phone-hit,
+.shell .phone-context .t-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
+  flex: 1 1 0;
   box-sizing: border-box;
-  min-width: 44px;
-  width: auto;
+  width: 0;
+  min-width: 0;
+  max-width: none;
   height: 44px;
   min-height: 44px;
   max-height: 44px;
   margin: 0;
-  padding: 7px 2px;
+  padding: 0 2px;
   border: 0;
-  border-radius: 0;
-  background: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: inherit;
+  border-radius: 8px;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
 }
 
-.shell.phone .phone-hit .phone-face {
+.shell .phone-context .phone-hit .phone-face {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   box-sizing: border-box;
-  height: 26px;
+  width: 100%;
+  height: auto;
   min-height: 0;
-  max-height: 26px;
-  padding: 0 8px;
-  border-radius: 8px;
-  border: 1px solid var(--btn-quiet-border);
-  background-color: var(--btn-quiet-bg);
-  background-image: var(--btn-quiet-face);
-  box-shadow: var(--btn-bevel);
-  color: var(--btn-quiet-ink);
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  background-image: none;
+  box-shadow: none;
+  color: inherit;
   font-size: 11px;
   font-weight: 650;
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 /* Eight tools plus Snap share one scrolling row at 390. Each hit stays 44px. */
@@ -98,13 +128,14 @@
   padding: 0 5px;
 }
 
-.shell.phone .phone-hit.on .phone-face,
-.shell.phone .phone-hit[aria-pressed="true"] .phone-face {
-  background-color: var(--btn-toggle-bg);
-  background-image: var(--btn-quiet-face);
-  color: var(--btn-toggle-ink);
-  border-color: transparent;
-  box-shadow: var(--btn-bevel-pressed);
+.shell .phone-context .phone-hit.on,
+.shell .phone-context .phone-hit[aria-pressed="true"],
+.shell .phone-context .t-btn.on,
+.shell .phone-context .t-btn[aria-pressed="true"] {
+  background-color: var(--accent);
+  background-image: var(--face);
+  color: var(--accent-ink);
+  box-shadow: var(--raised);
 }
 
 .shell.phone .phone-hit .metro-icon,
@@ -124,8 +155,8 @@
   display: inline;
 }
 
-.shell.phone .phone-tabs {
-  order: 1;
+.shell .phone-tabs {
+  order: 2;
   display: flex;
   flex-flow: row nowrap;
   align-items: stretch;
@@ -141,9 +172,8 @@
   box-shadow: var(--tray-inset);
 }
 
-.shell.phone .phone-tabs > button,
-.shell.phone .phone-tabs > button.menu-btn,
-.shell.phone .phone-tabs > button.phone-tab {
+.shell .phone-tabs > button,
+.shell .phone-tabs > button.phone-tab {
   flex: 1 1 0;
   width: 0;
   min-width: 0;
@@ -174,9 +204,8 @@
   font-size: 12px;
 }
 
-.shell.phone .phone-tabs > button.active,
-.shell.phone .phone-tabs > button.menu-btn.active,
-.shell.phone .phone-tabs > button.on {
+.shell .phone-tabs > button.active,
+.shell .phone-tabs > button.on {
   background-color: var(--accent);
   background-image: var(--face);
   color: var(--accent-ink);
@@ -189,11 +218,11 @@
   white-space: nowrap;
 }
 
-.shell.phone > .phone-sheet-host:empty {
+.shell .tool-slot > .phone-sheet-host:empty {
   display: none;
 }
 
-.shell.phone > .phone-sheet-host:not(:empty) {
+.shell .tool-slot > .phone-sheet-host:not(:empty) {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -202,8 +231,8 @@
   z-index: 6;
 }
 
-.shell.phone > .phone-sheet-host > .choice-tray,
-.shell.phone > .phone-sheet-host > .bottom-sheet.arrange-sheet {
+.shell .tool-slot > .phone-sheet-host > .choice-tray,
+.shell .tool-slot > .phone-sheet-host > .bottom-sheet.arrange-sheet {
   position: relative;
   z-index: 4;
   flex: 0 0 auto;
@@ -390,8 +419,8 @@ body:has(.shell.phone) .select-hint-host {
   font-variant-numeric: normal;
 }
 
-/* Same height as the browser sheet, sitting on the dock. Rows scroll inside that frame. */
-body:has(.shell.phone) [data-screen-overlay].phone-sheet:has(#shell-menu) {
+/* Same height as the browser sheet, sitting on the dock. The top menu does not use this. */
+body:has(.shell.phone) [data-screen-overlay].phone-sheet:has(#shell-menu):not(.menu-drop) {
   top: auto !important;
   bottom: calc(var(--phone-chrome-bottom, 108px) + 12px) !important;
   height: var(--phone-sheet-h, 46dvh) !important;

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { BufferHint } from '../audio/core/buffer'
 import { BUFFER_HINTS, bufferHintLabel } from '../audio/core/buffer'
+import { AudioReadout } from './AudioReadout'
 import { MENU_GROUPS, type MenuSpec } from './chrome'
 import { MenuRow } from './Hint'
 
@@ -70,6 +71,7 @@ export function MainMenu({
   latencyHint,
   latencyReadout,
   onLatency,
+  audioReport,
   projectName,
   onProjectName,
   canUndo,
@@ -87,6 +89,7 @@ export function MainMenu({
   latencyHint?: BufferHint
   latencyReadout?: string
   onLatency?: (hint: BufferHint) => void
+  audioReport?: () => string
   /** Phone keeps the session name here after the top row is removed. */
   projectName?: string
   onProjectName?: (name: string) => void
@@ -136,6 +139,7 @@ export function MainMenu({
           <section key={group.id} className="menu-group" aria-label={group.label}>
             <p className="menu-heading">{group.label}</p>
             <div className="menu-rows">
+              {group.id === 'settings' && audioReport && <AudioReadout report={audioReport} />}
               {group.id === 'settings' && onLatency && (
                 <SettingRow
                   action="latency"
