@@ -117,6 +117,23 @@
     0 0 0 2px rgba(244, 255, 248, 0.9),
     0 0 16px rgba(115, 196, 143, 0.95);
 }
+/* The ruler paints every i as a 10px tick at top: 30px. These lines have to win that, or the target bar sits in the playhead strip. */
+.loop-host .snap-line {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  width: 2px;
+  background: #f4fff8;
+  box-shadow: 0 0 8px rgba(244, 255, 248, 0.9);
+}
+.loop-host .loop-snap-target {
+  z-index: 25;
+  width: 2px;
+  background: #fff6d0;
+  box-shadow:
+    0 0 0 1px rgba(255, 186, 48, 0.95),
+    0 0 12px rgba(255, 196, 64, 0.95);
+}
 .loop-drag-read {
   position: absolute;
   top: 2px;
