@@ -31,5 +31,7 @@ jobs:
           node-version: 22.14.0
           cache: npm
       - run: npm ci
+      - name: Typecheck
+        run: PATH="$PWD/node_modules/.bin:$PATH" tsc -p tsconfig.json --noEmit
       - name: Production server boots
         run: npx vitest run src/test/server-boot.test.ts
