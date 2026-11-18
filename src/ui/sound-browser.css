@@ -430,6 +430,27 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   min-height: 0;
 }
 
+.sound-list.is-virtual {
+  position: relative;
+  gap: 0;
+}
+
+.sound-list.is-virtual .sound-window {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sound-list.is-virtual .sound-row {
+  height: 52px;
+  min-height: 52px;
+  margin: 0 0 6px;
+  box-sizing: border-box;
+}
+
 .sound-row {
   display: flex;
   align-items: center;

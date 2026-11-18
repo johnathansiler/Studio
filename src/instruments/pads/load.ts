@@ -3,6 +3,7 @@
 import { soundInfoLine } from '../../sounds/license'
 import { soundCache } from '../../sounds/cache'
 import { fetchCatalogSound, loadSoundCatalog } from '../../sounds/catalog'
+import { libraryFetch } from '../../sounds/direct'
 import { decodeSoundBytes } from '../../sounds/place'
 import { commitChoice, presetByName, readStamp } from '../../presets/library'
 import { commitPadPreset } from '../../presets/project'
@@ -91,7 +92,7 @@ async function loadKitSamples(store: ProjectStore, trackId: string, presetName: 
   if (!kit) return
   if (!replace && store.trackKit(trackId).banks[0]?.some((pad) => pad.layers.some((layer) => layer.bufferId))) return
   const blockResident = replace || store.trackKit(trackId).catalogDrums === true
-  const catalog = await loadSoundCatalog(fetch, soundCache())
+  const catalog = await loadSoundCatalog(libraryFetch, soundCache())
   if (!liveToken(trackId, token)) return
   if (!replace && store.trackKit(trackId).banks[0]?.some((pad) => pad.layers.some((layer) => layer.bufferId))) return
   const voices = inspectBeatKit(kit, catalog.entries)

@@ -1,6 +1,7 @@
 import type { SoundCache } from './cache'
 import { fetchSoundBytes, soundCache, type FetchSoundOptions } from './cache'
 import { packLabel, SOUNDSCOUT_VERSION, SOUND_VERSION_PREFIX } from './contract'
+import { libraryFetch } from './direct'
 import { licenseAllowed, licenseKeptWhenNotCc0 } from './license'
 import { presentSoundEntries } from './noteGroups'
 import { readPrivateCatalog, readPrivateFile } from './private'
@@ -240,6 +241,81 @@ export function parseScoutEntry(input: unknown): SoundEntry | null {
   }
 }
 
+export interface CatalogScan {
+  text: string
+  cursor: number
+  started: boolean
+  versionOk: boolean | null
+}
+
+export function createCatalogScan(): CatalogScan {
+  return { text: '', cursor: 0, started: false, versionOk: null }
+}
+
+/**
+ * Pull finished rows out of a catalog download.
+ * The official parse still runs on the finished document. This only lets the
+ * list paint while the rest of the file is on the wire.
+ */
+export function pullCatalogEntries(scan: CatalogScan, chunk: string) {
+  scan.text += chunk
+  const found: SoundEntry[] = []
+  if (scan.versionOk == null && scan.text.includes('"version"')) {
+    const version = /"version"\s*:\s*"([^"]+)"/.exec(scan.text)
+    if (version) scan.versionOk = version[1] === SOUNDSCOUT_VERSION
+  }
+  if (scan.versionOk === false) return { entries: found, done: true, rejected: true }
+  if (!scan.started) {
+    const at = scan.text.indexOf('"entries": [')
+    if (at < 0) return { entries: found, done: false, rejected: false }
+    scan.started = true
+    scan.cursor = at + '"entries": ['.length
+  }
+  const text = scan.text
+  let index = scan.cursor
+  while (index < text.length) {
+    while (index < text.length && text[index] !== '{' && text[index] !== ']') index += 1
+    if (index >= text.length) break
+    if (text[index] === ']') {
+      scan.cursor = index
+      return { entries: found, done: true, rejected: false }
+    }
+    const end = catalogObjectEnd(text, index)
+    if (end < 0) break
+    try {
+      const entry = parseScoutEntry(JSON.parse(text.slice(index, end + 1)))
+      if (entry) found.push(entry)
+    } catch {
+      /* a broken row does not stop the rest of the catalog */
+    }
+    index = end + 1
+  }
+  scan.cursor = index
+  return { entries: found, done: false, rejected: false }
+}
+
+function catalogObjectEnd(text: string, start: number) {
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < text.length; index += 1) {
+    const code = text.charCodeAt(index)
+    if (inString) {
+      if (escaped) escaped = false
+      else if (code === 92) escaped = true
+      else if (code === 34) inString = false
+      continue
+    }
+    if (code === 34) inString = true
+    else if (code === 123) depth += 1
+    else if (code === 125) {
+      depth -= 1
+      if (depth === 0) return index
+    }
+  }
+  return -1
+}
+
 /** The versioned catalog object. An array is the old stock index and is ignored. */
 export function parseSoundScoutCatalog(input: unknown): SoundEntry[] {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return []
@@ -253,21 +329,49 @@ export function parseSoundScoutCatalog(input: unknown): SoundEntry[] {
   return entries
 }
 
+const COMPACT_SUFFIX = '#rows'
+let hotCatalog: { url: string; result: CatalogResult } | null = null
+
+/** Rows already parsed in this tab. The next open does not touch the network. */
+export function cachedSoundCatalog(): CatalogResult | null {
+  return hotCatalog?.result.entries.length ? hotCatalog.result : null
+}
+
+export interface CatalogLoadOptions {
+  /** Fired as soon as rows exist, including a cached copy and a partial download. */
+  onUpdate?: (result: CatalogResult) => void
+}
+
 /**
  * Fetch the versioned SoundScout catalog only.
  * A missing file, a legacy index, or a cached copy of that index does not become the list.
  * The cache key is the catalog URL, which includes the dataset commit and catalog filename.
  * A stored copy of an older commit or filename is not reused.
+ * The browser fetch reads that cache first. A caller-supplied fetch still checks the network,
+ * which is how tests substitute a document.
  * Audio files are not requested here.
  */
-export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => fetch(input, init), cache?: SoundCache): Promise<CatalogResult> {
+export async function loadSoundCatalog(fetchImpl: FetchLike = libraryFetch, cache?: SoundCache, options?: CatalogLoadOptions): Promise<CatalogResult> {
   listedFetch = fetchImpl
   listedCache = cache
   const url = soundCatalogUrl()
+  const trusted = fetchImpl === libraryFetch
+  if (trusted && hotCatalog?.url === url) {
+    options?.onUpdate?.(hotCatalog.result)
+    return hotCatalog.result
+  }
+  if (trusted && cache) {
+    const cached = await readCachedCatalog(cache, url)
+    if (cached.entries.length) {
+      hotCatalog = { url, result: cached }
+      options?.onUpdate?.(cached)
+      return cached
+    }
+  }
   try {
-    const response = await fetchImpl(url, { cache: 'no-store' })
+    const response = await fetchImpl(url)
     if (response.ok) {
-      const text = await response.text()
+      const text = await readCatalogText(response, options)
       let json: unknown
       try {
         json = JSON.parse(text)
@@ -277,19 +381,58 @@ export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => f
       const remote = parseSoundScoutCatalog(json)
       if (remote.length && cache) {
         try { await cache.put(url, bytesOf(text)) } catch { /* the list still shows */ }
+        try { await cache.put(`${url}${COMPACT_SUFFIX}`, bytesOf(JSON.stringify({ version: SOUNDSCOUT_VERSION, entries: remote }))) } catch { /* the full document is enough */ }
       }
-      return finishCatalog(remote, remote.length ? 'ok' : 'missing')
+      const result = await finishCatalog(remote, remote.length ? 'ok' : 'missing')
+      if (trusted && result.entries.length) hotCatalog = { url, result }
+      options?.onUpdate?.(result)
+      return result
     }
   } catch {
     /* try the last versioned catalog, never the legacy index */
   }
-  return readCachedCatalog(cache, url)
+  const fallback = await readCachedCatalog(cache, url)
+  if (trusted && fallback.entries.length) hotCatalog = { url, result: fallback }
+  return fallback
+}
+
+async function readCatalogText(response: Response, options?: CatalogLoadOptions) {
+  if (!options?.onUpdate) return response.text()
+  const reader = response.body?.getReader?.()
+  if (!reader) return response.text()
+  const scan = createCatalogScan()
+  const collected: SoundEntry[] = []
+  const decoder = new TextDecoder()
+  let shown = 0
+  let closed = false
+  for (;;) {
+    const step = await reader.read()
+    if (step.done) break
+    const piece = decoder.decode(step.value, { stream: true })
+    if (closed) {
+      scan.text += piece
+      continue
+    }
+    const pulled = pullCatalogEntries(scan, piece)
+    if (pulled.entries.length) {
+      collected.push(...pulled.entries)
+      if (collected.length >= 8 && collected.length - shown >= 8) {
+        shown = collected.length
+        options.onUpdate({ entries: collected.slice(), status: 'ok' })
+      }
+    }
+    if (pulled.done || pulled.rejected) closed = true
+  }
+  scan.text += decoder.decode()
+  if (collected.length) options.onUpdate({ entries: collected.slice(), status: 'ok' })
+  return scan.text
 }
 
 async function readCachedCatalog(cache: SoundCache | undefined, url: string): Promise<CatalogResult> {
   if (!cache) return finishCatalog([], 'missing')
   try {
-    const bytes = await cache.get(url)
+    const compact = await cache.get(`${url}${COMPACT_SUFFIX}`)
+    const bytes = compact ?? await cache.get(url)
     if (!bytes) return finishCatalog([], 'missing')
     const json = JSON.parse(new TextDecoder().decode(bytes)) as unknown
     const remote = parseSoundScoutCatalog(json)
@@ -327,6 +470,9 @@ export async function fetchCatalogSound(entry: SoundEntry, options?: FetchSoundO
     attempts: options?.attempts,
     delayMs: options?.delayMs,
     onProgress: options?.onProgress,
+    onChunk: options?.onChunk,
+    priority: options?.priority,
+    signal: options?.signal,
     sha256: options?.sha256 ?? entry.sha256,
     totalBytes: options?.totalBytes ?? entry.bytes,
   })
