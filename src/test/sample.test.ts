@@ -141,7 +141,7 @@ describe('sampler and looper', () => {
     expect(lane.gain).toBeCloseTo(0.25)
   })
 
-  it('uses the offline stretch for a bounce and the preview stretch while playing', () => {
+  it('plays a tonal sampler with the same phase vocoder the bounce uses', () => {
     const play = (offline: boolean) => {
       const plugin = createPlugin('sampler')
       plugin.sampler!.bufferId = 'tone'
@@ -165,7 +165,10 @@ describe('sampler and looper', () => {
     const live = play(false)
     clean(bounced)
     clean(live)
-    expect(bounced.some((sample, index) => sample !== live[index])).toBe(true)
+    // Tonal material keeps the phase vocoder while playing, so the live note
+    // does not jump when the bounce replaces it.
+    expect(live.length).toBe(bounced.length)
+    expect(bounced.some((sample, index) => sample !== live[index])).toBe(false)
   })
 
   it('places beat slices on exact beat boundaries', () => {

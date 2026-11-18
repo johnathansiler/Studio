@@ -172,7 +172,7 @@ describe('sound library', () => {
     expect(proxied).toBe(false)
   })
 
-  it('keeps a loop at its own tempo until sync is turned on', () => {
+  it('follows the song tempo when a loop is placed, and keeps preview at the file tempo', () => {
     const project = createEmptyProject(48000)
     project.tempo = 90
     const loop = new Float32Array(48000)
@@ -185,10 +185,11 @@ describe('sound library', () => {
       bufferId: 'lib_dust',
       clipId: 'clip_dust',
     })
-    expect(placed?.clip.stretch?.followTempo).toBe(false)
+    expect(placed?.clip.stretch?.followTempo).toBe(true)
+    expect(placed?.clip.stretch?.tempoMode).toBe('follow')
     expect(placed?.clip.stretch?.sourceBpm).toBe(120)
     expect(placed?.clip.stretch?.mode).toBe('beats')
-    expect(placed?.clip.durationSamples).toBe(48000)
+    expect(placed?.clip.durationSamples).toBe(64000)
     expect(placed?.clip.startSample).toBe(24000)
     expect(placed?.asset.sampleRate).toBe(48000)
 
@@ -207,10 +208,14 @@ describe('sound library', () => {
     store.addAsset(placed!.asset)
     store.addAudioClip(track.id, placed!.clip)
     store.setTempo(60)
-    expect(track.clips[0].durationSamples).toBe(48000)
-    store.setClipStretch(track.id, placed!.clip.id, { followTempo: true })
     expect(track.clips[0].stretch?.followTempo).toBe(true)
     expect(track.clips[0].durationSamples).toBe(96000)
+    store.setClipStretch(track.id, placed!.clip.id, { followTempo: false })
+    expect(track.clips[0].stretch?.followTempo).toBe(false)
+    expect(track.clips[0].stretch?.tempoMode).toBeUndefined()
+    const held = track.clips[0].durationSamples
+    store.setTempo(80)
+    expect(track.clips[0].durationSamples).toBe(held)
 
     const tone = sine(440, 0.5, 48000)
     const slow = createEmptyProject(48000)

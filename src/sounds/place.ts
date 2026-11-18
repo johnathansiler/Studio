@@ -3,7 +3,7 @@ import { interactiveAudioContext } from '../audio/micTap'
 import { normalizePeak } from '../audio/level'
 import { bpmFromName, fitLoopBeats } from '../audio/loopSeam'
 import { resampleSinc } from '../audio/quality/resample'
-import { defaultStretch, detectBpm } from '../audio/stretch/engine'
+import { defaultStretch, detectBpm, timelineSamples } from '../audio/stretch/engine'
 import type { StretchMode } from '../model/types'
 import { quartersPerBar } from '../model/time'
 import { uid, type AudioAsset, type AudioClip, type Project } from '../model/types'
@@ -25,11 +25,22 @@ function fitLength(channel: Float32Array, length: number) {
   return out
 }
 
-/** Drums keep their attacks. Everything else uses the phase vocoder so pitch stays put. */
+/**
+ * Drums keep their attacks. A pitched loop uses the phase vocoder so the note stays put.
+ * An 808 bass is a note even when the file is also tagged beat, drum, kick, or BD.
+ * A hat, snare, clap, or shaker stays a drum loop when the kit happens to be an 808.
+ */
 export function stretchModeFor(entry: SoundEntry): StretchMode {
-  const tags = `${entry.name} ${entry.tags.join(' ')}`.toLowerCase()
-  if (/\b(drum|kick|snare|hat|perc|beat|clap|shaker)\b/.test(tags)) return 'beats'
+  const hay = `${entry.name} ${entry.path} ${entry.category ?? ''} ${entry.tags.join(' ')}`.toLowerCase()
+  if (pitchedLoop(hay)) return 'pro'
+  if (/\b(drum|kick|snare|hat|perc|beat|clap|shaker)\b/.test(hay)) return 'beats'
   return 'pro'
+}
+
+function pitchedLoop(hay: string): boolean {
+  if (/\b(bass|sub|tonal|pad|keys|piano|vocal|vox|melody|chord)\b/.test(hay)) return true
+  if (/\b(hat|snare|clap|shaker|cymbal|rim)\b/.test(hay)) return false
+  return /808/.test(hay)
 }
 
 /**
@@ -47,9 +58,9 @@ export function loopBpm(entry: SoundEntry, channel?: Float32Array, sampleRate?: 
 
 /**
  * Build the asset and clip for the playhead.
- * The clip keeps the file length and the file tempo. Tempo sync is a separate
- * choice on the clip, because stretching an 808 or any tonal loop changes the
- * tone before anyone has asked for it.
+ * A loop with a catalog tempo follows the song (Follow). The file tempo stays
+ * on the clip so half, double, and lock can still change it. Preview playback
+ * is separate and stays at the file tempo.
  */
 export function placeSound(options: {
   entry: SoundEntry
@@ -67,18 +78,8 @@ export function placeSound(options: {
   const bpm = loopBpm(options.entry, lead, rate)
   const mode = stretchModeFor(options.entry)
   const stretch = bpm
-    ? { ...defaultStretch(lead.length, mode), followTempo: false, sourceBpm: bpm }
+    ? { ...defaultStretch(lead.length, mode), followTempo: true, tempoMode: 'follow' as const, sourceBpm: bpm }
     : defaultStretch(lead.length, mode)
-  if (stretch.sourceBpm) {
-    const fit = fitLoopBeats({
-      samples: lead.length,
-      sampleRate: rate,
-      bpm: stretch.sourceBpm,
-      name: `${options.entry.name} ${options.entry.path}`,
-      beatsPerBar: quartersPerBar(options.project.timeSignature),
-    })
-    if (fit) stretch.sourceBpm = fit.sourceBpm
-  }
   const clip: AudioClip = {
     id: options.clipId || uid('clip'),
     name: options.entry.name,
@@ -92,6 +93,17 @@ export function placeSound(options: {
     source: 'import',
     stretch,
   }
+  if (stretch.followTempo && stretch.sourceBpm) {
+    const fit = fitLoopBeats({
+      samples: lead.length,
+      sampleRate: rate,
+      bpm: stretch.sourceBpm,
+      name: `${options.entry.name} ${options.entry.path}`,
+      beatsPerBar: quartersPerBar(options.project.timeSignature),
+    })
+    if (fit) stretch.sourceBpm = fit.sourceBpm
+    clip.durationSamples = timelineSamples(clip, options.project)
+  }
   return {
     asset: { id: clip.bufferId, name: options.entry.name, sampleRate: rate, channels },
     clip,
@@ -100,9 +112,9 @@ export function placeSound(options: {
 
 /**
  * Speaker preview at the file tempo.
- * A 105 BPM 808 stretched to the song tempo (usually 120) goes through the
- * phase vocoder or the granular preview. On a bass sine that is a pitch error
- * of tens to hundreds of cents, which is the crunch. Sync stays on the clip.
+ * Only the sample rate is fitted. Stretching a 105 BPM 808 to the song tempo
+ * in the browser preview is what made the bass crunch. The clip on the track
+ * follows the song; this button does not.
  */
 export function previewChannelsFor(
   _entry: SoundEntry,

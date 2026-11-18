@@ -1,3 +1,4 @@
+import { tempoFollowsProject } from '../model/clipTempo'
 import type { AudioClip, StretchMode } from '../model/types'
 import { sourceSamplesOf } from '../audio/stretch/engine'
 import { selectClip } from '../state/select'
@@ -124,9 +125,11 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
         <button type="button" title="Set the song tempo to this clip" disabled={stretch?.sourceBpm == null} onClick={() => store.adaptClipTempo(trackId, clip.id)}>
           Use for song
         </button>
-        <button type="button" title="Stretch this clip to the song tempo without changing its pitch" disabled={stretch?.sourceBpm == null} onClick={() => store.conformClipTempo(trackId, clip.id)}>
-          Fit to song
-        </button>
+        {tempoFollowsProject(stretch) ? null : (
+          <button type="button" title="Stretch this clip to the song tempo without changing its pitch" disabled={stretch?.sourceBpm == null} onClick={() => store.conformClipTempo(trackId, clip.id)}>
+            Fit to song
+          </button>
+        )}
       </div>
       {(stretch?.markers ?? []).map((marker) => (
         <div className="row" key={marker.id}>

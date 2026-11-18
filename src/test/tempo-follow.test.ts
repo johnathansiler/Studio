@@ -222,7 +222,17 @@ describe('loaded loop tempo follow', () => {
     expect(Math.abs((stretchSlot(key120)?.channels?.[0].length ?? 0) - lengthAt(120))).toBeLessThan(rate * 0.02)
     expect(Math.abs((stretchSlot(key90)?.channels?.[0].length ?? 0) - lengthAt(90))).toBeLessThan(rate * 0.02)
     expect(Math.abs((stretchSlot(key140)?.channels?.[0].length ?? 0) - lengthAt(140))).toBeLessThan(rate * 0.02)
-    expect(heard.filter((key) => key === key90 || key === key120 || key === key140)).toEqual([key140])
+    expect(stretchSlot(key120)?.quality).toBe('hq')
+    expect(stretchSlot(key90)?.quality).toBe('hq')
+    expect(stretchSlot(key140)?.quality).toBe('hq')
+    expect(heard).toEqual([])
+    store.project.tempo = 140
+    const played140 = readStretch(key140, asset.channels, clip, store.project)[0]
+    expect(Math.abs(played140.length - lengthAt(140))).toBeLessThan(rate * 0.02)
+    store.project.tempo = 120
+    const played120 = readStretch(key120, asset.channels, clip, store.project)[0]
+    expect(Math.abs(played120.length - lengthAt(120))).toBeLessThan(rate * 0.02)
+    expect(played140.length).not.toBe(played120.length)
     expect(stretchCacheKey(clip, { ...store.project, tempo: 120 })).toBe(key120)
   })
 })

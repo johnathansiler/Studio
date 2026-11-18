@@ -14,6 +14,7 @@ import {
 import { LEGACY_INDEX_URL, SOUND_CATALOG_FILE, SOUND_CATALOG_URL, SOUND_DATASET_BASE, SOUND_DATASET_COMMIT, SOUND_VERSION_PREFIX, SOUNDSCOUT_VERSION } from '../sounds/contract'
 import { licenseAllowed } from '../sounds/license'
 import { legacySoundFileUrl, soundCatalogUrl, soundFileUrl } from '../sounds/source'
+import { timelineSamples } from '../audio/stretch/engine'
 import { placeSound, previewChannelsFor } from '../sounds/place'
 import { libraryMatchesCategory, soundsForRole } from '../sounds/roles'
 import { ensureDefaultKit } from '../instruments/pads/load'
@@ -135,16 +136,18 @@ describe('SoundScout catalog', () => {
     const naturalPreview = previewChannelsFor(natural, [new Float32Array(480)], 48000, createEmptyProject(48000), 0)
     expect(naturalPreview[0]?.length).toBe(480)
     const timed = catalog.find((entry) => entry.type === 'loop' && entry.bpm)!
+    const project = createEmptyProject(48000)
     const timedPlaced = placeSound({
       entry: timed,
       channels: [new Float32Array(480)],
       fileRate: 48000,
-      project: createEmptyProject(48000),
+      project,
       startSample: 0,
     })
-    expect(timedPlaced?.clip.stretch?.followTempo).toBe(false)
+    expect(timedPlaced?.clip.stretch?.followTempo).toBe(true)
+    expect(timedPlaced?.clip.stretch?.tempoMode).toBe('follow')
     expect(timedPlaced?.clip.stretch?.sourceBpm).toBe(timed.bpm)
-    expect(timedPlaced?.clip.durationSamples).toBe(480)
+    expect(timedPlaced?.clip.durationSamples).toBe(timelineSamples(timedPlaced!.clip, project))
     expect(() => soundFileUrl('loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => soundFileUrl('one-shots/drums/kick.wav')).toThrow(/Hugging Face|library/)
     expect(legacySoundFileUrl('loops/dust.wav')).toBe(`${SOUND_DATASET_BASE}/loops/dust.wav`)
