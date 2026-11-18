@@ -2,6 +2,7 @@ import type { AudioClip, StretchMode } from '../model/types'
 import { sourceSamplesOf } from '../audio/stretch/engine'
 import { selectClip } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { ClipTempoControl } from './ClipTempoControl'
 import './songMap.css'
 
 const MODES: { id: StretchMode; label: string }[] = [
@@ -94,14 +95,6 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
         >
           Formant
         </button>
-        <button
-          type="button"
-          className={`text-btn ${stretch?.followTempo ? 'on' : ''}`}
-          aria-pressed={stretch?.followTempo ?? false}
-          onClick={() => store.setClipStretch(trackId, shown.id, { followTempo: !stretch?.followTempo })}
-        >
-          Tempo
-        </button>
         <label>
           BPM
           <input
@@ -125,6 +118,7 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
           +
         </button>
       </div>
+      <ClipTempoControl store={store} trackId={trackId} clipId={shown.id} />
       <div className="smart-row">
         <span>{stretch?.sourceBpm ? `${stretch.sourceBpm.toFixed(1)} BPM in this clip` : 'No tempo in this clip yet'}</span>
         <button type="button" title="Set the song tempo to this clip" disabled={stretch?.sourceBpm == null} onClick={() => store.adaptClipTempo(trackId, clip.id)}>

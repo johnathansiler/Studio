@@ -1,12 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { formatLoopReadout, loopGridBeats, loopSnapMinSamples, resolveLoopDrag, type LoopDragMode } from '../model/loopEdit'
-import { positionReadout } from '../model/snapGrid'
+import { formatLoopReadout, loopDragLabel, loopGridBeats, loopLabelCenter, loopSnapMinSamples, loopSnapSpec, resolveStickyLoopDrag, type LoopDragMode, type LoopSnapUnit } from '../model/loopEdit'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { quartersPerBar } from '../model/time'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
-import { armFinePress } from './integerTick'
 import { LOOP_DRAG_THRESHOLD, LOOP_GRIP_VISUAL, LOOP_TOUCH_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, resolveGripParks, type GripPark, type LoopGripBox } from './loopGrips'
 import './loopRegion.css'
 
@@ -34,13 +32,15 @@ type DragState = {
   originX: number
   originY: number
   minSamples: number
+  heldBeat: number
+  snapUnit: LoopSnapUnit
+  snapX: number | null
   moved: boolean
   changed: boolean
   onBody: boolean
   fine: boolean
   finger: number | null
-  read: { x: number; text: string } | null
-  cancelFine: () => void
+  read: { text: string } | null
 }
 
 export function LoopRegion({
@@ -95,6 +95,8 @@ export function LoopRegion({
   gridRef.current = gridBeats
   const onSeekRef = useRef(onSeek)
   onSeekRef.current = onSeek
+  const xAtRef = useRef(xAt)
+  xAtRef.current = xAt
 
   useLayoutEffect(() => {
     const host = hostRef.current
@@ -182,21 +184,44 @@ export function LoopRegion({
     state.mode = mode
     const rect = host.getBoundingClientRect()
     const projectNow = store.project
+    // Shift or Alt leaves the grid. Snap on stays on bars (or beats, when zoomed in) for the whole drag.
     const fine = point.shift || point.alt || state.fine
-    const next = resolveLoopDrag(
-      { mode, anchor: state.anchor, originStart: state.originStart, originEnd: state.originEnd },
+    const snapping = !fine && gridRef.current > 0
+    const spec = loopSnapSpec({
+      snap: snapping,
+      barBeats: quartersPerBar(projectNow.timeSignature),
+      beatBeats: 4 / Math.max(1, projectNow.timeSignature.denominator),
+      pxPerQuarter: quarterPxAt(projectNow, rect, sampleAtRef.current),
+    })
+    // Beats can be the snap grid once a beat is wide enough. The loop still cannot shrink under one bar.
+    const minSamples = snapping
+      ? loopSnapMinSamples(projectNow, state.mode === 'start' ? state.originEnd : state.originStart, quartersPerBar(projectNow.timeSignature))
+      : (fine ? state.minSamples : 1)
+    const next = resolveStickyLoopDrag(
+      {
+        mode,
+        anchor: state.anchor,
+        originStart: state.originStart,
+        originEnd: state.originEnd,
+        heldBeat: state.heldBeat,
+      },
       sampleAtRef.current(point.x, rect),
       projectNow,
-      fine ? 0 : gridRef.current,
-      fine,
-      state.minSamples,
+      spec,
+      minSamples,
     )
-    const shown = state.mode === 'end' ? next.end : next.start
-    const beat = projectSampleBeat(projectNow, shown)
-    state.finger = point.x - rect.left
-    state.read = { x: point.x - rect.left, text: positionReadout(beat, quartersPerBar(projectNow.timeSignature)) }
+    state.heldBeat = next.heldBeat
+    state.snapUnit = spec.unit
+    const target = state.mode === 'end' ? next.end : next.start
+    state.snapX = spec.unit === 'free' ? null : xAtRef.current(target, host.clientWidth)
+    state.finger = spec.unit === 'free' ? point.x - rect.left : null
+    state.read = { text: loopDragLabel(projectNow, next.start, next.end).text }
     const same = next.start === projectNow.loopStartSample && next.end === projectNow.loopEndSample && projectNow.loopEnabled
     if (!same) {
+      const stepped = next.start !== projectNow.loopStartSample || next.end !== projectNow.loopEndSample
+      // One tick per grid landing. Free drags stay quiet, and a repeat of the same bar does not buzz.
+      if (spec.unit !== 'free' && stepped) pulseSnap()
+      // Drafted, so playback extends the queued window instead of cutting the buffer on every pixel.
       store.setLoop(true, next.start, next.end, true)
       state.changed = true
     }
@@ -206,7 +231,6 @@ export function LoopRegion({
   endRef.current = (clientX: number) => {
     const state = drag.current
     if (!state) return
-    state.cancelFine()
     drag.current = null
     pendingMove.current = null
     setActiveEdge(null)
@@ -259,8 +283,15 @@ export function LoopRegion({
     confineHeight: confineHits,
   })
   const body = { left, right: left + barWidth, top: 0, bottom: hostRef.current?.clientHeight || 44, mode: grips.mode }
-  const finger = drag.current?.finger ?? null
-  const liveRead = drag.current?.read ?? null
+  const live = drag.current
+  const finger = live?.moved ? live.finger : null
+  const liveRead = live?.moved ? live.read : null
+  const snapX = live?.moved ? live.snapX : null
+  const labelViewLeft = followScroll ? visible.viewLeft : viewLeft
+  const labelViewWidth = followScroll ? visible.viewWidth : viewWidth
+  const labelLeft = liveRead
+    ? loopLabelCenter(left, barWidth, 96, labelViewLeft, labelViewWidth || viewWidth)
+    : 0
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary) return
@@ -284,6 +315,14 @@ export function LoopRegion({
     const projectNow = store.project
     const fine = event.shiftKey || event.altKey
     const pointerId = event.pointerId
+    const snapping = !fine && gridRef.current > 0
+    const downSpec = loopSnapSpec({
+      snap: snapping,
+      barBeats: quartersPerBar(projectNow.timeSignature),
+      beatBeats: 4 / Math.max(1, projectNow.timeSignature.denominator),
+      pxPerQuarter: quarterPxAt(projectNow, rect, sampleAtRef.current),
+    })
+    const heldSample = edge === 'end' ? projectNow.loopEndSample : projectNow.loopStartSample
     drag.current = {
       pointerId,
       pointerType: event.pointerType,
@@ -293,19 +332,17 @@ export function LoopRegion({
       originEnd: projectNow.loopEndSample,
       originX: event.clientX,
       originY: event.clientY,
-      minSamples: loopSnapMinSamples(projectNow, projectNow.loopStartSample, gridRef.current),
+      minSamples: snapping ? loopSnapMinSamples(projectNow, projectNow.loopStartSample, downSpec.gridBeats) : 1,
+      heldBeat: projectSampleBeat(projectNow, heldSample),
+      snapUnit: downSpec.unit,
+      snapX: null,
       moved: false,
       changed: false,
       onBody,
       fine,
       finger: null,
       read: null,
-      cancelFine: () => undefined,
     }
-    drag.current.cancelFine = armFinePress(event.pointerType, () => {
-      const state = drag.current
-      if (state) state.fine = true
-    })
     if (edge === 'start' || edge === 'end' || edge === 'move') setActiveEdge(edge)
     const move = (ev: PointerEvent) => {
       const state = drag.current
@@ -353,6 +390,7 @@ export function LoopRegion({
       data-loop-span={readout.span}
       data-park-start={followScroll ? parks.start : undefined}
       data-park-end={followScroll ? parks.end : undefined}
+      data-loop-snap={live?.moved ? live.snapUnit : undefined}
       role="group"
       aria-label={`Loop, ${readout.text}. Drag the edges to resize. Drag the middle to move it. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       style={followScroll ? {
@@ -380,8 +418,9 @@ export function LoopRegion({
         {parks.start === 'right' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} parked="right" />}
         {parks.end === 'right' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} parked="right" />}
       </ParkDock>
+      {snapX != null && <i className="snap-line loop-snap-target" data-loop-snap-target="1" style={{ left: snapX }} />}
       {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
-      {liveRead && <em className="loop-drag-read" data-loop-drag-read="1" style={{ left: liveRead.x }}>{liveRead.text}</em>}
+      {liveRead && <em className="loop-drag-read" data-loop-drag-read="1" data-loop-drag-label={liveRead.text} style={{ left: labelLeft }}>{liveRead.text}</em>}
     </div>
   )
 }
@@ -460,6 +499,26 @@ export function SongLoopStrip({ store, onSeek }: { store: ProjectStore; onSeek?:
 
 function near(a: number, b: number) {
   return Math.abs(a - b) < 0.5
+}
+
+/** Pixels per quarter note, measured across the ruler so zoom decides bar vs beat snap. */
+function quarterPxAt(project: Project, rect: DOMRect, sampleAt: (clientX: number, rect: DOMRect) => number) {
+  const x0 = rect.left + 16
+  const x1 = x0 + 64
+  const beats = projectSampleBeat(project, sampleAt(x1, rect)) - projectSampleBeat(project, sampleAt(x0, rect))
+  if (!(Math.abs(beats) > 1e-4)) return 45
+  return 64 / Math.abs(beats)
+}
+
+/** One short tick when the loop lands on the next bar or beat. Missing haptics are ignored. */
+function pulseSnap() {
+  const nav = typeof navigator === 'undefined' ? null : navigator as Navigator & { vibrate?: (pattern: number) => boolean }
+  if (!nav?.vibrate) return
+  try {
+    nav.vibrate(8)
+  } catch {
+    /* this device has no haptic */
+  }
 }
 
 function visualGrip(host: HTMLElement, clientX: number, clientY: number, slop = 0): 'start' | 'end' | null {

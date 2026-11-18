@@ -9,6 +9,7 @@ import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { SnapChoices } from './UtilitySheets'
 import { DeleteTrackConfirm, applyTrackDelete } from './equalGrid'
 import { useScreenOverlay } from './screenOverlay'
+import { ClipTempoControl } from './ClipTempoControl'
 import {
   phoneContextKind,
   type PhonePlace,
@@ -210,6 +211,7 @@ export function PhoneDock({
   const gridLabel = SNAP_DIVISIONS.find((item) => item.id === division)?.label ?? division
   const snapLabel = `Snap ${snapOn ? gridLabel : 'Off'}`
   const clip = selectedClip(store)
+  const audioTempo = clip?.kind === 'audio' ? clip : null
   const notes = store.selectedNoteIds.length > 0 && Boolean(store.selectedMidiClipId)
   const kind = phoneContextKind({
     sheet: menuOpen ? 'menu' : browseOpen ? 'browse' : toolsOpen ? 'tools' : null,
@@ -322,6 +324,7 @@ export function PhoneDock({
       ) : null}
       {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
       {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
+      {audioTempo ? <ClipTempoControl store={store} trackId={audioTempo.trackId} clipId={audioTempo.clipId} /> : null}
       <div className="phone-context btn-tray phone-context-tray" role="toolbar" aria-label="Actions" data-phone-context={kind}>
         {kind === 'clip' && clip && (
           <>

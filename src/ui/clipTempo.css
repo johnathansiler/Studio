@@ -1,0 +1,89 @@
+/* Clip tempo sits in the dock, in the same tray family as the clip actions.
+   It is only mounted while an audio clip is selected. */
+
+.clip-tempo {
+  order: 0;
+  display: flex;
+  flex-flow: row wrap;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow:
+    inset 0 3px 10px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.clip-tempo button[data-tempo-mode] {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text, #e7eee8);
+  font: 700 13px/1 var(--font, inherit);
+  letter-spacing: 0;
+}
+
+.clip-tempo button[data-tempo-mode][aria-pressed='true'] {
+  background-color: var(--accent, #73c48f);
+  background-image: var(--face);
+  color: var(--accent-ink, #102117);
+}
+
+.clip-tempo-bpm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1.15 1 72px;
+  min-width: 72px;
+  height: 44px;
+  margin: 0;
+  padding: 0 6px;
+  border-radius: 8px;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text, #e7eee8);
+  font: 700 11px/1 var(--font, inherit);
+}
+
+.clip-tempo-bpm input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: #0c110f;
+  color: inherit;
+  font: 700 16px/1 var(--font, inherit);
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-tempo-readout {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 3px 6px 2px;
+  color: var(--muted, #b7c4bb);
+  font: 600 12px/1.25 var(--font, inherit);
+}
+
+.clip-sheet .clip-tempo {
+  margin-top: 8px;
+}

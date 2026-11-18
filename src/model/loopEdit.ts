@@ -29,6 +29,90 @@ export function loopGridBeats(project: Pick<Project, 'snap' | 'timeSignature'> &
   return activeGridBeats(project)
 }
 
+/**
+ * Share of a bar (or beat) on each side of a grid line that grabs the pointer.
+ * About a third of the cell, so landing on 1, 2, 3, or 4 bars does not need a pixel-perfect finger.
+ */
+export const LOOP_SNAP_CAPTURE = 0.36
+/** Capture zone in pixels. Below this a snap line is finer than a finger can hold. */
+export const LOOP_CAPTURE_MIN_PX = 28
+/** Keep a gap between neighbors so a line can stay sticky instead of flickering at the midpoint. */
+export const LOOP_CAPTURE_MAX_FRACTION = 0.45
+
+export type LoopSnapUnit = 'bar' | 'beat' | 'free'
+
+export interface LoopSnapSpec {
+  unit: LoopSnapUnit
+  /** Quarter notes between snap lines. 0 is free movement. */
+  gridBeats: number
+  /** How close, in quarter notes, the pointer must be before a line takes it. */
+  captureBeats: number
+}
+
+/** A meter beat is comfortable to aim at once its capture zone is a practical finger width. */
+export function loopBeatComfortPx() {
+  return LOOP_CAPTURE_MIN_PX / LOOP_SNAP_CAPTURE
+}
+
+/**
+ * Snap resolution for a loop drag.
+ * Snap off is free. Snap on uses bars until a beat is wide enough to grab, then beats.
+ * The capture zone is ~36% of that cell at a normal phone zoom, and never a sliver of pixels
+ * unless the cell itself is already that narrow.
+ */
+export function loopSnapSpec(input: {
+  snap: boolean
+  /** Quarter notes in one bar. */
+  barBeats: number
+  /** Quarter notes in one meter beat. */
+  beatBeats: number
+  /** Screen pixels per quarter note at the current zoom. */
+  pxPerQuarter: number
+}): LoopSnapSpec {
+  if (!input.snap) return { unit: 'free', gridBeats: 0, captureBeats: 0 }
+  const bar = Math.max(1e-6, input.barBeats)
+  const beat = Math.max(1e-6, input.beatBeats)
+  const px = Number.isFinite(input.pxPerQuarter) && input.pxPerQuarter > 0 ? input.pxPerQuarter : 45
+  const beatPx = px * beat
+  const unit: LoopSnapUnit = beatPx >= loopBeatComfortPx() - 1e-6 ? 'beat' : 'bar'
+  const gridBeats = unit === 'beat' ? beat : bar
+  return { unit, gridBeats, captureBeats: loopCaptureBeats(gridBeats, px) }
+}
+
+/** Capture distance in quarter notes. Scales with zoom, floored to a finger width, capped so neighbors still have a gap. */
+export function loopCaptureBeats(gridBeats: number, pxPerQuarter: number): number {
+  const grid = Math.max(1e-6, gridBeats)
+  const px = Math.max(1, pxPerQuarter)
+  const fraction = LOOP_SNAP_CAPTURE * grid
+  const fromPx = LOOP_CAPTURE_MIN_PX / px
+  const cap = LOOP_CAPTURE_MAX_FRACTION * grid
+  return Math.min(cap, Math.max(fraction, fromPx))
+}
+
+/**
+ * Stick to `heldBeat` until the pointer enters another line's capture zone.
+ * A null hold lands on the nearest line. An off-grid hold stays put until a line captures it,
+ * so the edge does not jump on the first pixel.
+ */
+export function magneticSnapBeat(rawBeat: number, gridBeats: number, captureBeats: number, heldBeat: number | null): number {
+  const raw = Math.max(0, rawBeat)
+  if (!(gridBeats > 0)) return raw
+  const grid = gridBeats
+  const capture = Math.min(grid * (LOOP_CAPTURE_MAX_FRACTION + 0.04), Math.max(0, captureBeats))
+  const nearest = Math.max(0, Math.round(raw / grid) * grid)
+  if (heldBeat == null || !Number.isFinite(heldBeat)) return nearest
+  const held = Math.max(0, heldBeat)
+  const heldLine = Math.max(0, Math.round(held / grid) * grid)
+  const heldOnGrid = Math.abs(held - heldLine) <= Math.max(1e-4, grid * 1e-4)
+  if (!heldOnGrid) {
+    if (Math.abs(raw - nearest) <= capture + 1e-6) return nearest
+    return held
+  }
+  const sticky = grid - capture
+  if (Math.abs(raw - heldLine) <= sticky + 1e-6) return heldLine
+  return nearest
+}
+
 /** One snap unit, in samples. Free movement (no grid) keeps a single sample so the ends cannot cross. */
 export function loopSnapMinSamples(
   project: Pick<Project, 'tempo' | 'tempoMap' | 'automation' | 'sampleRate' | 'timeSignature'>,
@@ -129,6 +213,95 @@ export function resolveLoopDrag(
   return finish(start, end, min)
 }
 
+export interface StickyLoopDrag extends LoopDrag {
+  /** Beat the active edge is sticking to. Pass the origin beat so a grab does not jump. */
+  heldBeat: number | null
+}
+
+/**
+ * Loop drag with magnetic bar or beat snap.
+ * The pointer delta is applied first, so a parked handle follows the finger instead of jumping under it.
+ * Snap off (`spec.unit === 'free'`) keeps that delta. Handles cannot cross, and a bar grid cannot shrink below one bar.
+ */
+export function resolveStickyLoopDrag(
+  drag: StickyLoopDrag,
+  sample: number,
+  project: Pick<Project, 'tempo' | 'tempoMap' | 'automation' | 'sampleRate'>,
+  spec: LoopSnapSpec,
+  minSamples: number,
+): { start: number; end: number; heldBeat: number } {
+  const min = Math.max(1, Math.round(minSamples))
+  const at = Math.max(0, sample)
+  const free = spec.unit === 'free' || !(spec.gridBeats > 0)
+  const toBeat = (value: number) => projectSampleBeat(project, Math.max(0, value))
+  const toSample = (beat: number) => Math.max(0, Math.round(projectBeatSample(project, Math.max(0, beat))))
+  const hard = (beat: number, bias: 'ceil' | 'floor') => {
+    if (free) return Math.max(0, beat)
+    const steps = Math.max(0, beat) / spec.gridBeats
+    const snapped = bias === 'ceil' ? Math.ceil(steps - 1e-6) : Math.floor(steps + 1e-6)
+    return Math.max(0, snapped * spec.gridBeats)
+  }
+  const stick = (rawSample: number, held: number | null) => {
+    const beat = toBeat(rawSample)
+    if (free) return { beat, sample: Math.max(0, Math.round(rawSample)) }
+    const next = magneticSnapBeat(beat, spec.gridBeats, spec.captureBeats, held)
+    return { beat: next, sample: toSample(next) }
+  }
+
+  if (drag.mode === 'end') {
+    const raw = Math.max(0, drag.originEnd + (at - drag.anchor))
+    let landed = stick(raw, drag.heldBeat)
+    if (landed.sample < drag.originStart + min) {
+      const liftedBeat = free ? toBeat(drag.originStart + min) : hard(toBeat(drag.originStart + min), 'ceil')
+      const lifted = free ? drag.originStart + min : toSample(liftedBeat)
+      const end = lifted < drag.originStart + min ? drag.originStart + min : lifted
+      landed = { beat: end === lifted ? liftedBeat : toBeat(end), sample: end }
+    }
+    const done = finish(drag.originStart, landed.sample, min)
+    return { ...done, heldBeat: Math.abs(done.end - landed.sample) < 1 ? landed.beat : toBeat(done.end) }
+  }
+  if (drag.mode === 'start') {
+    const raw = Math.max(0, drag.originStart + (at - drag.anchor))
+    let landed = stick(raw, drag.heldBeat)
+    const limit = Math.max(0, drag.originEnd - min)
+    if (landed.sample > limit) {
+      const droppedBeat = free ? toBeat(limit) : hard(toBeat(limit), 'floor')
+      const dropped = free ? limit : toSample(droppedBeat)
+      const start = dropped > limit ? limit : dropped
+      landed = { beat: start === dropped ? droppedBeat : toBeat(start), sample: Math.max(0, start) }
+    }
+    if (drag.originEnd - landed.sample < min) {
+      const start = Math.max(0, drag.originEnd - min)
+      landed = { beat: toBeat(start), sample: start }
+    }
+    const done = finish(landed.sample, drag.originEnd, min)
+    return { ...done, heldBeat: Math.abs(done.start - landed.sample) < 1 ? landed.beat : toBeat(done.start) }
+  }
+  if (drag.mode === 'move') {
+    const len = Math.max(min, Math.round(drag.originEnd - drag.originStart))
+    const raw = Math.max(0, drag.originStart + (at - drag.anchor))
+    const landed = stick(raw, drag.heldBeat)
+    const done = finish(landed.sample, landed.sample + len, min)
+    return { ...done, heldBeat: Math.abs(done.start - landed.sample) < 1 ? landed.beat : toBeat(done.start) }
+  }
+  const anchor = stick(Math.max(0, drag.anchor), null)
+  const pointer = stick(at, drag.heldBeat)
+  let start = Math.min(anchor.sample, pointer.sample)
+  let end = Math.max(anchor.sample, pointer.sample)
+  if (end - start < min) {
+    if (pointer.sample >= anchor.sample) {
+      end = free ? start + min : toSample(hard(toBeat(start + min), 'ceil'))
+      if (end < start + min) end = start + min
+    } else {
+      start = free ? Math.max(0, end - min) : toSample(hard(toBeat(Math.max(0, end - min)), 'floor'))
+      if (end - start < min) start = Math.max(0, end - min)
+      if (end - start < min) end = start + min
+    }
+  }
+  const done = finish(start, end, min)
+  return { ...done, heldBeat: toBeat(pointer.sample >= anchor.sample ? done.end : done.start) }
+}
+
 function compactPlace(place: MusicalPlace) {
   return `${place.bar}.${place.beat}.${place.tick === 0 ? 0 : place.tick}`
 }
@@ -164,6 +337,13 @@ export function formatLoopReadout(project: Project, startSample: number, endSamp
   const to = musicalAt(project, Math.max(0, endSample))
   const span = downbeat(from) && downbeat(to) ? `${from.bar} → ${to.bar}` : `${compactPlace(from)} → ${compactPlace(to)}`
   return { length, span, text: `${length} · ${span}` }
+}
+
+/** Length plus the start bar, for the label shown while a loop handle is dragging. */
+export function loopDragLabel(project: Project, startSample: number, endSample: number): { length: string; bar: string; text: string } {
+  const read = formatLoopReadout(project, startSample, endSample)
+  const bar = String(musicalAt(project, Math.max(0, startSample)).bar)
+  return { length: read.length, bar, text: `${read.length} / ${bar}` }
 }
 
 /**
