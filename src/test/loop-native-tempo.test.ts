@@ -63,6 +63,58 @@ describe('808 loop preview and track playback', () => {
       category: 'hat',
       bpm: 105,
     }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: '808 Snare Loop',
+      tags: ['snare', '808', 'beat'],
+      category: 'snare',
+    }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: '808 Clap Loop',
+      tags: ['clap', '808'],
+      category: 'clap',
+    }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: 'Shakers 16ths',
+      tags: ['shakers', 'loop'],
+      category: 'percussion',
+    }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: 'SHAKER1-ALPGRDN (94)',
+      tags: ['loop', 'acoustic', 'nature'],
+      category: 'nature',
+      bpm: 94,
+    }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: 'BOTH-1 (100)',
+      tags: ['loop', 'acoustic', 'percussion', 'cowbell', 'bpm_100'],
+      category: 'percussion',
+      bpm: 100,
+    }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: 'INB-16THS (100)',
+      tags: ['loop', 'acoustic', 'percussion', 'tambourine', 'bpm_100'],
+      category: 'percussion',
+      bpm: 100,
+    }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: 'Downbeat Drums #1',
+      path: 'loops/downbeat-drums-1.wav',
+      tags: ['loop', 'drums', 'percussion'],
+      category: 'drums',
+      bpm: 96,
+    }))).toBe('beats')
+    expect(stretchModeFor(bassLoop({
+      name: 'Felt Piano Loop',
+      tags: ['loop', 'keys', 'piano'],
+      category: 'keys',
+      bpm: 90,
+    }))).toBe('pro')
+    expect(stretchModeFor(bassLoop({
+      name: 'Night Melody',
+      tags: ['loop', 'melody'],
+      category: 'music',
+      bpm: 100,
+    }))).toBe('pro')
 
     const project = createEmptyProject(48000)
     project.tempo = 120

@@ -28,19 +28,27 @@ function fitLength(channel: Float32Array, length: number) {
 /**
  * Drums keep their attacks. A pitched loop uses the phase vocoder so the note stays put.
  * An 808 bass is a note even when the file is also tagged beat, drum, kick, or BD.
- * A hat, snare, clap, or shaker stays a drum loop when the kit happens to be an 808.
+ * Hats, snares, claps, shakers, cowbells, and tambourines stay on the beats stretcher,
+ * including plurals and names like SHAKER1, and even when the kit is an 808.
  */
 export function stretchModeFor(entry: SoundEntry): StretchMode {
   const hay = `${entry.name} ${entry.path} ${entry.category ?? ''} ${entry.tags.join(' ')}`.toLowerCase()
-  if (pitchedLoop(hay)) return 'pro'
-  if (/\b(drum|kick|snare|hat|perc|beat|clap|shaker)\b/.test(hay)) return 'beats'
+  if (attackLoop(hay)) return 'beats'
+  if (/\b(bass|sub|tonal|pads?|keys|pianos?|vocals?|vox|melod(?:y|ies)|chords?)\b/.test(hay)) return 'pro'
+  if (/808/.test(hay)) return 'pro'
+  if (drumLoop(hay)) return 'beats'
   return 'pro'
 }
 
-function pitchedLoop(hay: string): boolean {
-  if (/\b(bass|sub|tonal|pad|keys|piano|vocal|vox|melody|chord)\b/.test(hay)) return true
-  if (/\b(hat|snare|clap|shaker|cymbal|rim)\b/.test(hay)) return false
-  return /808/.test(hay)
+/** A transient instrument. Checked before the 808 bass rule so a hat in an 808 kit stays a drum. */
+function attackLoop(hay: string): boolean {
+  if (/\b(hats?|snares?|claps?|shakers?|cymbals?|rims?|cowbells?|tambourines?)\b/.test(hay)) return true
+  return /shaker/.test(hay)
+}
+
+/** Drum-machine and kit words, including the plurals the catalog actually uses. */
+function drumLoop(hay: string): boolean {
+  return /\b(drums?|kicks?|snares?|hats?|percussion|percs?|beats?|claps?|shakers?|cymbals?|rims?|toms?|cowbells?|tambourines?)\b/.test(hay)
 }
 
 /**
