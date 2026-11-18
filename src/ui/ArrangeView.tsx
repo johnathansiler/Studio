@@ -353,6 +353,39 @@ export function ArrangeView({
     return () => observer.disconnect()
   }, [])
   useLayoutEffect(() => {
+    const heads = headsRef.current
+    const inner = innerRef.current
+    if (!heads || !inner) return
+    let frame = 0
+    const sync = () => {
+      const gap = heads.querySelector(':scope > .ruler-gap') as HTMLElement | null
+      const laneRows = [...inner.querySelectorAll(':scope > .lane')] as HTMLElement[]
+      const headRows = [...heads.querySelectorAll(':scope > .head')] as HTMLElement[]
+      const first = laneRows[0]
+      if (gap && first) {
+        const prefix = first.offsetTop
+        if (Math.abs(gap.offsetHeight - prefix) > 0.5) gap.style.height = `${prefix}px`
+      }
+      headRows.forEach((head, index) => {
+        const lane = laneRows[index]
+        if (!lane) return
+        const height = lane.offsetHeight
+        if (Math.abs(head.offsetHeight - height) > 0.5) head.style.height = `${height}px`
+      })
+    }
+    const schedule = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(sync)
+    }
+    sync()
+    const observer = new ResizeObserver(schedule)
+    observer.observe(inner)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [laneZoom, phone, project.tracks.length])
+  useLayoutEffect(() => {
     if (!phone) return
     const heads = headsRef.current
     const arrange = heads?.closest('.arrange') as HTMLElement | null
@@ -1229,12 +1262,13 @@ export function ArrangeView({
         </>
       )}
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneScaleAttr(laneZoom)} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
-      <div className="heads-col">
       {!phone && (
         <div className="track-viewfinder-slot" ref={finderRef}>
           <TrackViewfinder store={store} playheadSample={position} />
         </div>
       )}
+      <div className="timeline-add-spacer" aria-hidden="true" />
+      <div className="heads-col">
       <div className="heads">
       <div
         className="heads-scroll"
@@ -1243,7 +1277,13 @@ export function ArrangeView({
           if (event.ctrlKey || event.metaKey) return
           const body = scroller.current
           if (!body) return
+          event.preventDefault()
           body.scrollTop += event.deltaY
+        }}
+        onScroll={() => {
+          const heads = headsRef.current
+          const body = scroller.current
+          if (heads && body && body.scrollTop !== heads.scrollTop) body.scrollTop = heads.scrollTop
         }}
       >
         <div
@@ -1318,14 +1358,13 @@ export function ArrangeView({
             <LanePicker store={store} trackId={track.id} />
           </div>
         ))}
-      </div>
         <div className="track-add">
           <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
         </div>
       </div>
       </div>
+      </div>
       <div className="timeline-col">
-      <div className="timeline-add-spacer" aria-hidden="true" />
       <div className="timeline-stage">
       <div
         className="timeline-scroll"
@@ -1677,6 +1716,7 @@ export function ArrangeView({
                   })}
             </div>
           ))}
+          <div className="column-tail" aria-hidden="true" />
           {marquee && <div className="marquee" style={marquee} />}
           <RemoteTimeline peers={remotes} sampleRate={project.sampleRate} px={px} />
           <div className="playhead" data-playhead="arrange" ref={headNode} style={{ left: 0, willChange: 'transform' }} />

@@ -39,7 +39,7 @@ import { ArrangeView } from './ui/ArrangeView'
 import type { TrackChoice } from './model/addTrack'
 import { collectRecordInputs } from './midi/inputs'
 import { hidesHardwareMidi } from './model/midiTools'
-import { formFactor, type FormFactor } from './ui/form'
+import { formFactor, readPointer, type FormFactor } from './ui/form'
 import { MidiTools } from './ui/MidiTools'
 import { LazySheet, SheetFallback } from './ui/sheetFallback'
 import { ideasPageFromSearch, ideasSheetRequested, type IdeasPage } from './unstuck/ideasPage'
@@ -269,9 +269,13 @@ export function App() {
     return () => window.clearInterval(timer)
   }, [menuOpen, engine])
   const [recordHint, setRecordHint] = useState('')
-  const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
+  const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight, readPointer()))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
+  const [frameSize, setFrameSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
   const phone = form === 'phone'
+  /* Short landscape keeps the squeezed phone chrome. A tall Fold (884x700) uses the portrait phone stack. */
+  const shellLand = phone ? land && frameSize.h <= 520 : land
+  const phoneWide = phone && frameSize.w >= 640 && !shellLand
   const editorView = preferArrangeView(store.view)
   const rackRoll = editorView === 'beats' && store.project.tracks.some((track) => track.midiClips.some((clip) => clip.id === store.selectedMidiClipId && clip.channelId))
   useEffect(() => {
@@ -776,17 +780,23 @@ export function App() {
 
   useEffect(() => {
     const apply = () => {
-      const next = formFactor(window.innerWidth, window.innerHeight)
+      const next = formFactor(window.innerWidth, window.innerHeight, readPointer())
       setForm(next)
       setLand(window.innerWidth > window.innerHeight)
+      setFrameSize({ w: window.innerWidth, h: window.innerHeight })
       setSoundWidth((value) => clampSoundWidth(value, window.innerWidth, soundReserveRef.current))
       document.documentElement.classList.toggle('phone-root', next === 'phone')
       document.documentElement.dataset.form = next
     }
     apply()
     window.addEventListener('resize', apply)
+    const medias = typeof window.matchMedia === 'function'
+      ? ['(any-pointer: coarse)', '(pointer: coarse)'].map((query) => window.matchMedia(query))
+      : []
+    for (const media of medias) media.addEventListener('change', apply)
     return () => {
       window.removeEventListener('resize', apply)
+      for (const media of medias) media.removeEventListener('change', apply)
       document.documentElement.classList.remove('phone-root')
     }
   }, [])
@@ -2031,7 +2041,7 @@ async function importDropped(files: FileList) {
     }}>
     <div
       ref={shellRef}
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phoneArrange ? 'phone-arrange' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) === 'upside-down' ? 'orient-180' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) !== 'upside-down' ? 'keys-landscape' : ''}`}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${shellLand ? 'land' : ''} ${phoneWide ? 'phone-wide menu-anchored' : ''} ${phoneArrange ? 'phone-arrange' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) === 'upside-down' ? 'orient-180' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) !== 'upside-down' ? 'keys-landscape' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
@@ -2048,7 +2058,7 @@ async function importDropped(files: FileList) {
         if (event.dataTransfer.files.length) void importDropped(event.dataTransfer.files)
       }}
     >
-      <div className={phone && !land ? 'phone-top' : 'chrome-stack'}>
+      <div className={phone && !shellLand ? 'phone-top' : 'chrome-stack'}>
       <header className="topbar">
         {!phone && (
           <div className="brand">
@@ -2154,7 +2164,7 @@ async function importDropped(files: FileList) {
           store={store}
           engine={engine}
           syncLabel={session.state.syncLabel}
-          simple={phone && !land}
+          simple={phone && !shellLand}
           phone={phone}
           recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}

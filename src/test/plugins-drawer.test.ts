@@ -281,7 +281,7 @@ describe('arrange plugins drawer', () => {
   it('starts closed, and still opens beside the tracks when asked', () => {
     expect(formFactor(390, 844)).toBe('phone')
     expect(formFactor(476, 752)).toBe('phone')
-    expect(formFactor(880, 1000)).toBe('fold')
+    expect(formFactor(880, 1000)).toBe('phone')
     expect(formFactor(1440, 900)).toBe('desk')
     const store = new ProjectStore(createEmptyProject())
 
@@ -318,8 +318,9 @@ describe('arrange plugins drawer', () => {
     expect(coverOpen).toContain('data-place="bottom"')
 
     const foldOpen = arrange(store, 880, 1000, true)
-    expect(foldOpen).toContain('data-place="side"')
-    expect(foldOpen).toContain('plugins-side')
+    expect(foldOpen).toContain('data-place="bottom"')
+    expect(foldOpen).toContain('plugins-bottom')
+    expect(foldOpen).not.toContain('plugins-side')
 
     const css = readFileSync(new URL('../ui/pluginsDrawer.css', import.meta.url), 'utf8')
     expect(css).toContain('min-height: 40px')
