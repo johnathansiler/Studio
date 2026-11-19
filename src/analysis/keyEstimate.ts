@@ -479,7 +479,9 @@ function scoreGather(heard: Gather, profile: KeyProfile): KeyReading {
   const best = candidateOf(winner)
   const alt = runner && runner.corr > 0.15 ? candidateOf(runner) : null
   const percussive = harmShare < 0.27 && winner.corr < 0.8
-  const noisy = flat > 0.985 && winner.corr < 0.42
+  // A nearly flat chroma still correlates with whichever profile it leans toward. That is noise, not a key.
+  // Tonal loops, including a full mix with drums, sit near 0.75–0.90. White and brown noise sit above 0.98.
+  const noisy = flat > 0.96
   const weak = winner.corr < 0.33 || salient < 3 || confidence < 0.2
   const clear = !percussive && !noisy && !weak
   if (!clear) {

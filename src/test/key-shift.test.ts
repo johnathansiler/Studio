@@ -653,6 +653,63 @@ describe('drop prompt', () => {
     expect(store.keyShiftOffer).toBeNull()
   }, 60000)
 
+  it('hears an untagged loop off the caller, including a silent left channel, then shifts and reverts', async () => {
+    const rate = 22050
+    const store = new ProjectStore(createEmptyProject(rate))
+    store.setScale({ root: 0, scale: 'aeolian' })
+    const audio = progression(MINOR, 9, rate)
+    const placed = placeLoop(store, audio, rate, 'Heard')
+    await offerLoopKeyShift(store, placed.trackId, placed.clipId, { loop: true })
+    expect(store.keyShiftOffer?.line).toBe('Loop is A minor — shift to project key C minor? (+3 st)')
+    expect(store.keyShiftOffer?.semitones).toBe(3)
+    store.dismissKeyShiftOffer()
+    expect(store.keyShiftOffer).toBeNull()
+
+    const quiet = new Float32Array(audio.length)
+    store.addAsset({ id: 'buf-stereo', name: 'Stereo', sampleRate: rate, channels: [quiet, audio] })
+    store.addAudioClip(placed.trackId, {
+      id: 'stereo',
+      name: 'Stereo',
+      bufferId: 'buf-stereo',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: audio.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+      stretch: {
+        sourceSamples: audio.length,
+        semitones: 0,
+        cents: 0,
+        mode: 'pro',
+        followTempo: false,
+        sourceBpm: null,
+        markers: [],
+      },
+    })
+    await offerLoopKeyShift(store, placed.trackId, 'stereo', { loop: true })
+    const offer = store.keyShiftOffer
+    expect(offer?.semitones).toBe(3)
+    expect(offer?.from).toBe('A minor')
+    await runKeyShift(store, offer!, false)
+    const shifted = store.track(placed.trackId)!.clips.find((item) => item.id === 'stereo')!
+    expect(shifted.stretch?.semitones).toBe(3)
+    expect(shifted.keyShift?.to).toBe('C minor')
+    expect(store.project.keyShift).not.toBe('always')
+    store.revertKeyShift(placed.trackId, 'stereo')
+    const restored = store.track(placed.trackId)!.clips.find((item) => item.id === 'stereo')!
+    expect(restored.stretch?.semitones).toBe(0)
+    expect(restored.keyShift).toBeUndefined()
+
+    const offerSource = readFileSync('src/ui/offerKeyShift.ts', 'utf8')
+    const job = readFileSync('src/analysis/keyJob.ts', 'utf8')
+    expect(offerSource).toContain('detectKeyOffThread')
+    expect(offerSource).not.toContain('detectKey(')
+    expect(job).toContain('new Worker')
+    expect(job).not.toContain('huggingface')
+  }, 60000)
+
   it('screenshots the prompt and the dock on a phone and a fold', async () => {
     const rate = 48000
     const store = new ProjectStore(createEmptyProject(rate))

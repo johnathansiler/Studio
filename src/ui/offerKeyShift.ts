@@ -1,3 +1,4 @@
+import { monoMix } from '../analysis/mix'
 import { isRecordedClip } from '../audio/recordTake'
 import type { ProjectStore } from '../state/store'
 import {
@@ -23,7 +24,10 @@ export interface KeyShiftRequest {
 /**
  * After a loop lands, ask whether to move it into the project key.
  * Drums, vocal tracks, and recorded takes are left alone.
+ * A newer drop replaces an offer that is still being heard.
  */
+let offerGeneration = 0
+
 export async function offerLoopKeyShift(
   store: ProjectStore,
   trackId: string,
@@ -31,8 +35,9 @@ export async function offerLoopKeyShift(
   hint: { catalogKey?: string; drum?: boolean; loop?: boolean; tags?: string[] } = {},
 ) {
   if (hint.loop === false) return
+  const generation = ++offerGeneration
   const plan = await planLoopKeyShift(store, trackId, clipId, hint)
-  if (!plan) return
+  if (generation !== offerGeneration || !plan) return
   const request = {
     trackId: plan.trackId,
     clipId: plan.clipId,
@@ -90,10 +95,22 @@ async function planLoopKeyShift(
   let loop = parseMusicalKey(hint.catalogKey)
   if (!loop) {
     const asset = store.buffers.get(clip.bufferId)
-    const channel = asset?.channels[0]
-    if (!asset || !channel?.length) return null
-    const { detectKey } = await import('../analysis/clipKey')
-    const heard = detectKey(channel, asset.sampleRate)
+    if (!asset?.channels.length) return null
+    const offset = Math.max(0, clip.offsetSamples || 0)
+    const source = Math.max(1, clip.stretch?.sourceSamples || clip.durationSamples)
+    const slices = asset.channels
+      .map((channel) => channel.subarray(offset, Math.min(channel.length, offset + source)))
+      .filter((channel) => channel.length > 0)
+    if (!slices.length) return null
+    const { detectKeyOffThread } = await import('../analysis/keyJob')
+    let heard
+    try {
+      heard = await detectKeyOffThread(monoMix(slices), asset.sampleRate)
+    } catch {
+      return null
+    }
+    const live = store.track(trackId)?.clips.find((item) => item.id === clipId)
+    if (!live) return null
     if (!heard.clear || heard.root == null) return null
     if (heard.scale !== 'ionian' && heard.scale !== 'aeolian') return null
     loop = { root: heard.root, minor: heard.scale === 'aeolian', label: heard.label, scaleId: heard.scale }
