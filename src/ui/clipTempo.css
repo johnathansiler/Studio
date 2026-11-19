@@ -84,6 +84,76 @@
   font: 600 12px/1.25 var(--font, inherit);
 }
 
+.clip-tempo button[data-clip-detect] {
+  flex: 1 1 100%;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background-color: #24382e;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text, #e7eee8);
+  font: 700 13px/1 var(--font, inherit);
+}
+
+.clip-tempo button[data-clip-detect]:disabled {
+  opacity: 0.72;
+}
+
+.clip-tempo-note,
+.clip-hearing {
+  flex: 1 1 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.clip-tempo-note {
+  padding: 2px 6px 0;
+  color: var(--muted, #b7c4bb);
+  font: 600 12px/1.3 var(--font, inherit);
+}
+
+.clip-hearing {
+  display: flex;
+  flex-flow: row wrap;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 8px;
+  background-color: #101815;
+}
+
+.clip-hearing p {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--text, #e7eee8);
+  font: 600 13px/1.35 var(--font, inherit);
+}
+
+.clip-hearing button {
+  flex: 1 1 42%;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text, #e7eee8);
+  font: 700 13px/1.2 var(--font, inherit);
+}
+
+.clip-hearing button.primary {
+  background-color: var(--accent, #73c48f);
+  color: var(--accent-ink, #102117);
+}
+
 .clip-sheet .clip-tempo {
   margin-top: 8px;
 }

@@ -134,8 +134,9 @@ import {
   type ParsedMidi,
 } from '../model/midiTools'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track, TrackInstrument } from '../model/types'
+import type { AudioAsset, AudioClip, AutomationWriteMode, ClipHearing, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track, TrackInstrument } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
+import { relateTempo, tempoForSong } from '../model/clipHearing'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { applyFreeze } from '../audio/bounce'
 import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead, stampMidiAtBeat } from '../model/playheadPlace'
@@ -2041,6 +2042,52 @@ export class ProjectStore {
   dismissSmartTempo() {
     this.smartTempo = null
     this.emit()
+  }
+
+  /** Keep a Detect reading on the clip so the dock can show it later. */
+  rememberClipHearing(trackId: string, clipId: string, hearing: ClipHearing) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      clip.hearing = hearing
+    })
+  }
+
+  /**
+   * Project key and scale from a stored Detect reading.
+   * Auto-Tune follows this when its key is Project, which is the default.
+   */
+  useDetectedKey(trackId: string, clipId: string) {
+    const hearing = this.track(trackId)?.clips.find((item) => item.id === clipId)?.hearing
+    if (!hearing?.clearKey || hearing.root == null) return
+    if (hearing.scale !== 'ionian' && hearing.scale !== 'aeolian') return
+    this.setScale({ root: hearing.root, scale: hearing.scale, library: '' })
+  }
+
+  /**
+   * Set the song tempo from a stored Detect reading.
+   * Follow, half, and double stay as they are. An octave disagreement keeps
+   * the tempo already stored on the clip so Follow does not jump an octave.
+   */
+  useDetectedTempo(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      const detected = clip?.hearing?.bpm ?? 0
+      if (!clip || !(detected > 0)) return
+      const chosen = tempoForSong(detected, clip.stretch?.sourceBpm ?? null)
+      if (!(chosen > 0)) return
+      const follow = clip.stretch?.followTempo
+      const mode = clip.stretch?.tempoMode
+      if (!clip.stretch) {
+        clip.stretch = { sourceSamples: clip.durationSamples, semitones: 0, cents: 0, mode: 'pro', followTempo: false, sourceBpm: chosen, markers: [] }
+      } else if (!clip.stretch.sourceBpm || relateTempo(detected, clip.stretch.sourceBpm) === 'apart') {
+        clip.stretch.sourceBpm = chosen
+        if (follow != null) clip.stretch.followTempo = follow
+        if (mode) clip.stretch.tempoMode = mode
+      }
+      adaptProjectTempo(this.project, chosen)
+      this.retimeFollow()
+    })
   }
 
   adaptClipTempo(trackId: string, clipId: string) {
