@@ -313,7 +313,7 @@ export function ArrangeView({
   projectRef.current = project
   const barRef = useRef(Number.NaN)
   const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number>; pattern: Record<string, number> } | null>(null)
-  const [patternMenu, setPatternMenu] = useState<{ x: number; y: number } | null>(null)
+  const [patternMenu, setPatternMenu] = useState<{ x: number; y: number; kind: 'audio' | 'midi' | 'pattern' } | null>(null)
   const form = useFormFactor()
   const [dragView, setDragView] = useState<null | {
     trackId: string
@@ -537,11 +537,6 @@ export function ArrangeView({
       if (next && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault()
         store.setTool(next)
-        return
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd' && !event.shiftKey) {
-        event.preventDefault()
-        store.duplicateSelection()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -1055,9 +1050,9 @@ export function ArrangeView({
         preview(ev.clientX)
         setNudge(null)
         setDragView(null)
-        if (kind === 'pattern' && patternHoldOpensMenu(touch, performance.now() - started, travel)) {
-          store.selectClip(trackId, clipId, false, false)
-          setPatternMenu(patternMenuPoint(originX, originY, 168, 56, window.innerWidth, window.innerHeight))
+        if (patternHoldOpensMenu(touch, performance.now() - started, travel)) {
+          store.selectClip(trackId, clipId, kind === 'midi', false)
+          setPatternMenu({ ...patternMenuPoint(originX, originY, 196, 220, window.innerWidth, window.innerHeight), kind })
           return
         }
         const host = kind === 'pattern' ? patternHostId(project.tracks, laneAt(ev.clientX, ev.clientY)) : null
@@ -1525,6 +1520,7 @@ export function ArrangeView({
                   }}
                   onErase={beginErase}
                   onMove={(event) => moveSelection(event, 'audio', track.id, clip.id)}
+                  onPaste={() => store.pasteClips(engine.currentTimelineSample())}
                 />
               ))}
               <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
@@ -1813,8 +1809,13 @@ export function ArrangeView({
         anchor={patternMenu ? { left: patternMenu.x, top: patternMenu.y, width: 28, height: 28 } : null}
         prefer="down"
       >
-        <button type="button" title="Copy this pattern clip and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
-        <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
+        <button type="button" title="Copy the selected clips." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.copyClips(); setPatternMenu(null) }}>Copy</button>
+        <button type="button" title="Cut the selected clips." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.cutClips(); setPatternMenu(null) }}>Cut</button>
+        <button type="button" className={store.clipPasteState().ready ? '' : 'is-muted'} title={store.clipPasteState().ready ? 'Paste at the playhead.' : (store.clipPasteState().reason || 'Copy a clip first.')} onPointerDown={(event) => event.stopPropagation()} onClick={() => { const offer = store.clipPasteState(); if (!offer.ready) store.toast(offer.reason || 'Copy a clip first.', 'warn'); else store.pasteClips(engine.currentTimelineSample()); setPatternMenu(null) }}>Paste</button>
+        <button type="button" title="Copy the selection and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
+        {patternMenu?.kind === 'pattern' && (
+          <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
+        )}
         <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
       </AnchoredMenu>
       <StemSheet store={store} />
@@ -1857,6 +1858,7 @@ function ClipView({
   onSplit,
   onErase,
   onMove,
+  onPaste,
 }: {
   store: ProjectStore
   clip: AudioClip
@@ -1870,6 +1872,7 @@ function ClipView({
   onSplit: (snapToZero: boolean) => void
   onErase: (event: ReactPointerEvent) => void
   onMove: (event: ReactPointerEvent) => void
+  onPaste: () => void
 }) {
   const project = selectArrange(store).project
   const asset = store.buffers.get(clip.bufferId)
@@ -2172,6 +2175,10 @@ function ClipView({
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(snapZero); setMenu(null) }}>Split</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
         <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>
+        <button type="button" title="Copy the selected clips." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.copyClips(); setMenu(null) }}>Copy</button>
+        <button type="button" title="Cut the selected clips." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.cutClips(); setMenu(null) }}>Cut</button>
+        <button type="button" className={store.clipPasteState().ready ? '' : 'is-muted'} title={store.clipPasteState().ready ? 'Paste at the playhead.' : (store.clipPasteState().reason || 'Copy a clip first.')} onPointerDown={(event) => event.stopPropagation()} onClick={() => { const offer = store.clipPasteState(); if (!offer.ready) store.toast(offer.reason || 'Copy a clip first.', 'warn'); else onPaste(); setMenu(null) }}>Paste</button>
+        <button type="button" title="Copy the selection and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setMenu(null) }}>Duplicate</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
       </AnchoredMenu>
       {(shown.stretch?.markers ?? []).map((marker) => (

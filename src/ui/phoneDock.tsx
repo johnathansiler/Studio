@@ -84,6 +84,57 @@ function PhoneToolRow({ store, onClose }: { store: ProjectStore; onClose: () => 
   )
 }
 
+function rollView(): { start: number; end: number } | null {
+  if (typeof document === 'undefined') return null
+  const roll = document.querySelector<HTMLElement>('.roll')
+  if (!roll) return null
+  const px = Number(roll.dataset.pxBeat)
+  if (!(px > 0)) return null
+  const start = roll.scrollLeft / px
+  return { start, end: start + Math.max(1, roll.clientWidth) / px }
+}
+
+function EditActions({
+  store,
+  mode,
+  playheadSample,
+  includeDuplicate = true,
+}: {
+  store: ProjectStore
+  mode: 'clips' | 'notes' | 'steps'
+  playheadSample: () => number
+  includeDuplicate?: boolean
+}) {
+  const offer = mode === 'notes' ? store.notePasteState() : mode === 'steps' ? store.stepPasteState() : store.clipPasteState()
+  const noun = mode === 'notes' ? 'notes' : mode === 'steps' ? 'steps' : 'clips'
+  function run(command: 'copy' | 'cut' | 'paste' | 'duplicate') {
+    if (command === 'paste' && !offer.ready) {
+      store.toast(offer.reason || `Copy ${noun} first.`, 'warn')
+      return
+    }
+    const seen = rollView()
+    store.editCommand(command, mode, playheadSample(), seen?.start ?? null, seen?.end ?? null)
+  }
+  return (
+    <>
+      <Hit action="copy" label="Copy" title={`Copy the selected ${noun}.`} onClick={() => run('copy')} />
+      <Hit action="cut" label="Cut" title={`Cut the selected ${noun}.`} onClick={() => run('cut')} />
+      {offer.visible && (
+        <Hit
+          action="paste"
+          className={offer.ready ? '' : 'is-muted'}
+          label="Paste"
+          title={offer.ready ? `Paste ${noun} at the playhead.` : offer.reason}
+          onClick={() => run('paste')}
+        />
+      )}
+      {includeDuplicate && (
+        <Hit action="duplicate" label="Duplicate" title={`Copy the selected ${noun} and place them just after.`} onClick={() => run('duplicate')} />
+      )}
+    </>
+  )
+}
+
 function Hit({
   action,
   label,
@@ -325,13 +376,13 @@ export function PhoneDock({
       {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
       {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
       {audioTempo ? <ClipTempoControl store={store} trackId={audioTempo.trackId} clipId={audioTempo.clipId} /> : null}
-      <div className="phone-context btn-tray phone-context-tray" role="toolbar" aria-label="Actions" data-phone-context={kind}>
+      <div className="phone-context btn-tray phone-context-tray" role="toolbar" aria-label="Actions" data-phone-context={kind} data-edit-row={kind === 'arrange' && clip ? 'clips' : kind === 'notes' ? 'notes' : undefined}>
         {kind === 'clip' && clip && (
           <>
+            <EditActions store={store} mode="clips" playheadSample={playheadSample} />
             {clip.kind !== 'pattern' && (
               <Hit action="split" label="Split" title="Split the clip at the playhead." onClick={splitClip} />
             )}
-            <Hit action="duplicate" label="Duplicate" title="Copy the selection and place it just after." onClick={() => store.duplicateSelection()} />
             <Hit action="delete" label="Delete" title="Remove the selection." onClick={() => store.deleteSelectedClip()} />
             {track && (
               <>
@@ -361,7 +412,7 @@ export function PhoneDock({
         )}
         {kind === 'notes' && (
           <>
-            <Hit action="duplicate" label="Duplicate" title="Copy the selected notes and place them just after." onClick={() => store.duplicateSelection()} />
+            <EditActions store={store} mode="notes" playheadSample={playheadSample} />
             <Hit action="delete" label="Delete" title="Remove the selected notes." onClick={() => store.deleteSelectedClip()} />
           </>
         )}
@@ -377,7 +428,10 @@ export function PhoneDock({
             />
           </>
         )}
-        {kind === 'plugin' && (
+        {kind === 'plugin' && store.stepTrackId && store.selectedRackSteps.length > 0 && (
+          <EditActions store={store} mode="steps" playheadSample={playheadSample} />
+        )}
+        {kind === 'plugin' && !(store.stepTrackId && store.selectedRackSteps.length > 0) && (
           <>
             <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
             <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
@@ -386,7 +440,16 @@ export function PhoneDock({
             </Hit>
           </>
         )}
-        {kind === 'arrange' && (
+        {kind === 'arrange' && clip && (
+          <>
+            <EditActions store={store} mode="clips" playheadSample={playheadSample} />
+            <div id="transport-extras" className="transport-extras-slot" />
+            <Hit action="delete" label="Delete" title="Remove the selection." onClick={() => store.deleteSelectedClip()}>
+              <DeleteIcon />
+            </Hit>
+          </>
+        )}
+        {kind === 'arrange' && !clip && (
           <>
             <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
             <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
