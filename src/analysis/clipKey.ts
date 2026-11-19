@@ -383,7 +383,9 @@ export function detectKey(samples: Float32Array, sampleRate: number): KeyReading
   const salient = salientCount(chroma)
   const margin = winner.corr - (runner?.corr ?? 0)
   const confidence = clamp01(winner.corr * (0.72 + 0.28 * clamp01(margin / 0.12)))
-  const clear = salient >= 3 && heard.tonal >= 0.012 && winner.corr >= 0.45 && confidence >= 0.32
+  // Peak energy is logged and the spectrum is linear, so a smooth lead sits
+  // near 0.01. A drum loop and broadband noise stay under about 0.004.
+  const clear = salient >= 3 && heard.tonal >= 0.007 && winner.corr >= 0.45 && confidence >= 0.32
   const best = candidateOf(winner)
   const alt = runner && runner.corr > 0.2 ? candidateOf(runner) : null
   if (!clear) {
@@ -581,6 +583,10 @@ export function detectTempo(samples: Float32Array, sampleRate: number): TempoRea
 
 export function hearingOf(key: KeyReading, tempo: TempoReading): ClipHearing {
   const alt = key.clear && key.alt ? key.alt : null
+  const winnerScore = key.best && key.best.score > 0 ? key.best.score : 0
+  const altConfidence = alt && winnerScore > 0
+    ? Math.min(key.confidence, clamp01(key.confidence * (alt.score / winnerScore)))
+    : 0
   return {
     key: key.clear ? key.label : '',
     root: key.clear ? key.root : null,
@@ -589,7 +595,7 @@ export function hearingOf(key: KeyReading, tempo: TempoReading): ClipHearing {
     alt: alt?.name ?? '',
     altRoot: alt ? alt.root : null,
     altScale: alt ? (alt.minor ? 'aeolian' : 'ionian') : '',
-    altConfidence: alt ? clamp01(alt.corr) : 0,
+    altConfidence,
     clearKey: key.clear,
     bpm: tempo.bpm > 0 ? tempo.bpm : 0,
     bpmConfidence: tempo.bpm > 0 ? tempo.confidence : 0,

@@ -194,6 +194,33 @@ describe('clip key and tempo', () => {
     expect(hits / total).toBeGreaterThanOrEqual(0.9)
   }, 60000)
 
+  it('names a smooth lead and still refuses drums and noise', () => {
+    const rate = 22050
+    function lead(note: number, seconds: number) {
+      const data = new Float32Array(Math.round(seconds * rate))
+      const freq = midiHz(note)
+      for (let h = 1; h <= 8; h++) {
+        const f = freq * h
+        if (f >= rate * 0.45) break
+        for (let i = 0; i < data.length; i++) {
+          const t = i / rate
+          data[i] += Math.sin(2 * Math.PI * f * t) * (0.22 / h) * Math.min(1, t / 0.06)
+        }
+      }
+      return data
+    }
+    const minor = concat([69, 72, 76, 74, 72, 71, 69].map((note) => lead(note, 0.5)))
+    const heard = detectKey(minor, rate)
+    expect(heard.clear).toBe(true)
+    expect(heard.root).toBe(9)
+    expect(heard.scale).toBe('aeolian')
+    const card = hearingOf(heard, { bpm: 0, confidence: 0 })
+    expect(card.altConfidence).toBeLessThanOrEqual(card.confidence + 1e-9)
+    const bed = new Float32Array(rate * 3)
+    for (let i = 0; i < bed.length; i++) bed[i] = noise(i) * (i < rate ? 0.02 : 0.8)
+    expect(detectKey(bed, rate).clear).toBe(false)
+  })
+
   it('says there is no clear key on a drum loop', () => {
     const rate = 22050
     const heard = detectKey(drums(100, 4, rate), rate)
