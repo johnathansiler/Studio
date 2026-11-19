@@ -1,3 +1,4 @@
+import { LIBRARY_OBJECT_PREFIX } from '../library/objectUrl'
 import { libraryFetch } from './direct'
 import { assertSoundUrl } from './source'
 
@@ -42,6 +43,11 @@ export interface FetchSoundOptions {
   /** Prefetch waits behind a tap. A tap never waits behind prefetch. */
   priority?: 'user' | 'prefetch'
   signal?: AbortSignal
+  /**
+   * A passphrase-signed My Library object.
+   * The URL must be the stable library-object key. The signed host is fetched by the caller.
+   */
+  trusted?: boolean
 }
 
 const DB_NAME = 'cueharbor-sound-library'
@@ -517,7 +523,11 @@ async function downloadSoundBody(url: string, fetchImpl: FetchLike, cache: Sound
 
 /** Download one library file from Hugging Face, or the browser copy from last time. */
 export async function fetchSoundBytes(url: string, fetchImpl: FetchLike = libraryFetch, cache = soundCache(), options: FetchSoundOptions = {}): Promise<ArrayBuffer> {
-  assertSoundUrl(url)
+  if (options.trusted) {
+    if (!url.startsWith(LIBRARY_OBJECT_PREFIX)) throw new Error('That library sound could not be read.')
+  } else {
+    assertSoundUrl(url)
+  }
   const expected = options.sha256?.trim().toLowerCase()
   const hit = await cache.get(url)
   const known = cache.knownHash(url)

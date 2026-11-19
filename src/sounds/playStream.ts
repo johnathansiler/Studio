@@ -134,6 +134,7 @@ function openDecoder(toRate: number, onSlice: (channels: Float32Array[], sampleR
       worker.postMessage({ id, type: 'cancel' })
       cleanup()
       rejectDone(new DOMException('The download was cancelled.', 'AbortError'))
+      done.catch(() => undefined)
     },
     done,
   }
@@ -202,6 +203,7 @@ function mainDecoder(toRate: number, onSlice: (channels: Float32Array[], sampleR
     },
     cancel() {
       rejectDone(new DOMException('The download was cancelled.', 'AbortError'))
+      done.catch(() => undefined)
     },
     done,
   }
@@ -224,6 +226,10 @@ export async function streamCatalogSound(options: {
   onSlice: (slice: PreviewSlice) => void
   /** False when the caller only needs the decoded file, for example Load during a preview. */
   play?: boolean
+  /** My Library object. The URL is the stable key, not a Hugging Face dataset path. */
+  trusted?: boolean
+  priority?: 'user' | 'prefetch'
+  attempts?: number
 }): Promise<StreamedFile> {
   const key = options.sha256 || options.url
   const cached = rememberedFile(key)
@@ -255,6 +261,9 @@ async function streamCatalogSoundNow(options: {
   fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>
   cache?: SoundCache
   onSlice: (slice: PreviewSlice) => void
+  trusted?: boolean
+  priority?: 'user' | 'prefetch'
+  attempts?: number
 }): Promise<StreamedFile> {
   let peak = 0
   let played = 0
@@ -337,6 +346,9 @@ async function streamCatalogSoundNow(options: {
       sha256: options.sha256,
       totalBytes: options.totalBytes,
       signal: options.signal,
+      trusted: options.trusted,
+      priority: options.priority,
+      attempts: options.attempts,
       onChunk: (chunk) => {
         streamed = true
         note(chunk.byteLength)

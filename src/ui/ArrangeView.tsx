@@ -2098,13 +2098,19 @@ function ClipView({
         onSpan={(span) => { spanRef.current = span }}
       />
       <em>
-        {clip.name}
-        {clip.stretch && Math.abs(clip.durationSamples - sourceSamplesOf(clip)) > 1 ? ` ${Math.round((clip.durationSamples / sourceSamplesOf(clip)) * 100)}%` : ''}
-        {tempoBadge ? ` · ${tempoBadge}` : ''}
-        {clip.folder ? ` · ${clip.folder.lanes.length} takes` : ''}
-        {clip.source === 'guide' ? ' · guide' : ''}
-        {clip.source === 'aligned-take' ? ' · aligned' : ''}
-        {clip.spectral?.ops.length ? ' · repair' : ''}
+        <span className="clip-name">{clip.name}</span>
+        {clip.stretch && Math.abs(clip.durationSamples - sourceSamplesOf(clip)) > 1 ? <span className="clip-stretch">{Math.round((clip.durationSamples / sourceSamplesOf(clip)) * 100)}%</span> : null}
+        {tempoBadge || clip.folder || clip.source === 'guide' || clip.source === 'aligned-take' || clip.spectral?.ops.length ? (
+          <span className="clip-extra">
+            {[
+              tempoBadge,
+              clip.folder ? `${clip.folder.lanes.length} takes` : '',
+              clip.source === 'guide' ? 'guide' : '',
+              clip.source === 'aligned-take' ? 'aligned' : '',
+              clip.spectral?.ops.length ? 'repair' : '',
+            ].filter(Boolean).join(' · ')}
+          </span>
+        ) : null}
       </em>
       {clip.folder && store.selectedClipId === clip.id && (
         <div className="take-lanes">

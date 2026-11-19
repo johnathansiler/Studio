@@ -10,13 +10,15 @@ import { absorbLegacyFavoriteIds, favoriteSounds, isFavorite, subscribeFavorites
 import { FavoriteStar } from './FavoriteStar'
 import { groupLibraryInstruments, midiName, summarizeInstrument, type LibraryInstrument, type LibraryInstrumentSummary } from '../library/group'
 import { fetchAllLibraryInstruments } from '../library/instrumentsApi'
-import { libraryDragId, loadGroupedLibraryInstrument, loadLibraryDrag, loadLibraryEntry, placeLibraryInstrument, previewLibraryInstrument, publishLibrary, readLibraryAsset } from '../library/place'
+import { libraryDragId, loadGroupedLibraryInstrument, loadLibraryDrag, loadLibraryEntry, placeLibraryInstrument, previewLibraryInstrument, publishLibrary } from '../library/place'
+import { prefetchLibrarySounds, previewLibrarySound } from '../library/stream'
 import { retargetLibraryMemory } from '../library/retarget'
 import { libraryRowWindow, searchLibrary, type LibraryIndex } from '../library/search'
 import type { LibraryDocument, LibraryEntry, LibraryQuery } from '../library/types'
 import type { ProjectStore } from '../state/store'
 
-const ROW = 48
+/** The row is 64px tall plus the 6px margin under it. Virtualization uses that stride. */
+const ROW = 64 + 6
 const GROUPS = [
   { id: 'type', label: 'Type' },
   { id: 'category', label: 'Category' },
@@ -49,6 +51,9 @@ type Engine = {
   unlock: () => void
   stopPreview: () => void
   previewPcm: (channels: Float32Array[], sampleRate?: number, loop?: boolean) => void
+  feedPreview?: (token: number, channels: Float32Array[], sampleRate: number, gain?: number) => boolean | void
+  setPreviewGain?: (token: number, gain: number) => void
+  continuePreviewLoop?: (token: number, channels: Float32Array[], sampleRate: number, gain?: number) => boolean | void
   currentTimelineSample: () => number
   decodeLibrary?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>
 }
@@ -117,6 +122,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const listRef = useRef<HTMLDivElement>(null)
   const filterButton = useRef<HTMLButtonElement>(null)
   const previewGen = useRef(0)
+  const previewAbort = useRef<AbortController | null>(null)
 
   function rememberGroups(entries: LibraryDocument['entries']) {
     const full = groupLibraryInstruments(entries)
@@ -184,6 +190,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   }, [])
 
   useEffect(() => () => {
+    previewAbort.current?.abort()
     previewGen.current += 1
     engine.stopPreview()
   }, [engine])
@@ -257,6 +264,17 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     absorbLegacyFavoriteIds(store.project.soundFavorites ?? [])
   }, [store])
 
+  const prefetchKey = phase === 'ready'
+    ? rows.filter((row) => row.kind === 'sound').slice(0, 2).map((row) => row.entry.key).join('\n')
+    : ''
+  useEffect(() => {
+    if (!prefetchKey) return
+    const controller = new AbortController()
+    const entries = prefetchKey.split('\n').map((key) => index?.entries.find((entry) => entry.key === key)).filter((entry): entry is LibraryEntry => Boolean(entry))
+    void prefetchLibrarySounds(entries, undefined, controller.signal)
+    return () => controller.abort()
+  }, [prefetchKey, index])
+
   function keep(id: string) {
     setFocusId(id)
     writeBrowsePlace({ libraryFocus: id, libraryAnchor: id })
@@ -319,6 +337,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   }
 
   function lock() {
+    previewAbort.current?.abort()
     previewGen.current += 1
     engine.stopPreview()
     clearLibraryAccessKey()
@@ -334,22 +353,34 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     const entry = index?.entries.find((item) => item.key === key)
     if (!entry) return
     if (playing === key) {
+      previewAbort.current?.abort()
       previewGen.current += 1
       engine.stopPreview()
       setPlaying('')
       return
     }
+    previewAbort.current?.abort()
+    const controller = new AbortController()
+    previewAbort.current = controller
     const gen = ++previewGen.current
     setBusy(key)
     try {
       engine.unlock()
-      const asset = await readLibraryAsset(entry, decodeOf(engine))
-      if (gen !== previewGen.current) return
-      engine.stopPreview()
-      engine.previewPcm(asset.channels, asset.sampleRate, entry.type === 'loop')
-      setPlaying(key)
+      await previewLibrarySound({
+        entry,
+        toRate: store.project.sampleRate,
+        token: gen,
+        signal: controller.signal,
+        engine,
+        onStart: () => {
+          if (gen !== previewGen.current || controller.signal.aborted) return
+          setPlaying(key)
+          setBusy('')
+        },
+      })
     } catch (error) {
-      if (gen !== previewGen.current) return
+      if (gen !== previewGen.current || controller.signal.aborted) return
+      if (error instanceof DOMException && error.name === 'AbortError') return
       if (error instanceof LibraryAuthError) {
         setPhase('lock')
         setMessage(error.message)

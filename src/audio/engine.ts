@@ -5696,6 +5696,50 @@ export class AudioEngine {
     try { feed.gain.gain.setTargetAtTime(next, this.ctx.currentTime, 0.008) } catch { feed.gain.gain.value = next }
   }
 
+  /**
+   * Loop the finished file when the slices already scheduled reach its end.
+   * A late join is refused so the caller can start a fresh looping preview.
+   */
+  continuePreviewLoop(token: number, channels: Float32Array[], sampleRate: number, gain = 0.8): boolean {
+    const ctx = this.ctx
+    const feed = this.previewFeed
+    const lead = channels[0]
+    if (!ctx || !feed || feed.token !== token || !lead?.length || !(sampleRate > 0)) return false
+    const when = abutPreviewSlice(feed.next, ctx.currentTime)
+    if (when == null) return false
+    if (Math.abs(feed.gain.gain.value - gain) > 0.001) this.setPreviewGain(token, gain)
+    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, sampleRate)
+    for (let index = 0; index < channels.length; index++) {
+      const data = new Float32Array(lead.length)
+      data.set((channels[index] ?? lead).subarray(0, lead.length))
+      buffer.copyToChannel(data, index)
+    }
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    src.loop = true
+    src.connect(feed.gain)
+    const stop = () => { try { src.stop() } catch { /* already stopped */ } }
+    const disconnect = () => {
+      try { src.disconnect() } catch { /* already disconnected */ }
+      src.buffer = null
+    }
+    this.previewStops.push({ stop, disconnect })
+    const arm = () => {
+      if (!this.previewStops.some((item) => item.stop === stop)) return
+      if (ctx.currentTime > when + 0.03) {
+        disconnect()
+        return
+      }
+      try { src.start(when) } catch { disconnect() }
+    }
+    if (ctx.state === 'running') arm()
+    else void ctx.resume().then(arm)
+    feed.next = when + buffer.duration
+    this.previewClock = { start: feed.started, duration: buffer.duration, loop: true }
+    this.previewRates = { sourceRate: sampleRate, outputRate: sampleRate }
+    return true
+  }
+
   private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()

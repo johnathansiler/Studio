@@ -17,6 +17,7 @@ import {
 import { migrateProject } from '../model/schema'
 import { createEmptyProject, type AudioClip, type ClipStretch } from '../model/types'
 import { ProjectStore } from '../state/store'
+import { ClipSheet } from '../ui/ClipSheet'
 import { PhoneDock } from '../ui/phoneDock'
 
 const rate = 48000
@@ -272,6 +273,13 @@ describe('clip tempo control', () => {
     const { store, track, clip } = mount(80, 1, 160)
     store.selectClip(track.id, clip.id)
     const html = dock(store)
+    const sheet = renderToStaticMarkup(createElement(ClipSheet, {
+      store,
+      trackId: track.id,
+      clip,
+      onClose() {},
+    }))
+    expect(sheet).not.toContain('data-tempo-mode')
     expect(html).toContain('data-clip-tempo="follow"')
     expect(html).toContain('data-tempo-mode="follow"')
     expect(html).toContain('data-tempo-mode="half"')

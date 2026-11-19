@@ -266,7 +266,7 @@ describe('808 loop preview and track playback', () => {
     expect(sheet).toContain('Use for song')
     expect(sheet).not.toContain('Fit to song')
     expect(sheet).not.toContain('Stretch this clip')
-    expect(sheet).toContain('Follow')
+    expect(sheet).not.toContain('data-tempo-mode')
 
     store.setTempo(100)
     const at100 = clip.durationSamples
