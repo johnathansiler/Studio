@@ -153,6 +153,7 @@ export async function previewLibrarySound(options: {
   const loop = options.entry.type === 'loop'
   const feed = options.engine.feedPreview
   let started = false
+  let level = 0.8
   const file = await streamLibraryAsset({
     entry: options.entry,
     toRate: options.toRate,
@@ -163,6 +164,7 @@ export async function previewLibrarySound(options: {
       if (!feed || options.signal?.aborted) return
       const accepted = feed(options.token, slice.channels, slice.sampleRate, slice.gain)
       if (accepted === false) return
+      level = slice.gain
       options.engine.setPreviewGain?.(options.token, slice.gain)
       if (started) return
       started = true
@@ -175,7 +177,7 @@ export async function previewLibrarySound(options: {
   const sampleRate = matched && file.matchedRate ? file.matchedRate : file.sampleRate
   if (!channels[0]?.length) throw new Error('That sound had no audio.')
   if (loop) {
-    const looped = started && options.engine.continuePreviewLoop?.(options.token, channels, sampleRate, 0.8)
+    const looped = started && options.engine.continuePreviewLoop?.(options.token, channels, sampleRate, level)
     if (looped) return
     options.engine.stopPreview()
     options.engine.previewPcm(channels, sampleRate, true)

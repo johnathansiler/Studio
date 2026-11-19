@@ -363,6 +363,8 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     const controller = new AbortController()
     previewAbort.current = controller
     const gen = ++previewGen.current
+    engine.stopPreview()
+    setPlaying('')
     setBusy(key)
     try {
       engine.unlock()
@@ -415,6 +417,8 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
 
   async function previewInstrument(item: LibraryInstrumentSummary) {
     keep(`instrument:${item.id}`)
+    previewAbort.current?.abort()
+    previewAbort.current = null
     if (playing === item.id) {
       previewGen.current += 1
       engine.stopPreview()
@@ -422,6 +426,8 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
       return
     }
     const gen = ++previewGen.current
+    engine.stopPreview()
+    setPlaying('')
     setBusy(item.id)
     try {
       engine.unlock()

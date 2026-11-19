@@ -236,6 +236,8 @@ describe('my library streamed preview', () => {
     const fed: number[] = []
     let looped = false
     let pcmLoop: boolean | null = null
+    let heardGain = 0
+    let loopGain = 0
     const engine = {
       stopPreview() {},
       previewPcm(_channels: Float32Array[], _sampleRate?: number, loop?: boolean) { pcmLoop = loop ?? false },
@@ -243,9 +245,10 @@ describe('my library streamed preview', () => {
         fed.push(slice[0]?.length ?? 0)
         return true
       },
-      setPreviewGain() {},
-      continuePreviewLoop() {
+      setPreviewGain(_token: number, gain: number) { heardGain = gain },
+      continuePreviewLoop(_token: number, _channels: Float32Array[], _sampleRate: number, gain = 0.8) {
         looped = true
+        loopGain = gain
         return true
       },
     }
@@ -258,6 +261,8 @@ describe('my library streamed preview', () => {
     })
     expect(fed.length).toBeGreaterThan(0)
     expect(looped).toBe(true)
+    expect(loopGain).toBeCloseTo(heardGain, 5)
+    expect(loopGain).toBeLessThan(0.8)
     expect(pcmLoop).toBeNull()
 
     resetSoundDownloads()
@@ -302,6 +307,32 @@ describe('my library streamed preview', () => {
       },
     })
     expect(pcmLoop).toBe(true)
+
+    resetSoundDownloads()
+    resetLibrarySoundMemory()
+    setLibraryCaches({ audio: memoryAudioCache() })
+    const cancelled: string[] = []
+    const controller = new AbortController()
+    const pending = previewLibrarySound({
+      entry: entryFor('Choir/cancel.wav', bytes, 'loop'),
+      toRate: rate,
+      token: 4,
+      signal: controller.signal,
+      fetchImpl,
+      engine: {
+        stopPreview() { cancelled.push('stop') },
+        previewPcm() { cancelled.push('pcm') },
+        feedPreview() { cancelled.push('feed'); return true },
+        setPreviewGain() {},
+        continuePreviewLoop() { cancelled.push('loop'); return true },
+      },
+    })
+    controller.abort()
+    await pending.catch((error: unknown) => {
+      if (!(error instanceof DOMException) || error.name !== 'AbortError') throw error
+    })
+    expect(cancelled).not.toContain('pcm')
+    expect(cancelled).not.toContain('loop')
     clearLibraryAccessKey()
     setLibraryCaches({ audio: null })
   })
