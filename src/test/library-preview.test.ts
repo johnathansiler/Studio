@@ -123,6 +123,42 @@ function assertContinuous(emissions: { at: number; channels: Float32Array[] ; sa
 }
 
 describe('my library streamed preview', () => {
+  it('calls the engine methods with the engine as this', async () => {
+    resetSoundDownloads()
+    resetLibrarySoundMemory()
+    setLibraryCaches({ audio: memoryAudioCache() })
+    writeLibraryAccessKey('owner-pass')
+    const rate = 48000
+    const bytes = wavBytes(tone(1800, rate, 330), rate)
+    const fetchImpl = libraryFetch(bytes, 2_000_000, 'owner-pass', { n: 0 })
+    const engine = {
+      fed: 0,
+      looped: 0,
+      stopPreview() {},
+      previewPcm() {},
+      feedPreview() {
+        this.fed += 1
+        return true
+      },
+      setPreviewGain() {},
+      continuePreviewLoop() {
+        this.looped += 1
+        return true
+      },
+    }
+    await previewLibrarySound({
+      entry: entryFor('Choir/bound.wav', bytes, 'loop'),
+      toRate: rate,
+      token: 7,
+      fetchImpl,
+      engine,
+    })
+    expect(engine.fed).toBeGreaterThan(0)
+    expect(engine.looped).toBe(1)
+    clearLibraryAccessKey()
+    setLibraryCaches({ audio: null })
+  })
+
   it('refuses the asset until the passphrase signs it', async () => {
     resetSoundDownloads()
     resetLibrarySoundMemory()
