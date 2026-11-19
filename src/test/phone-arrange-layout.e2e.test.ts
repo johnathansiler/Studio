@@ -66,7 +66,7 @@ async function measure(page: Page) {
           }
         })
       : []
-    const controls = [...document.querySelectorAll<HTMLElement>('.arrange .track-controls')].map((row) => {
+    const controls = [...document.querySelectorAll<HTMLElement>('.arrange [data-track-controls]')].map((row) => {
       const buttons = [...row.querySelectorAll<HTMLElement>('button')]
       const tops = new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top)))
       const rowBox = row.getBoundingClientRect()
@@ -176,7 +176,7 @@ describe('phone arrange layout', () => {
           if (viewport.kind === 'wide') expect(layout.gripHit, viewport.name).toBeGreaterThanOrEqual(44)
           expect(layout.overlaps, viewport.name).toEqual([])
           for (const row of layout.controls) {
-            expect(row.tops, viewport.name).toBe(1)
+            expect(row.tops, viewport.name).toBe(2)
             expect(row.wrapped, viewport.name).toBe(false)
           }
           if (viewport.kind === 'portrait') {

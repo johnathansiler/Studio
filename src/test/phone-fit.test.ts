@@ -266,8 +266,8 @@ describe('phone fit at 412x915', () => {
         expect(phoneAdd!.width).toBeGreaterThanOrEqual(40)
         await phone.getByRole('button', { name: 'Add Track' }).click()
         const phoneChoices = phone.locator('.add-choice')
-        expect(await phoneChoices.count()).toBe(4)
-        for (let i = 0; i < 4; i++) {
+        expect(await phoneChoices.count()).toBe(5)
+        for (let i = 0; i < 5; i++) {
           const choice = await phoneChoices.nth(i).boundingBox()
           expect(choice!.height).toBeGreaterThanOrEqual(40)
           expect(choice!.width).toBeGreaterThanOrEqual(40)
@@ -298,8 +298,8 @@ describe('phone fit at 412x915', () => {
         expect(foldAdd!.width).toBeGreaterThanOrEqual(40)
         await fold.getByRole('button', { name: 'Add Track' }).click()
         const foldChoices = fold.locator('.add-choice')
-        expect(await foldChoices.count()).toBe(4)
-        for (let i = 0; i < 4; i++) {
+        expect(await foldChoices.count()).toBe(5)
+        for (let i = 0; i < 5; i++) {
           const choice = await foldChoices.nth(i).boundingBox()
           expect(choice!.height).toBeGreaterThanOrEqual(40)
         }

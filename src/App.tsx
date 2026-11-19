@@ -5,9 +5,10 @@ import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
 import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, roomOwnsOpenProject, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
-import { punchWindow, sliceCapture } from './model/comp'
+import { channelConstraints, punchWindow, sliceCapture } from './model/comp'
 import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
+import { fitRecordedChannels, recordedClipFields } from './audio/recordTake'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import { AwarenessChannel, bindAwareness, currentEditCursor, localAwareness, onPresencePoke } from './remote/presence'
 import { SessionClient } from './remote/session'
@@ -274,6 +275,44 @@ export function App() {
     return () => window.clearInterval(timer)
   }, [menuOpen, engine])
   const [recordHint, setRecordHint] = useState('')
+  const ownedMic = useRef<MediaStream | null>(null)
+  const armedVocalId = store.project.tracks.find((track) => track.type === 'audio' && track.kind === 'vocal' && track.armed)?.id ?? ''
+  useEffect(() => {
+    if (!armedVocalId) {
+      ownedMic.current?.getTracks().forEach((track) => track.stop())
+      ownedMic.current = null
+      return
+    }
+    let cancel = false
+    const open = async () => {
+      const live = session.localPerformanceStream()
+      if (live?.getAudioTracks().some((track) => track.readyState === 'live')) {
+        engine.setLocalMic(live)
+        return
+      }
+      if (ownedMic.current?.getAudioTracks().some((track) => track.readyState === 'live')) {
+        engine.setLocalMic(ownedMic.current)
+        return
+      }
+      try {
+        await engine.resume()
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: channelConstraints(1, engine.sampleRate || 48000),
+          video: false,
+        })
+        if (cancel) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+        ownedMic.current = stream
+        engine.setLocalMic(stream)
+      } catch {
+        /* The meter stays dark until the mic is allowed. Recording asks again. */
+      }
+    }
+    void open()
+    return () => { cancel = true }
+  }, [armedVocalId, engine, session])
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight, readPointer()))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const [frameSize, setFrameSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
@@ -1184,32 +1223,30 @@ export function App() {
       const intoSlot = FEATURES.session && slot && slot.trackId === track.id && capture.source === 'local'
       if (intoSlot && slot) {
         const bufferId = uid('buf')
-        store.addAsset({
-          id: bufferId,
-          name: capture.source === 'guide' ? 'Live guide' : 'Recording',
-          sampleRate: capture.sampleRate,
-          channels: capture.channels,
-        })
-        const durationSamples = recordedLength(capture.channels[0].length, store.project.recordBars ?? 0, capture.sampleRate, store.project.tempo, store.project.timeSignature)
+        const fitted = fitRecordedChannels(capture.channels, capture.sampleRate, store.project.sampleRate)
+        const durationSamples = recordedLength(fitted[0].length, store.project.recordBars ?? 0, store.project.sampleRate, store.project.tempo, store.project.timeSignature)
         const clip: AudioClip = {
           id: uid('clip'),
           name: capture.source === 'guide' ? `${track.name} guide` : track.name,
           bufferId,
           startSample: 0,
           offsetSamples: 0,
-          durationSamples,
           fadeInSamples: 64,
           fadeOutSamples: 128,
           gain: 1,
           source: capture.source === 'guide' ? 'guide' : 'local',
           peerId: capture.peerId,
           takeId: capture.takeId,
-          durationBeats: samplesToBeats(durationSamples, capture.sampleRate, store.project.tempo),
-          warp: true,
           loop: true,
           slotOnly: true,
-          stretch: inspectClip(capture.channels[0] ?? new Float32Array(), capture.sampleRate, store.project.tempo),
+          ...recordedClipFields(fitted[0].length, durationSamples),
         }
+        store.addAsset({
+          id: bufferId,
+          name: capture.source === 'guide' ? 'Live guide' : 'Recording',
+          sampleRate: store.project.sampleRate,
+          channels: fitted,
+        })
         store.placeInSlot(track.id, slot.scene, clip)
         if (capture.source === 'guide' && isSilentTake(capture.channels)) {
           store.toast(`${track.name} guide is silent. Video and the live mic need a connected media path. The aligned take replaces this if the upload arrives.`, 'warn')
@@ -1217,10 +1254,11 @@ export function App() {
         continue
       }
       const length = capture.channels[0]?.length || 0
+      const rateScale = capture.sampleRate > 0 ? store.project.sampleRate / capture.sampleRate : 1
       const slices = sliceCapture({
-        captureStart: capture.startSample,
+        captureStart: Math.round(capture.startSample * rateScale),
         captureLength: length,
-        compensation: capture.source === 'guide' ? 0 : compensation,
+        compensation: capture.source === 'guide' ? 0 : Math.round(compensation * rateScale),
         punchFrom: punched ? punched.recordFrom : undefined,
         punchTo: punched ? punched.recordTo : undefined,
         loopStart: cycling ? store.project.loopStartSample : undefined,
@@ -1228,12 +1266,13 @@ export function App() {
       })
       if (!track || !slices.length) continue
       const makeLane = (slice: (typeof slices)[number], index: number): TakeLane => {
-        const channels = capture.channels.map((channel) => channel.slice(slice.captureOffset, slice.captureOffset + slice.durationSamples))
+        const raw = capture.channels.map((channel) => channel.slice(slice.captureOffset, slice.captureOffset + slice.durationSamples))
+        const channels = fitRecordedChannels(raw, capture.sampleRate, store.project.sampleRate)
         const bufferId = uid('buf')
         store.addAsset({
           id: bufferId,
           name: capture.source === 'guide' ? 'Live guide' : `Take ${index + 1}`,
-          sampleRate: capture.sampleRate,
+          sampleRate: store.project.sampleRate,
           channels,
         })
         return {
@@ -1242,7 +1281,7 @@ export function App() {
           bufferId,
           offsetSamples: 0,
           startSample: slice.startSample,
-          durationSamples: channels[0]?.length || slice.durationSamples,
+          durationSamples: channels[0]?.length || Math.round(slice.durationSamples * rateScale),
           peerId: capture.peerId,
           takeId: capture.takeId,
           source: capture.source === 'guide' ? 'guide' : 'local',
@@ -1260,14 +1299,13 @@ export function App() {
           bufferId: lane.bufferId,
           startSample: lane.startSample,
           offsetSamples: 0,
-          durationSamples: lane.durationSamples,
           fadeInSamples: 64,
           fadeOutSamples: 128,
           gain: 1,
           source: lane.source,
           peerId: capture.peerId,
           takeId: capture.takeId,
-          stretch: inspectClip(channels[0] ?? new Float32Array(), capture.sampleRate, store.project.tempo),
+          ...recordedClipFields(channels[0]?.length || 1),
         }
         store.addAudioClip(track.id, clip)
         if (capture.source === 'local' && compensation > 0) {
@@ -1446,10 +1484,11 @@ export function App() {
     const inputs = await collectRecordInputs({
       tracks: store.project.tracks,
       takeId,
-      localStream: () => session.localPerformanceStream(),
+      localStream: () => session.localPerformanceStream() ?? ownedMic.current,
       remoteStream: (peerId) => session.remoteMusic(peerId),
       setLocalMic: (stream) => engine.setLocalMic(stream),
       openMic: (audio) => navigator.mediaDevices.getUserMedia({ audio, video: false }),
+      sampleRate: engine.sampleRate || store.project.sampleRate,
     })
     if (epoch !== recordEpoch.current) return
     const midiArmed = armedRecordPlan(store.project.tracks).midi.length > 0

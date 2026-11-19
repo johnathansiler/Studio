@@ -192,9 +192,10 @@ describe('808 loop preview and track playback', () => {
       startSample: 0,
     })!
     const store = new ProjectStore(project)
-    const track = store.project.tracks.find((item) => item.type === 'audio')!
+    const vocal = store.project.tracks.find((item) => item.type === 'audio')!
     store.addAsset(placed.asset)
-    store.placeClipAtPlayhead(track.id, placed.clip, 0)
+    const landed = store.placeClipAtPlayhead(vocal.id, placed.clip, 0)
+    const track = store.project.tracks.find((item) => item.id === landed?.trackId) ?? vocal
     const clip = track.clips[0]
     const atFollow = clip.durationSamples
     store.setTempo(100)
@@ -246,9 +247,10 @@ describe('808 loop preview and track playback', () => {
       startSample: 0,
     })!
     const store = new ProjectStore(project)
-    const track = store.project.tracks.find((item) => item.type === 'audio')!
+    const vocal = store.project.tracks.find((item) => item.type === 'audio')!
     store.addAsset(placed.asset)
-    store.placeClipAtPlayhead(track.id, placed.clip, 0)
+    const landed = store.placeClipAtPlayhead(vocal.id, placed.clip, 0)
+    const track = store.project.tracks.find((item) => item.id === landed?.trackId) ?? vocal
     const clip = track.clips[0]
     const at120 = clip.durationSamples
     expect(store.smartTempo?.bpm).toBe(105)

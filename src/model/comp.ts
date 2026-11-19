@@ -347,12 +347,14 @@ export function mediaChannelCount(inputs: string[]): number {
   return count
 }
 
-export function channelConstraints(count: number): MediaTrackConstraints {
+export function channelConstraints(count: number, sampleRate?: number): MediaTrackConstraints {
+  const rate = sampleRate && sampleRate > 0 ? { sampleRate: { ideal: sampleRate } } : {}
   return {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
     channelCount: { ideal: Math.max(1, count) },
+    ...rate,
   }
 }
 

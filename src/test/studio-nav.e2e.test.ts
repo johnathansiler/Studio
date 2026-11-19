@@ -185,13 +185,14 @@ describe('studio navigation', () => {
       await page.getByRole('button', { name: /Close Beat Machine/ }).click()
       await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 
-      await addTrack(page, /Audio \/ Vocal\. Record mic/)
-      await page.locator('[data-track-name="Audio 1"]').waitFor()
+      await addTrack(page, /Vocal\. Record mic/)
+      await page.locator('[data-track-name="Vocal 2"]').waitFor()
       const armed = await page.evaluate(() => {
-        const hook = (window as unknown as { __cueharbor?: { store: { project: { tracks: { name: string; armed: boolean; type: string }[] } } } }).__cueharbor
-        return hook?.store.project.tracks.find((track) => track.name === 'Audio 1')
+        const hook = (window as unknown as { __cueharbor?: { store: { project: { tracks: { name: string; armed: boolean; type: string; kind?: string }[] } } } }).__cueharbor
+        return hook?.store.project.tracks.find((track) => track.name === 'Vocal 2')
       })
       expect(armed?.type).toBe('audio')
+      expect(armed?.kind).toBe('vocal')
       expect(armed?.armed).toBe(true)
     } finally {
       web.kill('SIGTERM')

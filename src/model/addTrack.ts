@@ -2,14 +2,15 @@ import { makeTrack, TRACK_COLORS, type Track, type TrackInstrument } from './typ
 
 export type AddKind = 'audio' | 'midi' | 'drum' | 'bus'
 
-/** One tap in the Add Track menu. */
-export type TrackChoice = 'instrument' | 'steps' | 'pads' | 'audio'
+/** One tap in the Add Track menu. `audio` is the older name for a Vocal track. */
+export type TrackChoice = 'instrument' | 'steps' | 'pads' | 'vocal' | 'loop' | 'audio'
 
 export const TRACK_CHOICES: { id: TrackChoice; name: string; detail: string }[] = [
   { id: 'instrument', name: 'Instrument', detail: 'Play keys' },
   { id: 'steps', name: 'Step Sequencer', detail: 'Program beats' },
   { id: 'pads', name: 'Beat Machine', detail: 'Pads' },
-  { id: 'audio', name: 'Audio / Vocal', detail: 'Record mic' },
+  { id: 'vocal', name: 'Vocal', detail: 'Record mic' },
+  { id: 'loop', name: 'Loop', detail: 'Follow tempo' },
 ]
 
 export interface AddTrackSpec {
@@ -63,7 +64,11 @@ function drumInstrument(instrument: TrackInstrument): TrackInstrument {
 }
 
 function label(spec: AddTrackSpec) {
-  if (spec.kind === 'audio') return 'Audio'
+  if (spec.kind === 'audio') {
+    if (spec.choice === 'loop') return 'Loop'
+    if (spec.choice === 'vocal' || spec.choice === 'audio') return 'Vocal'
+    return 'Audio'
+  }
   if (spec.kind === 'bus') return 'Bus'
   if (spec.kind === 'drum') {
     if (spec.instrument === '808') return '808'
@@ -88,17 +93,26 @@ export function tracksFor(spec: AddTrackSpec, existing: Track[]): Track[] {
     ? drumInstrument(spec.instrument)
     : spec.kind === 'midi' ? spec.instrument : 'none'
   const type = spec.kind === 'bus' ? 'bus' : spec.kind === 'audio' ? 'audio' : 'midi'
+  const audioKind = type !== 'audio'
+    ? undefined
+    : spec.choice === 'loop'
+      ? 'loop' as const
+      : spec.choice === 'vocal' || spec.choice === 'audio' || spec.armed
+        ? 'vocal' as const
+        : 'loop' as const
   const made: Track[] = []
   for (let i = 0; i < count; i++) {
     used += 1
     made.push(makeTrack({
       name: `${name} ${used}`,
       type,
+      kind: audioKind,
+      inputGainDb: audioKind === 'vocal' ? 0 : undefined,
       color: TRACK_COLORS[(existing.length + i) % TRACK_COLORS.length],
       instrument,
-      input: audioInput(spec),
+      input: spec.choice === 'loop' ? 'none' : audioInput(spec),
       channels: type === 'audio' ? spec.channels : 1,
-      armed: type === 'audio' && spec.armed,
+      armed: audioKind === 'vocal' && spec.armed,
     }))
   }
   return made

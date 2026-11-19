@@ -45,7 +45,7 @@ async function openRoll(page: Page, url: string) {
     const keys = hook.store.project.tracks.find((track) => track.name === 'Keys')!
     hook.store.addMidiClip(keys.id, 0)
   })
-  await page.locator('[data-track-name="Keys"] .piano-open').click()
+  await page.locator('[data-midi="1"]').first().dblclick()
   await page.locator('.midi-dock .mode-tabs').waitFor()
 }
 

@@ -1,3 +1,4 @@
+import { clipPlaybackRate, inputGainLinear } from './recordTake'
 import { tempoDrivesLength } from '../model/clipTempo'
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
 import { bodyLength, clipHasWaveBody, fadeCurve, type WaveEdit } from './wave/edit'
@@ -95,6 +96,8 @@ interface RecordInput {
   takeId?: string
   /** Interface channel. Omitted records the whole stream. */
   channel?: number
+  /** Input trim in dB, applied before the samples hit the worklet. */
+  gainDb?: number
 }
 
 interface ActiveRec {
@@ -106,6 +109,7 @@ interface ActiveRec {
   meta: RecordInput
   timelineSample: number
   anchorCtx: number
+  trim: GainNode
 }
 
 interface Stoppable {
@@ -196,6 +200,10 @@ export class AudioEngine {
   private cueDest: MediaStreamAudioDestinationNode | null = null
   private recordSink: MediaStreamAudioDestinationNode | null = null
   private inputAnalyser: AnalyserNode | null = null
+  private inputWindow: Float32Array | null = null
+  private recordTrims = new Map<string, GainNode>()
+  private inputListeners = new Set<() => void>()
+  private waveTakes = new Map<string, { startSample: number; min: number[]; max: number[] }>()
   private tuneAnalyser: AnalyserNode | null = null
   private talkAnalyser: AnalyserNode | null = null
   private cueReturnGain: GainNode | null = null
@@ -1891,6 +1899,66 @@ export class AudioEngine {
     return sample
   }
 
+  /** Dry mic peak and RMS. The track multiplies by its input trim for the meter. */
+  readInputMeter(): { peak: number; rms: number } | null {
+    const node = this.inputAnalyser
+    if (!node || typeof node.getFloatTimeDomainData !== 'function') return null
+    const size = node.fftSize || node.frequencyBinCount * 2 || 256
+    if (!this.inputWindow || this.inputWindow.length !== size) this.inputWindow = new Float32Array(size)
+    node.getFloatTimeDomainData(this.inputWindow as Float32Array<ArrayBuffer>)
+    let peak = 0
+    let sum = 0
+    for (let i = 0; i < size; i++) {
+      const sample = this.inputWindow[i] || 0
+      const mag = Math.abs(sample)
+      if (mag > peak) peak = mag
+      sum += sample * sample
+    }
+    return { peak, rms: Math.sqrt(sum / Math.max(1, size)) }
+  }
+
+  /** Move the armed track's trim while a take is running. The meter uses the same dB. */
+  setRecordTrim(key: string, db: number) {
+    const node = this.recordTrims.get(key)
+    if (!node || !this.ctx) return
+    node.gain.setTargetAtTime(inputGainLinear(db), this.ctx.currentTime, 0.015)
+  }
+
+  subscribeInput(fn: () => void) {
+    this.inputListeners.add(fn)
+    return () => { this.inputListeners.delete(fn) }
+  }
+
+  recordWave(trackId: string) {
+    return this.waveTakes.get(trackId) ?? null
+  }
+
+  private emitInput() {
+    for (const fn of this.inputListeners) fn()
+  }
+
+  private pushRecordWave(trackId: string, startSample: number, left: Float32Array) {
+    let take = this.waveTakes.get(trackId)
+    if (!take) {
+      take = { startSample, min: [], max: [] }
+      this.waveTakes.set(trackId, take)
+    }
+    const bucket = 256
+    for (let i = 0; i < left.length; i += bucket) {
+      let min = 1
+      let max = -1
+      const end = Math.min(left.length, i + bucket)
+      for (let j = i; j < end; j++) {
+        const sample = left[j] || 0
+        if (sample < min) min = sample
+        if (sample > max) max = sample
+      }
+      take.min.push(min)
+      take.max.push(max)
+    }
+    this.emitInput()
+  }
+
   /**
    * Peak of the analyser window, then a short release.
    * The window covers a display frame, so a click or a hat is in the buffer
@@ -2526,6 +2594,9 @@ export class AudioEngine {
       this.releaseRecorder(rec)
     }
     this.recorders.clear()
+    this.recordTrims.clear()
+    this.waveTakes.clear()
+    this.emitInput()
     if (this.status === 'recording') this.status = this.playing ? 'playing' : 'stopped'
     this.emit()
     return results
@@ -2554,8 +2625,10 @@ export class AudioEngine {
   private releaseRecorder(rec: ActiveRec) {
     try { rec.node.port.postMessage({ type: 'stop' }) } catch { /* already stopped */ }
     try { rec.source.disconnect() } catch { /* already gone */ }
+    try { rec.trim.disconnect() } catch { /* already gone */ }
     try { rec.splitter?.disconnect() } catch { /* already gone */ }
     try { rec.node.disconnect() } catch { /* already gone */ }
+    this.recordTrims.delete(rec.meta.key)
     try { rec.silent.disconnect() } catch { /* already gone */ }
   }
 
@@ -2597,12 +2670,16 @@ export class AudioEngine {
       const node = new AudioWorkletNode(this.ctx, 'recorder-processor')
       const silent = this.ctx.createGain()
       silent.gain.value = 0
+      const trim = this.ctx.createGain()
+      trim.gain.value = inputGainLinear(input.gainDb ?? 0)
+      this.recordTrims.set(input.key, trim)
       let splitter: ChannelSplitterNode | undefined
       if (input.channel != null) {
         splitter = this.ctx.createChannelSplitter(input.channel + 1)
         src.connect(splitter)
-        splitter.connect(node, input.channel, 0)
-      } else src.connect(node)
+        splitter.connect(trim, input.channel, 0)
+      } else src.connect(trim)
+      trim.connect(node)
       node.connect(silent)
       silent.connect(this.recordSink ?? this.ctx.destination)
       const rec: ActiveRec = {
@@ -2610,6 +2687,7 @@ export class AudioEngine {
         source: src,
         silent,
         splitter,
+        trim,
         chunks: [],
         meta: input,
         timelineSample,
@@ -2618,6 +2696,7 @@ export class AudioEngine {
       node.port.onmessage = (event) => {
         if (event.data?.type === 'chunk') {
           rec.chunks.push({ frame: event.data.frame, left: event.data.left, right: event.data.right })
+          if (event.data.left instanceof Float32Array) this.pushRecordWave(input.key, timelineSample, event.data.left)
         }
       }
       node.port.postMessage({ type: 'start' })
@@ -3465,7 +3544,8 @@ export class AudioEngine {
         const baked = this.bakeWave(this.ctx, buffer, audio)
         const prepared = this.stretchBuffer(this.ctx, baked.buffer, baked.clip)
         const src = this.ctx.createBufferSource()
-        const rate = audio.stretch ? 1 : warpRate(audio.durationSamples, audio.durationBeats, sr, project.tempo, audio.warp !== false)
+        const forced = clipPlaybackRate(audio)
+        const rate = forced ?? (audio.stretch ? 1 : warpRate(audio.durationSamples, audio.durationBeats, sr, project.tempo, audio.warp !== false))
         let playBuffer = prepared.buffer
         let offset = prepared.clip.offsetSamples / prepared.buffer.sampleRate
         let dur = Math.max(0.01, prepared.clip.durationSamples / sr)
@@ -4392,6 +4472,8 @@ export class AudioEngine {
     const offset = (clip.offsetSamples + (from - clip.startSample)) / buffer.sampleRate + slip
     const src = ctx.createBufferSource()
     src.buffer = buffer
+    const forcedRate = clipPlaybackRate(clip)
+    if (forcedRate != null) src.playbackRate.value = forcedRate
     const gain = ctx.createGain()
     const relFrom = (from - clip.startSample) / sr + slip
     const relTo = (to - clip.startSample) / sr
