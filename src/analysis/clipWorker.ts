@@ -1,6 +1,6 @@
 import { renderClipChannels, sourceSamplesOf } from '../audio/stretch/engine'
 import { formantPitchChannels } from '../audio/stretch/formantPitch'
-import { formantPitchKey, readFormantPitch, writeFormantPitch } from '../audio/stretch/pitchCache'
+import { channelPrint, formantPitchKey, readFormantPitch, writeFormantPitch } from '../audio/stretch/pitchCache'
 import { monoMix } from './mix'
 import { detectKey, detectTempo, hearingOf } from './clipKey'
 import type { AudioClip, ClipHearing, Project, TempoPoint } from '../model/types'
@@ -88,6 +88,7 @@ function warmFormantPitch(channels: Float32Array[], clip: AudioClip, sampleRate:
     cents: stretch.cents,
     formant: true,
     mode: stretch.mode,
+    print: channelPrint(sliced),
   })
   if (readFormantPitch(key)) return
   writeFormantPitch(key, formantPitchChannels(sliced, sampleRate, {

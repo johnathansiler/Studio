@@ -1,6 +1,6 @@
 import { clipTempoMode, tempoDrivesLength } from '../../model/clipTempo'
 import { renderClipChannels, timelineSamples, type StretchQuality } from './engine'
-import { formantPitchKey, readFormantPitch } from './pitchCache'
+import { channelPrint, formantPitchKey, readFormantPitch } from './pitchCache'
 import type { AudioClip, Project } from '../../model/types'
 
 export interface StretchSlot {
@@ -195,7 +195,9 @@ function formantPitchPending(clip: AudioClip, channels: Float32Array[], sampleRa
   if (stretch.mode !== 'pro' && stretch.mode !== 'tonal') return false
   const offset = Math.max(0, clip.offsetSamples || 0)
   const source = Math.max(1, stretch.sourceSamples || 0)
-  const length = Math.max(0, Math.min(channels[0]?.length ?? 0, offset + source) - offset)
+  const end = Math.min(channels[0]?.length ?? 0, offset + source)
+  const sliced = channels.map((channel) => channel.subarray(offset, end))
+  const length = sliced[0]?.length ?? 0
   if (length < 8) return false
   const key = formantPitchKey({
     bufferId: clip.bufferId,
@@ -207,6 +209,7 @@ function formantPitchPending(clip: AudioClip, channels: Float32Array[], sampleRa
     cents: stretch.cents,
     formant: true,
     mode: stretch.mode,
+    print: channelPrint(sliced),
   })
   return !readFormantPitch(key)
 }

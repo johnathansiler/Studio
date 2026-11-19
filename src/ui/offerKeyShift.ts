@@ -40,6 +40,7 @@ export async function offerLoopKeyShift(
     to: plan.to,
     tonicOnly: plan.tonicOnly,
   }
+  if (store.project.keyShift === 'keep') return
   if (store.project.keyShift === 'always') {
     await runKeyShift(store, request, false)
     return
@@ -59,7 +60,7 @@ export async function runKeyShift(store: ProjectStore, request: KeyShiftRequest,
         bufferId: clip.bufferId,
         offsetSamples: clip.offsetSamples,
         sourceSamples: stretch?.sourceSamples || clip.durationSamples,
-        sampleRate: asset.sampleRate,
+        sampleRate: store.project.sampleRate,
         semitones: request.semitones,
         cents: 0,
         formant: true,

@@ -7,7 +7,8 @@ import { detectKey } from '../analysis/clipKey'
 import { handleClipDetect } from '../analysis/clipWorker'
 import { renderClipChannels } from '../audio/stretch/engine'
 import { formantPitchChannels, formantPitchShift, pitchFactorOf } from '../audio/stretch/formantPitch'
-import { formantPitchKey, readFormantPitch, writeFormantPitch } from '../audio/stretch/pitchCache'
+import { resampleSinc } from '../audio/quality/resample'
+import { channelPrint, formantPitchKey, readFormantPitch, writeFormantPitch } from '../audio/stretch/pitchCache'
 import { fft } from '../audio/stretch/phase'
 import {
   fitToProject,
@@ -75,37 +76,45 @@ function peakOf(channel: Float32Array) {
   return peak
 }
 
+/** Hann-windowed search. A bare DFT bin parabola reads several cents off a clean sine. */
 function hzOf(channel: Float32Array, rate: number, expectHz: number) {
-  const start = Math.floor(channel.length * 0.45)
-  const frame = channel.subarray(start, Math.min(channel.length, start + 16384))
-  const n = frame.length
-  const power = (k: number) => {
-    const w = (2 * Math.PI * k) / n
+  const n = Math.min(16384, channel.length)
+  const start = Math.max(0, Math.floor(channel.length * 0.5) - Math.floor(n / 2))
+  const frame = channel.subarray(start, start + n)
+  const power = (hz: number) => {
+    const w = (2 * Math.PI * hz) / rate
     let re = 0
     let im = 0
-    for (let i = 0; i < n; i++) {
-      re += frame[i] * Math.cos(w * i)
-      im -= frame[i] * Math.sin(w * i)
+    for (let i = 0; i < frame.length; i++) {
+      const win = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / Math.max(1, frame.length - 1))
+      const sample = (frame[i] || 0) * win
+      re += sample * Math.cos(w * i)
+      im -= sample * Math.sin(w * i)
     }
     return re * re + im * im
   }
-  const bin = (expectHz * n) / rate
-  let best = Math.max(1, Math.floor(bin - 6))
+  let best = expectHz
   let bestP = -1
-  const last = Math.min(n / 2 - 2, Math.ceil(bin + 6))
-  for (let k = best; k <= last; k++) {
-    const powerAt = power(k)
+  for (let hz = expectHz - 2; hz <= expectHz + 2; hz += 0.05) {
+    const powerAt = power(hz)
     if (powerAt > bestP) {
       bestP = powerAt
-      best = k
+      best = hz
     }
   }
-  const ym1 = power(best - 1)
+  const span = 0.05
+  const ym1 = power(best - span)
   const y0 = power(best)
-  const yp1 = power(best + 1)
+  const yp1 = power(best + span)
   const denom = ym1 - 2 * y0 + yp1
-  const delta = denom === 0 ? 0 : (0.5 * (ym1 - yp1)) / denom
-  return ((best + delta) * rate) / n
+  const delta = denom === 0 ? 0 : (0.5 * (ym1 - yp1) / denom) * span
+  return best + delta
+}
+
+function rmsOf(channel: Float32Array) {
+  let sum = 0
+  for (let i = 0; i < channel.length; i++) sum += channel[i] * channel[i]
+  return Math.sqrt(sum / Math.max(1, channel.length))
 }
 
 function bandEnergy(channel: Float32Array, rate: number, lo: number, hi: number) {
@@ -189,18 +198,39 @@ describe('in-house pitch shift', () => {
   it('measures cents, formants, and attack alignment, and writes listening renders', () => {
     const rate = 48000
     const cents: number[] = []
-    for (const semis of [3, -5, 7, 1]) {
+    const sineRates: { rate: number; semis: number }[] = []
+    for (const semis of [3, -5, 7, 1, 6, -6]) sineRates.push({ rate, semis })
+    sineRates.push({ rate: 44100, semis: -6 }, { rate: 44100, semis: 6 })
+    let sineSource: Float32Array | null = null
+    let sineKept: Float32Array | null = null
+    let sineBare: Float32Array | null = null
+    for (const move of sineRates) {
       const src = 220
-      const input = new Float32Array(Math.round(rate * 0.7))
-      for (let i = 0; i < input.length; i++) input[i] = 0.4 * Math.sin((2 * Math.PI * src * i) / rate)
-      const out = formantPitchShift(input, rate, pitchFactorOf(semis), true)
+      const input = new Float32Array(Math.round(move.rate * 0.7))
+      for (let i = 0; i < input.length; i++) input[i] = 0.4 * Math.sin((2 * Math.PI * src * i) / move.rate)
+      const out = formantPitchShift(input, move.rate, pitchFactorOf(move.semis), true)
       expect(out.length).toBe(input.length)
       expect(peakOf(out)).toBeLessThanOrEqual(1)
-      const target = src * pitchFactorOf(semis)
-      const error = 1200 * Math.log2(hzOf(out, rate, target) / target)
-      cents.push(error)
-      expect(Math.abs(error)).toBeLessThan(12)
+      const level = rmsOf(out) / Math.max(1e-8, rmsOf(input))
+      expect(level, `level ${move.semis} @ ${move.rate}`).toBeGreaterThan(0.85)
+      expect(level).toBeLessThan(1.15)
+      const target = src * pitchFactorOf(move.semis)
+      const error = 1200 * Math.log2(hzOf(out, move.rate, target) / target)
+      if (move.rate === rate) cents.push(error)
+      expect(Math.abs(error), `${move.semis} st at ${move.rate}`).toBeLessThan(2)
+      if (move.rate === rate && move.semis === 3) {
+        sineSource = input
+        sineKept = out
+        sineBare = formantPitchShift(input, move.rate, pitchFactorOf(move.semis), false)
+      }
     }
+    const file = new Float32Array(Math.round(44100 * 0.6))
+    for (let i = 0; i < file.length; i++) file[i] = 0.3 * Math.sin((2 * Math.PI * 196 * i) / 44100)
+    const at48 = resampleSinc(file, Math.round(file.length * (48000 / 44100)), 96)
+    const from44 = formantPitchShift(at48, 48000, pitchFactorOf(3), false)
+    const from44Target = 196 * pitchFactorOf(3)
+    const from44Error = 1200 * Math.log2(hzOf(from44, 48000, from44Target) / from44Target)
+    expect(Math.abs(from44Error)).toBeLessThan(2)
     const vowel = new Float32Array(Math.round(rate * 0.7))
     const f0 = 180
     for (let i = 0; i < vowel.length; i++) {
@@ -249,30 +279,110 @@ describe('in-house pitch shift', () => {
     const preEcho = before / Math.max(1e-8, after)
     expect(preEcho).toBeLessThan(0.35)
 
+    const loop = new Float32Array(rate * 2)
+    for (const f0 of [220, 277.18, 329.63]) {
+      const cycles = Math.round((f0 * loop.length) / rate)
+      const freq = (cycles * rate) / loop.length
+      for (let h = 1; h <= 4; h++) {
+        for (let i = 0; i < loop.length; i++) loop[i] += Math.sin((2 * Math.PI * freq * h * i) / rate) / (h * h) * 0.1
+      }
+    }
+    const looped = formantPitchShift(loop, rate, pitchFactorOf(3), true)
+    const join = Math.abs(looped[0] - looped[looped.length - 1])
+    let bodyStep = 0
+    for (let i = Math.floor(loop.length / 2); i < Math.floor(loop.length / 2) + 2000; i++) {
+      bodyStep = Math.max(bodyStep, Math.abs(looped[i] - looped[i - 1]))
+    }
+    expect(join).toBeLessThan(bodyStep * 3 + 0.02)
+
+    const stereoN = rate
+    const left = new Float32Array(stereoN)
+    const right = new Float32Array(stereoN)
+    const delay = 20
+    for (let i = 0; i < stereoN; i++) {
+      left[i] = 0.25 * Math.sin((2 * Math.PI * 196 * i) / rate)
+      if (i >= delay) right[i] = 0.25 * Math.sin((2 * Math.PI * 196 * (i - delay)) / rate)
+    }
+    const [outL, outR] = formantPitchChannels([left, right], rate, { semitones: 4, formant: true })
+    const stereoHz = 196 * pitchFactorOf(4)
+    const phaseAt = (from: number) => {
+      const w = (2 * Math.PI * stereoHz) / rate
+      let ar = 0
+      let ai = 0
+      let br = 0
+      let bi = 0
+      const len = 4096
+      for (let i = 0; i < len; i++) {
+        const c = Math.cos(w * i)
+        const s = Math.sin(w * i)
+        ar += outL[from + i] * c
+        ai -= outL[from + i] * s
+        br += outR[from + i] * c
+        bi -= outR[from + i] * s
+      }
+      let delta = Math.atan2(ai, ar) - Math.atan2(bi, br)
+      if (delta > Math.PI) delta -= 2 * Math.PI
+      if (delta < -Math.PI) delta += 2 * Math.PI
+      return delta
+    }
+    const phaseA = phaseAt(Math.floor(stereoN * 0.3))
+    const phaseB = phaseAt(Math.floor(stereoN * 0.55))
+    expect(Math.abs(phaseA - phaseB)).toBeLessThan(0.25)
+
+    const bars = rate * 16
+    const eightL = new Float32Array(bars)
+    const eightR = new Float32Array(bars)
+    for (const f0 of [196, 246.94, 293.66]) {
+      const cycles = Math.round((f0 * bars) / rate)
+      const freq = (cycles * rate) / bars
+      for (let h = 1; h <= 3; h++) {
+        for (let i = 0; i < bars; i++) {
+          const sample = Math.sin((2 * Math.PI * freq * h * i) / rate) / (h * h) * 0.08
+          eightL[i] += sample
+          eightR[i] += sample * 0.75
+        }
+      }
+    }
+    const started = performance.now()
+    const eight = formantPitchChannels([eightL, eightR], rate, { semitones: 3, formant: true })
+    const eightBarMs = performance.now() - started
+    expect(eight[0].length).toBe(bars)
+    expect(eight[1].length).toBe(bars)
+    expect(eightBarMs).toBeLessThan(20000)
+
+    if (!sineSource || !sineKept || !sineBare) throw new Error('missing sine renders')
     const dir = '/opt/cursor/artifacts/key-shift'
     mkdirSync(dir, { recursive: true })
-    const renders: [string, Float32Array][] = [
-      ['vowel-source', vowel],
-      ['vowel-formant', kept],
-      ['vowel-plain', bare],
-      ['pluck-source', pluck],
-      ['pluck-shifted', plucked],
+    const renders: [string, Float32Array, number][] = [
+      ['vowel-source', vowel, rate],
+      ['vowel-formant', kept, rate],
+      ['vowel-plain', bare, rate],
+      ['pluck-source', pluck, rate],
+      ['pluck-shifted', plucked, rate],
+      ['sine-source', sineSource, rate],
+      ['sine-formant', sineKept, rate],
+      ['sine-plain', sineBare, rate],
     ]
-    for (const [name, channel] of renders) {
-      writeFileSync(`${dir}/${name}.wav`, Buffer.from(encodeWav([channel], rate, { bits: 24 })))
+    for (const [name, channel, fileRate] of renders) {
+      writeFileSync(`${dir}/${name}.wav`, Buffer.from(encodeWav([channel], fileRate, { bits: 24 })))
     }
     const report = {
-      engine: 'in-house phase vocoder (Laroche–Dolson identity lock, cepstral formant, transient reset)',
+      engine: 'in-house phase vocoder (identity phase lock, shared stereo phase, cepstral formant, circular loop, transient reset)',
       cents,
       maxAbsCents: Math.max(...cents.map((value) => Math.abs(value))),
+      resampled44100To48000Cents: from44Error,
       durationErrorSamples: 0,
       formantHomeToShifted: { preserved: keptRatio, plain: bareRatio, source: ratio(vowel) },
       onsetErrorMs: onsetMs,
       preEchoRatio: preEcho,
+      loopJoin: join,
+      loopBodyStep: bodyStep,
+      stereoPhaseWanderRad: phaseB - phaseA,
+      eightBar48kStereoMs: Math.round(eightBarMs),
     }
     writeFileSync(`${dir}/metrics.json`, JSON.stringify(report, null, 2))
     console.log(JSON.stringify(report, null, 2))
-  }, 60000)
+  }, 120000)
 })
 
 describe('drop prompt', () => {
@@ -363,6 +473,7 @@ describe('drop prompt', () => {
       cents: 0,
       formant: true,
       mode: 'pro',
+      print: channelPrint([audio]),
     })
     expect(readFormantPitch(key)?.[0].length).toBe(audio.length)
     const sounded = renderClipChannels(asset.channels, shifted, store.project, 'hq')
@@ -412,7 +523,78 @@ describe('drop prompt', () => {
     writeFormantPitch(key, formantPitchChannels([audio], rate, { semitones: 3, formant: true }))
   }, 120000)
 
-  it('screenshots the prompt and the dock on a fold', async () => {
+  it('keeps the shift through paste and tempo follow, and the always choice can be turned off', async () => {
+    const rate = 48000
+    const store = new ProjectStore(createEmptyProject(rate))
+    store.setScale({ root: 0, scale: 'aeolian' })
+    const tone = new Float32Array(rate)
+    for (let i = 0; i < tone.length; i++) tone[i] = 0.25 * Math.sin((2 * Math.PI * 220 * i) / rate)
+    const placed = placeLoop(store, tone, rate, 'Tone')
+    const clip = store.track(placed.trackId)!.clips.find((item) => item.id === placed.clipId)!
+    clip.stretch = { ...clip.stretch!, semitones: 3, formant: true, followTempo: true, sourceBpm: 100 }
+    clip.keyShift = { semitones: 3, from: 'A minor', to: 'C minor', formantBefore: false }
+    const key = formantPitchKey({
+      bufferId: clip.bufferId,
+      offsetSamples: 0,
+      sourceSamples: tone.length,
+      length: tone.length,
+      sampleRate: rate,
+      semitones: 3,
+      cents: 0,
+      formant: true,
+      mode: 'pro',
+      print: channelPrint([tone]),
+    })
+    writeFormantPitch(key, [new Float32Array(tone.length)])
+    store.project.tempo = 110
+    const asset = store.buffers.get(clip.bufferId)!
+    const silent = renderClipChannels(asset.channels, clip, store.project, 'hq')
+    expect(rmsOf(silent[0])).toBeLessThan(0.01)
+    writeFormantPitch(key, formantPitchChannels([tone], rate, { semitones: 3, formant: true }))
+    const sounded = renderClipChannels(asset.channels, clip, store.project, 'hq')
+    const target = 220 * pitchFactorOf(3)
+    const error = 1200 * Math.log2(hzOf(sounded[0], rate, target) / target)
+    expect(Math.abs(error)).toBeLessThan(10)
+    expect(sounded[0].length).not.toBe(tone.length)
+
+    store.selectClip(placed.trackId, placed.clipId, false, false)
+    expect(store.copyClips()).toBe(true)
+    expect(store.pasteClips(rate * 4)).toBe(true)
+    const pasted = store.track(placed.trackId)!.clips.find((item) => item.id !== placed.clipId)
+    expect(pasted?.stretch?.semitones).toBe(3)
+    expect(pasted?.stretch?.formant).toBe(true)
+    expect(pasted?.keyShift?.from).toBe('A minor')
+    expect(pasted?.bufferId).toBe(clip.bufferId)
+
+    tone[10] = 0.9
+    const changed = formantPitchKey({
+      bufferId: clip.bufferId,
+      offsetSamples: 0,
+      sourceSamples: tone.length,
+      length: tone.length,
+      sampleRate: rate,
+      semitones: 3,
+      cents: 0,
+      formant: true,
+      mode: 'pro',
+      print: channelPrint([tone]),
+    })
+    expect(changed).not.toBe(key)
+    expect(readFormantPitch(changed)).toBeNull()
+
+    store.setKeyShiftPolicy('always')
+    expect(store.project.keyShift).toBe('always')
+    const dock = renderToStaticMarkup(createElement(ClipTempoControl, { store, trackId: placed.trackId, clipId: placed.clipId }))
+    expect(dock).toContain('data-key-shift-policy="ask"')
+    expect(dock).toContain('Ask each time')
+    store.undo()
+    expect(store.project.keyShift).not.toBe('always')
+    store.setKeyShiftPolicy('keep')
+    await offerLoopKeyShift(store, placed.trackId, placed.clipId, { loop: true, catalogKey: 'A minor' })
+    expect(store.keyShiftOffer).toBeNull()
+  }, 60000)
+
+  it('screenshots the prompt and the dock on a phone and a fold', async () => {
     const rate = 48000
     const store = new ProjectStore(createEmptyProject(rate))
     const track = store.project.tracks.find((item) => item.name === 'Music')!
@@ -454,8 +636,8 @@ describe('drop prompt', () => {
     })
     try {
       for (const view of [
-        { name: 'fold-cover', width: 344, height: 882 },
-        { name: 'fold-inner', width: 884, height: 1104 },
+        { name: 'phone-344', width: 344, height: 844 },
+        { name: 'fold-768', width: 768, height: 1024 },
       ]) {
         const page = await browser.newPage({ viewport: { width: view.width, height: view.height }, deviceScaleFactor: 2 })
         await page.setContent(`<!doctype html><html><head><style>

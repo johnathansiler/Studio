@@ -610,8 +610,8 @@ export interface Project {
   record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
-  /** Ask before shifting a new loop, or always shift it into the project key. */
-  keyShift?: 'ask' | 'always'
+  /** Ask before shifting a new loop, always shift it, or always leave it. */
+  keyShift?: 'ask' | 'always' | 'keep'
   /** Last one-tap generator choices. The MIDI itself lives on the tracks. */
   generator?: GeneratorSettings
   /** Drummer and session-player choices. The MIDI itself lives on the tracks. */

@@ -1,5 +1,5 @@
 import { renderClipChannels } from './engine'
-import { formantPitchKey, readFormantPitch, writeFormantPitch } from './pitchCache'
+import { channelPrint, formantPitchKey, readFormantPitch, writeFormantPitch } from './pitchCache'
 import { publishStretch } from './commit'
 import type { AudioClip, Project } from '../../model/types'
 
@@ -96,7 +96,13 @@ export async function cacheFormantPitch(request: PitchCacheRequest) {
   const sliced = request.channels.map((channel) => Float32Array.from(channel.subarray(offset, Math.min(channel.length, offset + source))))
   const length = sliced[0]?.length ?? 0
   if (length < 8) return
-  const key = formantPitchKey({ ...request, offsetSamples: offset, sourceSamples: source, length })
+  const key = formantPitchKey({
+    ...request,
+    offsetSamples: offset,
+    sourceSamples: source,
+    length,
+    print: channelPrint(sliced),
+  })
   if (readFormantPitch(key)) return
   const shifted = await shiftOffThread(sliced, request.sampleRate, request.semitones, request.cents, request.formant)
   writeFormantPitch(key, shifted.map((channel) => fitLength(channel, length)))

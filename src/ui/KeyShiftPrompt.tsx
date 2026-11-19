@@ -47,7 +47,10 @@ export function KeyShiftPrompt({ store }: { store: ProjectStore }) {
         data-key-shift="keep"
         disabled={busy}
         title="Leave this loop in its original key."
-        onClick={() => store.dismissKeyShiftOffer()}
+        onClick={() => {
+          if (always) store.setKeyShiftPolicy('keep')
+          store.dismissKeyShiftOffer()
+        }}
       >
         Keep original
       </button>

@@ -38,6 +38,11 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
   const [bpmText, setBpmText] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const keyPolicy = useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => store.project.keyShift ?? 'ask',
+    () => store.project.keyShift ?? 'ask',
+  )
   if (!clip) return null
   const stretch = clip.stretch
   const mode = clipTempoMode(stretch)
@@ -142,6 +147,18 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
         </label>
       )}
       <span className="clip-tempo-readout">{sourceText} · {playsText}</span>
+      {keyPolicy !== 'ask' ? (
+        <button
+          type="button"
+          data-key-shift-policy="ask"
+          title={keyPolicy === 'keep'
+            ? 'New loops stay in their original key. Ask again next time.'
+            : 'New loops shift into the project key. Ask again next time.'}
+          onClick={() => store.setKeyShiftPolicy('ask')}
+        >
+          Ask each time
+        </button>
+      ) : null}
       {note ? <p className="clip-tempo-note">{note}</p> : null}
       {keyLine ? (
         <div className="clip-hearing" data-key-shift-dock="" role="region" aria-label="Shifted key">

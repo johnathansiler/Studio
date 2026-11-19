@@ -2144,6 +2144,14 @@ export class ProjectStore {
     })
   }
 
+  /** Ask again, always shift, or always keep the original key. One undo. */
+  setKeyShiftPolicy(policy: 'ask' | 'always' | 'keep') {
+    this.mutate(() => {
+      if (policy === 'ask') delete this.project.keyShift
+      else this.project.keyShift = policy
+    })
+  }
+
   /** Put the clip back on its original pitch. One undo. */
   revertKeyShift(trackId: string, clipId: string) {
     this.mutate(() => {

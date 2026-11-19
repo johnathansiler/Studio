@@ -3,7 +3,7 @@ import { clipHasWaveBody } from '../wave/edit'
 import { cachedWaveBody } from '../wave/render'
 import { clipTempoMode, lockedTimelineSamples, projectBeatSpan } from '../../model/clipTempo'
 import { beatAtSample, samplesAtBeat, tempoMapOf } from '../../model/tempoMap'
-import { formantPitchKey, readFormantPitch } from './pitchCache'
+import { channelPrint, formantPitchKey, readFormantPitch } from './pitchCache'
 import { phaseStretch } from './phase'
 import { Psola } from './voice'
 import type { AudioClip, ClipStretch, Project, StretchMode, TempoPoint, WarpMarker } from '../../model/types'
@@ -229,6 +229,7 @@ function cachedFormantPitch(clip: AudioClip, sliced: Float32Array[], sampleRate:
     cents: stretch.cents,
     formant: true,
     mode: stretch.mode,
+    print: channelPrint(sliced),
   }))
   if (!hit?.[0] || hit.length !== sliced.length || hit[0].length !== length) return null
   return hit
