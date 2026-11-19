@@ -61,6 +61,8 @@ import { activeTool } from './state/tools'
 import { visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
+import { KeyShiftPrompt } from './ui/KeyShiftPrompt'
+import { offerLoopKeyShift } from './ui/offerKeyShift'
 import { BOTTOM_COVER_EVENT, CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
@@ -1710,8 +1712,9 @@ export function App() {
       const channels = Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice())
       const bufferId = uid('buf')
       store.addAsset({ id: bufferId, name: file.name, sampleRate: decoded.sampleRate, channels })
+      const clipId = uid('clip')
       store.addAudioClip(track.id, {
-        id: uid('clip'),
+        id: clipId,
         name: file.name,
         bufferId,
         startSample: Math.round(engine.positionSamples),
@@ -1723,6 +1726,7 @@ export function App() {
         source: 'import',
         stretch: inspectClip(channels[0] ?? new Float32Array(), decoded.sampleRate, store.project.tempo),
       })
+      void offerLoopKeyShift(store, track.id, clipId, { loop: true, tags: [file.name] })
     }
   }
 
@@ -2670,6 +2674,7 @@ async function importDropped(files: FileList) {
         </Suspense>
       )}
       <HintBubble />
+      <KeyShiftPrompt store={store} />
       <Toasts store={store} />
     </div>
     </TransportActionContext.Provider>

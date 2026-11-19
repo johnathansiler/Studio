@@ -76,6 +76,8 @@ export interface ScaleState {
   /** Id of the idea last dropped onto the chord, bass, and drum tracks. */
   idea: string
   favorites: string[]
+  /** The musician chose this key. A fresh project stays unset so the first loop is not nagged. */
+  keySet?: boolean
 }
 
 export interface ChordPad {
@@ -189,6 +191,7 @@ export function normalizeScale(value: Partial<ScaleState> | undefined): ScaleSta
     voicing: VOICING_IDS.includes(value.voicing as VoicingId) ? (value.voicing as VoicingId) : 'close',
     idea: typeof value.idea === 'string' ? value.idea : '',
     favorites: Array.isArray(value.favorites) ? value.favorites.filter((item): item is string => typeof item === 'string') : [],
+    keySet: value.keySet === true,
   }
 }
 

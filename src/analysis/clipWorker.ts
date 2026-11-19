@@ -1,4 +1,6 @@
 import { renderClipChannels, sourceSamplesOf } from '../audio/stretch/engine'
+import { formantPitchChannels } from '../audio/stretch/formantPitch'
+import { channelPrint, formantPitchKey, readFormantPitch, writeFormantPitch } from '../audio/stretch/pitchCache'
 import { monoMix } from './mix'
 import { detectKey, detectTempo, hearingOf } from './clipKey'
 import type { AudioClip, ClipHearing, Project, TempoPoint } from '../model/types'
@@ -56,6 +58,7 @@ export function handleClipDetect(message: ClipDetectRequest): ClipDetectResponse
     const offset = Math.max(0, opened.clip.offsetSamples || 0)
     const sourceChannels = opened.channels.map((channel) => channel.subarray(offset, Math.min(channel.length, offset + sourceLen)))
     const source = monoMix(sourceChannels)
+    warmFormantPitch(opened.channels, opened.clip, sampleRate)
     const sounded = monoMix(renderClipChannels(opened.channels, opened.clip, project, 'hq'))
     const hearing = hearingOf(detectKey(sounded, sampleRate), detectTempo(source, sampleRate))
     return { id: message.id, type: 'result', hearing }
@@ -63,6 +66,36 @@ export function handleClipDetect(message: ClipDetectRequest): ClipDetectResponse
     const messageText = error instanceof Error ? error.message : 'Detection failed'
     return { id: message.id, type: 'error', message: messageText }
   }
+}
+
+/** Detect hears the shifted pitch, the same render playback caches as float PCM. */
+function warmFormantPitch(channels: Float32Array[], clip: AudioClip, sampleRate: number) {
+  const stretch = clip.stretch
+  if (!stretch?.formant || !(stretch.semitones || stretch.cents)) return
+  if (stretch.mode !== 'pro' && stretch.mode !== 'tonal') return
+  const offset = Math.max(0, clip.offsetSamples || 0)
+  const source = Math.max(1, stretch.sourceSamples || channels[0]?.length || 1)
+  const sliced = channels.map((channel) => Float32Array.from(channel.subarray(offset, Math.min(channel.length, offset + source))))
+  const length = sliced[0]?.length ?? 0
+  if (length < 8) return
+  const key = formantPitchKey({
+    bufferId: clip.bufferId,
+    offsetSamples: offset,
+    sourceSamples: source,
+    length,
+    sampleRate,
+    semitones: stretch.semitones,
+    cents: stretch.cents,
+    formant: true,
+    mode: stretch.mode,
+    print: channelPrint(sliced),
+  })
+  if (readFormantPitch(key)) return
+  writeFormantPitch(key, formantPitchChannels(sliced, sampleRate, {
+    semitones: stretch.semitones,
+    cents: stretch.cents,
+    formant: true,
+  }))
 }
 
 const scope = globalThis as { postMessage?: (data: unknown, transfer?: Transferable[]) => void; onmessage?: ((event: MessageEvent<ClipDetectRequest>) => void) | null }

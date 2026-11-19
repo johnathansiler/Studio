@@ -2,6 +2,7 @@ import { parseNote } from '../audio/multisample/sfz'
 import { decodeSlotBytes, decodeSlotFile, focusedSlot } from '../audio/sample/slot'
 import type { AudioAsset } from '../model/types'
 import { placeSound } from '../sounds/place'
+import { offerLoopKeyShift } from '../ui/offerKeyShift'
 import type { SoundEntry } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
 import { fetchLibraryBytes } from './audio'
@@ -122,6 +123,12 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
     const landed = store.placeClipAtPlayhead(host, placed.clip, startSample)
     if (!landed) throw new Error('Could not add that sound onto the track.')
     rememberLibrarySound(entry)
+    void offerLoopKeyShift(store, landed.trackId, landed.clipId, {
+      catalogKey: entry.musicalKey,
+      drum: entry.type !== 'loop' || /drum|perc/i.test(`${entry.category} ${entry.tags.join(' ')}`),
+      loop: true,
+      tags: entry.tags,
+    })
     return `${entry.name} is on the track.`
   }
   if (entry.type === 'multisample note') {
