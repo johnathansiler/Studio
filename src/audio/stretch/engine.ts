@@ -3,6 +3,7 @@ import { clipHasWaveBody } from '../wave/edit'
 import { cachedWaveBody } from '../wave/render'
 import { clipTempoMode, lockedTimelineSamples, projectBeatSpan } from '../../model/clipTempo'
 import { beatAtSample, samplesAtBeat, tempoMapOf } from '../../model/tempoMap'
+import { channelPrint, formantPitchKey, readFormantPitch } from './pitchCache'
 import { phaseStretch } from './phase'
 import { Psola } from './voice'
 import type { AudioClip, ClipStretch, Project, StretchMode, TempoPoint, WarpMarker } from '../../model/types'
@@ -210,6 +211,30 @@ export function formantEnabled(mode: StretchMode, formant?: boolean) {
   return mode === 'voice' || mode === 'speech'
 }
 
+/** Pitch PCM rendered offline. Missing means the clip still uses the live shifter. */
+function cachedFormantPitch(clip: AudioClip, sliced: Float32Array[], sampleRate: number) {
+  const stretch = clip.stretch
+  if (!stretch || !(stretch.semitones || stretch.cents)) return null
+  if (stretch.mode !== 'pro' && stretch.mode !== 'tonal') return null
+  if (!formantEnabled(stretch.mode, stretch.formant)) return null
+  const length = sliced[0]?.length ?? 0
+  if (length < 8) return null
+  const hit = readFormantPitch(formantPitchKey({
+    bufferId: clip.bufferId,
+    offsetSamples: clip.offsetSamples,
+    sourceSamples: stretch.sourceSamples,
+    length,
+    sampleRate,
+    semitones: stretch.semitones,
+    cents: stretch.cents,
+    formant: true,
+    mode: stretch.mode,
+    print: channelPrint(sliced),
+  }))
+  if (!hit?.[0] || hit.length !== sliced.length || hit[0].length !== length) return null
+  return hit
+}
+
 export function renderClipChannels(
   channels: Float32Array[],
   clip: AudioClip,
@@ -236,6 +261,21 @@ export function renderClipChannels(
   const stretch = clip.stretch
   const source = sourceSamplesOf(clip)
   const sliced = channels.map((channel) => Float32Array.from(channel.subarray(clip.offsetSamples, Math.min(channel.length, clip.offsetSamples + source))))
+  const pitched = cachedFormantPitch(clip, sliced, project.sampleRate)
+  if (pitched) {
+    return renderClipChannels(
+      pitched,
+      {
+        ...clip,
+        offsetSamples: 0,
+        stretch: clip.stretch
+          ? { ...clip.stretch, semitones: 0, cents: 0, sourceSamples: pitched[0]?.length || source }
+          : clip.stretch,
+      },
+      project,
+      quality,
+    )
+  }
   const outLen = timelineSamples(clip, project)
   if (!stretch || !clipNeedsStretch(clip, project)) return fitChannels(sliced, outLen)
   const lead = sliced[0] ?? new Float32Array(0)

@@ -302,12 +302,27 @@ export interface AudioClip {
   color?: string
   /** Last key and tempo read from this clip. Missing until Detect runs. */
   hearing?: ClipHearing
+  /** Semitone move into the project key. The samples stay in the source asset. */
+  keyShift?: ClipKeyShift
 }
 
 /**
  * Key and tempo Detect stored on a clip so the dock can show them again
  * without running the analyzer. `bpm` is the source tempo, not the stretched one.
  */
+/** Remembered when a loop is shifted into the project key. Undo restores it with the semitones. */
+export interface ClipKeyShift {
+  semitones: number
+  /** Key the loop was in, such as "A minor". */
+  from: string
+  /** Project key it moved toward, such as "C minor". */
+  to: string
+  /** Modes did not match, so only the tonic moved. */
+  tonicOnly?: boolean
+  /** Formant flag before the shift, so Revert can put it back. */
+  formantBefore?: boolean
+}
+
 export interface ClipHearing {
   /** "A minor". Empty when the clip has no clear key. */
   key: string
@@ -595,6 +610,8 @@ export interface Project {
   record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  /** Ask before shifting a new loop, always shift it, or always leave it. */
+  keyShift?: 'ask' | 'always' | 'keep'
   /** Last one-tap generator choices. The MIDI itself lives on the tracks. */
   generator?: GeneratorSettings
   /** Drummer and session-player choices. The MIDI itself lives on the tracks. */

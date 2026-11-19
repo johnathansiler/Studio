@@ -2,7 +2,6 @@ import { renderClipChannels } from '../audio/stretch/engine'
 import type { AudioClip, Project } from '../model/types'
 import { placeSound } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
-import { keySemitones } from './key'
 import type { HarborEntry } from './types'
 
 export function toSoundEntry(entry: HarborEntry): SoundEntry {
@@ -49,9 +48,8 @@ export function placeHarborLoop(options: {
     clipId: options.clipId,
   })
   if (!placed) return null
-  const pitch = options.matchKey && options.entry.loopKind !== 'drum'
-  const semitones = pitch ? keySemitones(options.entry.key, options.project.scale?.root ?? 0) : 0
-  if (placed.clip.stretch && semitones) placed.clip.stretch.semitones = semitones
+  // Pitch is offered after the clip lands, so the file stays put until Shift.
+  void options.matchKey
   return placed
 }
 

@@ -11,6 +11,7 @@ import { rememberHarborInstrument } from '../library/recent'
 import { FavoriteStar } from './FavoriteStar'
 import { installHarborInstrument } from '../harbor/player'
 import { placeHarborLoop, previewHarborLoop } from '../harbor/place'
+import { offerLoopKeyShift } from './offerKeyShift'
 import { articulationsIn } from '../harbor/program'
 import { licenseLabel } from '../harbor/license'
 import { INSTRUMENT_FAMILIES, type CatalogInstrument, type HarborCatalog, type HarborEntry, type LoopKind } from '../harbor/types'
@@ -281,8 +282,15 @@ export function HarborBrowser({
         return
       }
       revealClip(landed.trackId, landed.clipId)
-      const pitched = (placed.clip.stretch?.semitones ?? 0) !== 0
-      store.toast(pitched ? `${entry.name} follows the song tempo and key.` : `${entry.name} follows the song tempo.`, 'good')
+      store.toast(`${entry.name} follows the song tempo.`, 'good')
+      if (matchKey) {
+        void offerLoopKeyShift(store, landed.trackId, landed.clipId, {
+          catalogKey: entry.key,
+          drum: entry.loopKind === 'drum',
+          loop: true,
+          tags: entry.tags,
+        })
+      }
     } catch (error) {
       store.toast(error instanceof Error ? error.message : 'Could not add that loop.', 'warn')
     } finally {

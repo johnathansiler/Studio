@@ -19,6 +19,7 @@ import { absorbLegacyFavoriteIds, favoriteSounds, isFavorite, subscribeFavorites
 import { rememberCatalogSound } from '../library/recent'
 import { FavoriteStar } from './FavoriteStar'
 import { decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
+import { offerLoopKeyShift } from './offerKeyShift'
 import { PACK_LABEL, packLabel } from '../sounds/contract'
 import { looseGroup, retargetSoundMemory, samplerFromNotes } from '../sounds/noteGroups'
 import { importPrivateLibrary, type PrivateImportResult, type PrivateSourceFile } from '../sounds/private'
@@ -820,6 +821,14 @@ export function SoundBrowser({
       const conformed = entry.type === 'loop' && clip.stretch?.followTempo
       rememberCatalogSound(entry)
       store.toast(conformed ? `${entry.name} is on the track at the song tempo.` : `${entry.name} is on the track.`, 'good')
+      if (entry.type === 'loop') {
+        void offerLoopKeyShift(store, landed.trackId, landed.clipId, {
+          catalogKey: entry.key,
+          drum: entry.tags.some((tag) => /drum|perc|kick|snare|hat/i.test(tag)),
+          loop: true,
+          tags: entry.tags,
+        })
+      }
     } catch (error) {
       if (gen !== previewGen.current) return
       const message = error instanceof Error ? error.message : 'Could not add that sound.'

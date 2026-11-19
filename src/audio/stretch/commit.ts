@@ -1,5 +1,6 @@
 import { clipTempoMode, tempoDrivesLength } from '../../model/clipTempo'
 import { renderClipChannels, timelineSamples, type StretchQuality } from './engine'
+import { channelPrint, formantPitchKey, readFormantPitch } from './pitchCache'
 import type { AudioClip, Project } from '../../model/types'
 
 export interface StretchSlot {
@@ -128,16 +129,20 @@ export function queueClipStretch(clip: AudioClip, channels: Float32Array[], proj
   const frozenProject = clockSnapshot(project)
   const key = stretchCacheKey(frozenClip, frozenProject)
   currentKey.set(frozenClip.id, key)
+  const cold = formantPitchPending(frozenClip, channels, frozenProject.sampleRate)
   if (tempoDrivesLength(frozenClip.stretch)) {
     commitTempoStretch(key, () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'), frozenClip.id)
-    return key
+  } else {
+    scheduleStretchCommit(
+      key,
+      () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'),
+      () => renderClipChannels(channels, frozenClip, frozenProject, 'preview'),
+      frozenClip.id,
+    )
   }
-  scheduleStretchCommit(
-    key,
-    () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'),
-    () => renderClipChannels(channels, frozenClip, frozenProject, 'preview'),
-    frozenClip.id,
-  )
+  if (cold) {
+    void import('./pitchJob').then((mod) => mod.upgradeFormantPitch(channels, frozenClip, frozenProject, key))
+  }
   return key
 }
 
@@ -148,20 +153,63 @@ export function readStretch(key: string, channels: Float32Array[], clip: AudioCl
   const cacheKey = key === frozenKey ? key : frozenKey
   currentKey.set(frozenClip.id, cacheKey)
   if (tempoDrivesLength(frozenClip.stretch)) {
-    return commitTempoStretch(cacheKey, () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'), frozenClip.id)
+    const rendered = commitTempoStretch(cacheKey, () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'), frozenClip.id)
+    if (formantPitchPending(frozenClip, channels, frozenProject.sampleRate)) {
+      void import('./pitchJob').then((mod) => mod.upgradeFormantPitch(channels, frozenClip, frozenProject, cacheKey))
+    }
+    return rendered
   }
   const hit = slots.get(cacheKey)
+  if (!(hit?.quality === 'hq' && hit.channels)) {
+    const cold = formantPitchPending(frozenClip, channels, frozenProject.sampleRate)
+    if (!hit?.channels) {
+      scheduleStretchCommit(
+        cacheKey,
+        () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'),
+        () => renderClipChannels(channels, frozenClip, frozenProject, 'preview'),
+        frozenClip.id,
+      )
+    }
+    if (cold) void import('./pitchJob').then((mod) => mod.upgradeFormantPitch(channels, frozenClip, frozenProject, cacheKey))
+  }
   if (hit?.quality === 'hq' && hit.channels) return hit.channels
   if (hit?.channels) return hit.channels
-  scheduleStretchCommit(
-    cacheKey,
-    () => renderClipChannels(channels, frozenClip, frozenProject, 'hq'),
-    () => renderClipChannels(channels, frozenClip, frozenProject, 'preview'),
-    frozenClip.id,
-  )
   return slots.get(cacheKey)?.channels ?? renderClipChannels(channels, frozenClip, frozenProject, 'preview')
 }
 
 export function storeStretch(key: string, channels: Float32Array[]) {
   slots.set(key, { token: ++token, quality: 'hq', channels, clipId: '' })
+}
+
+/** Swap in the offline pitch render and tell playback to pick it up. */
+export function publishStretch(key: string, channels: Float32Array[], clipId = '') {
+  const current = slots.get(key)
+  slots.set(key, { token: current?.token ?? ++token, quality: 'hq', channels, clipId: clipId || current?.clipId || '' })
+  if (clipId && currentKey.get(clipId) && currentKey.get(clipId) !== key) return
+  for (const listener of listeners) listener(key)
+}
+
+function formantPitchPending(clip: AudioClip, channels: Float32Array[], sampleRate: number) {
+  const stretch = clip.stretch
+  if (!stretch?.formant || !(stretch.semitones || stretch.cents)) return false
+  if (stretch.mode !== 'pro' && stretch.mode !== 'tonal') return false
+  const offset = Math.max(0, clip.offsetSamples || 0)
+  const source = Math.max(1, stretch.sourceSamples || 0)
+  const end = Math.min(channels[0]?.length ?? 0, offset + source)
+  const sliced = channels.map((channel) => channel.subarray(offset, end))
+  const length = sliced[0]?.length ?? 0
+  if (length < 8) return false
+  const key = formantPitchKey({
+    bufferId: clip.bufferId,
+    offsetSamples: offset,
+    sourceSamples: source,
+    length,
+    sampleRate,
+    semitones: stretch.semitones,
+    cents: stretch.cents,
+    formant: true,
+    mode: stretch.mode,
+    print: channelPrint(sliced),
+  })
+  return !readFormantPitch(key)
 }

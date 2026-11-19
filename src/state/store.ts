@@ -345,6 +345,16 @@ export class ProjectStore {
   tempoPointBeat: number | null = null
   /** Offer after a recording or import whose pulse is not the song tempo. Not saved. */
   smartTempo: { trackId: string; clipId: string; bpm: number } | null = null
+  /** Ask before shifting a newly dropped loop. Not saved. */
+  keyShiftOffer: {
+    trackId: string
+    clipId: string
+    semitones: number
+    from: string
+    to: string
+    tonicOnly: boolean
+    line: string
+  } | null = null
   /** Spectral repair sheet. Not saved. */
   spectralTrackId: string | null = null
   /** Open wave editor. Not saved. The edits themselves live on the clip. */
@@ -1834,7 +1844,8 @@ export class ProjectStore {
 
   setScale(patch: Partial<ScaleState>) {
     this.mutate(() => {
-      const next = normalizeScale({ ...this.scaleState(), ...patch })
+      const choosing = patch.root != null || patch.scale != null || patch.library != null
+      const next = normalizeScale({ ...this.scaleState(), ...patch, ...(choosing ? { keySet: true } : {}) })
       const turningOn = !this.scaleState().snap && next.snap
       this.project.scale = next
       if (turningOn) this.quantizeSelected()
@@ -2088,6 +2099,71 @@ export class ProjectStore {
    * Project key and scale from a stored Detect reading.
    * Auto-Tune follows this when its key is Project, which is the default.
    */
+  presentKeyShiftOffer(offer: NonNullable<ProjectStore['keyShiftOffer']>) {
+    this.keyShiftOffer = offer
+    this.emit()
+  }
+
+  dismissKeyShiftOffer() {
+    if (!this.keyShiftOffer) return
+    this.keyShiftOffer = null
+    this.emit()
+  }
+
+  /**
+   * Move one clip into the project key.
+   * One undo puts the semitones, the formant flag, and the "always" choice back.
+   */
+  applyKeyShift(input: {
+    trackId: string
+    clipId: string
+    semitones: number
+    from: string
+    to: string
+    tonicOnly: boolean
+    always: boolean
+  }) {
+    this.keyShiftOffer = null
+    this.mutate(() => {
+      const clip = this.track(input.trackId)?.clips.find((item) => item.id === input.clipId)
+      if (!clip) return
+      const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+      const formantBefore = base.formant === true
+      const mode = base.mode === 'tonal' ? 'tonal' : 'pro'
+      clip.stretch = { ...base, semitones: input.semitones, cents: 0, formant: true, mode, markers: base.markers }
+      clip.keyShift = {
+        semitones: input.semitones,
+        from: input.from,
+        to: input.to,
+        tonicOnly: input.tonicOnly,
+        formantBefore,
+      }
+      if (input.always) this.project.keyShift = 'always'
+      if (tempoDrivesLength(clip.stretch)) clip.durationSamples = timelineSamples(clip, this.project)
+      this.commitClip(clip)
+    })
+  }
+
+  /** Ask again, always shift, or always keep the original key. One undo. */
+  setKeyShiftPolicy(policy: 'ask' | 'always' | 'keep') {
+    this.mutate(() => {
+      if (policy === 'ask') delete this.project.keyShift
+      else this.project.keyShift = policy
+    })
+  }
+
+  /** Put the clip back on its original pitch. One undo. */
+  revertKeyShift(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip?.stretch) return
+      const formant = clip.keyShift?.formantBefore === true
+      clip.stretch = { ...clip.stretch, semitones: 0, formant, markers: clip.stretch.markers }
+      delete clip.keyShift
+      this.commitClip(clip)
+    })
+  }
+
   useDetectedKey(trackId: string, clipId: string) {
     const hearing = this.track(trackId)?.clips.find((item) => item.id === clipId)?.hearing
     if (!hearing?.clearKey || hearing.root == null) return
