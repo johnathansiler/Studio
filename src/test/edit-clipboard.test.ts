@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { editShortcut, notePasteBeat, stepPasteIndex } from '../model/editClipboard'
 import { PhoneDock } from '../ui/phoneDock'
 import { projectBeatSample } from '../model/tempoMap'
-import { createEmptyProject, type AudioClip, type ClipStretch, type MidiNote } from '../model/types'
+import { createEmptyProject, type ClipStretch, type MidiNote } from '../model/types'
 import { ProjectStore } from '../state/store'
 
 function audioTrack(store: ProjectStore) {
@@ -50,14 +50,27 @@ describe('arrange copy, cut, paste, and duplicate', () => {
     const store = new ProjectStore(createEmptyProject(48000))
     const track = audioTrack(store)
     store.drawRegion(track.id, 0, 48000)
-    const clip = track.clips[0] as AudioClip & { detectedKey?: string }
+    const clip = track.clips[0]
     clip.gain = 0.42
     clip.fadeInSamples = 12
     clip.fadeOutSamples = 34
     clip.loop = true
     clip.durationBeats = 2
     clip.stretch = stretch()
-    clip.detectedKey = 'F#m'
+    clip.hearing = {
+      key: 'F# minor',
+      root: 6,
+      scale: 'aeolian',
+      confidence: 0.81,
+      alt: 'A major',
+      altRoot: 9,
+      altScale: 'ionian',
+      altConfidence: 0.4,
+      clearKey: true,
+      bpm: 90,
+      bpmConfidence: 0.7,
+      cents: -4,
+    }
     clip.wave = {
       origin: 0,
       head: 0,
@@ -78,12 +91,13 @@ describe('arrange copy, cut, paste, and duplicate', () => {
     expect(store.canUndo).toBe(undoBefore)
     clip.stretch.markers[0].target = 3
     clip.gain = 0.1
-    clip.detectedKey = 'C'
+    clip.hearing.key = 'C major'
+    clip.hearing.confidence = 0.1
     const playhead = projectBeatSample(store.project, 1.3)
     expect(store.pasteClips(playhead)).toBe(true)
     const clips = audioTrack(store).clips
     expect(clips).toHaveLength(2)
-    const pasted = clips[1] as AudioClip & { detectedKey?: string }
+    const pasted = clips[1]
     expect(pasted.id).not.toBe(clip.id)
     expect(pasted.bufferId).toBe(clip.bufferId)
     expect(pasted.startSample).toBe(projectBeatSample(store.project, 1))
@@ -92,7 +106,10 @@ describe('arrange copy, cut, paste, and duplicate', () => {
     expect(pasted.fadeOutSamples).toBe(34)
     expect(pasted.loop).toBe(true)
     expect(pasted.durationBeats).toBe(2)
-    expect(pasted.detectedKey).toBe('F#m')
+    expect(pasted.hearing?.key).toBe('F# minor')
+    expect(pasted.hearing?.confidence).toBe(0.81)
+    expect(pasted.hearing?.bpm).toBe(90)
+    expect(pasted.hearing).not.toBe(clip.hearing)
     expect(pasted.stretch?.tempoMode).toBe('half')
     expect(pasted.stretch?.markers[0].target).toBe(0.5)
     expect(pasted.stretch).not.toBe(clip.stretch)
@@ -101,8 +118,12 @@ describe('arrange copy, cut, paste, and duplicate', () => {
     expect(pasted.wave).not.toBe(clip.wave)
     pasted.stretch!.markers[0].target = 9
     pasted.gain = 0.2
+    pasted.hearing!.key = 'D major'
+    pasted.hearing!.bpm = 140
     expect(clip.stretch?.markers[0].target).toBe(3)
     expect(clip.gain).toBe(0.1)
+    expect(clip.hearing?.key).toBe('C major')
+    expect(clip.hearing?.bpm).toBe(90)
     store.undo()
     expect(audioTrack(store).clips).toHaveLength(1)
     store.redo()
