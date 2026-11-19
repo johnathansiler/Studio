@@ -1,10 +1,10 @@
 /**
  * Key and tempo of one audio clip.
  *
- * Key reads the whole buffer (a short loop wraps around the seam). Peaks from
- * a Hann spectrum are tuned and summed into a harmonic pitch-class profile.
- * EDMA is the default profile. The top key and the runner-up are always
- * returned. "No clear key" is for drums and noise.
+ * A loop of about 40 seconds or less uses the harmonic/percussive estimator.
+ * A longer recording sums a tuned harmonic pitch-class profile and reads it
+ * with the EDMA profiles. The top key and the runner-up are always returned.
+ * "No clear key" is for drums and noise.
  *
  * Tempo listens to the source, before the stretch: an onset-strength envelope,
  * its autocorrelation, and a comb tempogram.
