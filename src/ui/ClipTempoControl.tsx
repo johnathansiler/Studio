@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from 'react'
+import { altReadout, keyReadout, tempoForSong, tempoReadout } from '../model/clipHearing'
 import {
   CLIP_TEMPO_LABEL,
   CLIP_TEMPO_MODES,
@@ -34,6 +35,8 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
     () => store.project.tempo,
   )
   const [bpmText, setBpmText] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
   if (!clip) return null
   const stretch = clip.stretch
   const mode = clipTempoMode(stretch)
@@ -49,9 +52,37 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
   const modeName = mode === 'free' ? 'Original' : CLIP_TEMPO_LABEL[mode]
   const sourceText = source ? `Source ${formatBpm(source)}` : 'No source tempo'
   const playsText = plays != null ? `Plays ${formatBpm(plays)}` : 'Plays with the file'
+  const hearing = clip.hearing
+  const songTempo = hearing && hearing.bpm > 0 ? tempoForSong(hearing.bpm, source) : 0
   const summary = mode === 'free'
-    ? `Original. ${sourceText}. ${playsText}. Pick Follow, half, double, or Lock.`
-    : `${modeName}. ${sourceText}. ${playsText}.`
+    ? `Original. ${sourceText}. ${playsText}. Pick Follow, half, double, or Lock. Detect reads the key and the tempo.`
+    : `${modeName}. ${sourceText}. ${playsText}. Detect reads the key and the tempo.`
+
+  async function detect() {
+    if (!clip) return
+    const asset = store.buffers.get(clip.bufferId)
+    const channels = asset?.channels ?? []
+    if (!asset || !channels.some((channel) => channel.length > 0)) {
+      setNote('This clip has no audio to read.')
+      return
+    }
+    setBusy(true)
+    setNote('')
+    try {
+      const { detectClipHearing } = await import('../analysis/clipJob')
+      const hearing = await detectClipHearing({
+        channels,
+        sampleRate: asset.sampleRate,
+        clip,
+        project: store.project,
+      })
+      store.rememberClipHearing(trackId, clipId, hearing)
+    } catch (caught) {
+      setNote(caught instanceof Error ? caught.message : 'Could not read this clip.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   function choose(next: ClipTempoMode) {
     if (next === 'lock' && mode !== 'lock') {
@@ -76,6 +107,16 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
           {CLIP_TEMPO_LABEL[id]}
         </button>
       ))}
+      <button
+        type="button"
+        data-clip-detect=""
+        aria-busy={busy}
+        disabled={busy}
+        title={busy ? 'Reading the key and the tempo.' : 'Detect the key and the tempo of this clip, the way it sounds now.'}
+        onClick={() => void detect()}
+      >
+        {busy ? 'Detecting…' : 'Detect'}
+      </button>
       {mode === 'lock' && (
         <label className="clip-tempo-bpm">
           BPM
@@ -99,6 +140,25 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
         </label>
       )}
       <span className="clip-tempo-readout">{sourceText} · {playsText}</span>
+      {note ? <p className="clip-tempo-note">{note}</p> : null}
+      {hearing ? (
+        <div className="clip-hearing" data-clip-hearing="" role="region" aria-label="Detected key and tempo">
+          <p data-hearing-key="">{keyReadout(hearing)}</p>
+          {hearing.clearKey && hearing.alt ? <p data-hearing-alt="">{altReadout(hearing)}</p> : null}
+          <p data-hearing-bpm="">{tempoReadout(hearing.bpm, source, projectBpm)}</p>
+          {hearing.clearKey && Math.abs(hearing.cents) >= 8 ? <p data-hearing-cents="">{`Tuning ${hearing.cents > 0 ? '+' : ''}${hearing.cents} cents`}</p> : null}
+          {hearing.clearKey ? (
+            <button type="button" className="primary" title={`Set the project key to ${hearing.key}. Auto-Tune follows the project key.`} onClick={() => store.useDetectedKey(trackId, clipId)}>
+              Set project key
+            </button>
+          ) : null}
+          {songTempo > 0 ? (
+            <button type="button" title={`Set the song to ${formatBpm(songTempo)}. Follow stays on.`} onClick={() => store.useDetectedTempo(trackId, clipId)}>
+              Use for song
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }
