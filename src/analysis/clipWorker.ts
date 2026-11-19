@@ -23,12 +23,11 @@ export interface ClipDetectResponse {
   message?: string
 }
 
-function windowed(clip: AudioClip, channels: Float32Array[], sampleRate: number) {
+function windowed(clip: AudioClip, channels: Float32Array[]) {
   const source = sourceSamplesOf(clip)
   const offset = Math.max(0, clip.offsetSamples || 0)
   const available = Math.max(0, (channels[0]?.length ?? 0) - offset)
-  const max = Math.round(sampleRate * 24)
-  const length = Math.max(1, Math.min(source, available, max))
+  const length = Math.max(1, Math.min(source, available))
   if (length >= source - 1 && length >= available - 1) return { clip, channels }
   const sliced = channels.map((channel) => Float32Array.from(channel.subarray(offset, offset + length)))
   const ratio = length / Math.max(1, source)
@@ -47,7 +46,7 @@ function windowed(clip: AudioClip, channels: Float32Array[], sampleRate: number)
 export function handleClipDetect(message: ClipDetectRequest): ClipDetectResponse {
   try {
     const sampleRate = message.sampleRate || 48000
-    const opened = windowed(message.clip, message.channels ?? [], sampleRate)
+    const opened = windowed(message.clip, message.channels ?? [])
     const project = {
       tempo: message.tempo || 120,
       sampleRate,
