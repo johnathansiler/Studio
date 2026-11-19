@@ -24,6 +24,9 @@ export function InputMonitor({
   const [level, setLevel] = useState({ peak: 0, rms: 0, clip: false })
   const clipUntil = useRef(0)
   useEffect(() => {
+    clipUntil.current = 0
+  }, [gainDb, trackId])
+  useEffect(() => {
     let frame = 0
     const tick = () => {
       const dry = engine.readInputMeter()

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { clipNeedsStretch, renderClipChannels, timelineSamples } from '../audio/stretch/engine'
-import { clipPlaybackRate, fitRecordedChannels, inputGainLinear, measureInputLevel, recordedClipFields, recordedStretch } from '../audio/recordTake'
+import { alignTakeToReference, clipPlaybackRate, fitRecordedChannels, floatChannelsFromAudioData, inputGainLinear, measureInputLevel, recordedClipFields, recordedStretch, scaleBlock } from '../audio/recordTake'
+import { contextAttempts } from '../audio/core/contextOptions'
 import { channelConstraints } from '../model/comp'
+import { decodeWavPCM, encodeWav } from '../model/wav'
 import { migrateAudioKinds } from '../model/audioKind'
 import { tempoFollowsProject } from '../model/clipTempo'
 import { planAudioRoutes } from '../model/midiTools'
@@ -178,5 +180,96 @@ describe('recorded takes stay at the performance', () => {
     const tame = measureInputLevel(Float32Array.from([0.2]), 0)
     expect(tame.clip).toBe(false)
     expect(tame.peak).toBeCloseTo(0.2, 5)
+    const hotTake = scaleBlock(Float32Array.from([0.5, -0.8]), 24)
+    expect(hotTake[0]).toBeGreaterThan(1)
+    const stored = decodeWavPCM(encodeWav([hotTake], 48000, { bits: 32 }))
+    expect(stored.channels[0][0]).toBeCloseTo(hotTake[0], 5)
+    expect(stored.channels[0][1]).toBeCloseTo(hotTake[1], 5)
+    const android = contextAttempts('interactive', 'android-chrome')
+    expect(android[0]).toEqual({ latencyHint: 'interactive', sampleRate: 48000 })
+  })
+
+  it('keeps a looped take folder, a paste, and Detect off the stretcher', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const vocal = store.project.tracks.find((track) => track.kind === 'vocal')!
+    const input = sine(440, 0.5, 48000)
+    store.addAsset({ id: 'buf', name: 'Take', sampleRate: 48000, channels: [input] })
+    store.addTakeLane(vocal.id, {
+      id: 'lane',
+      name: 'Vocal 1',
+      bufferId: 'buf',
+      offsetSamples: 0,
+      startSample: 0,
+      durationSamples: input.length,
+      source: 'local',
+      takeId: 'take-1',
+    })
+    const clip = vocal.clips[0]
+    expect(clip.playback).toBe('recorded')
+    expect(clipNeedsStretch(clip, store.project)).toBe(false)
+    store.setTempo(80)
+    expect(clip.durationSamples).toBe(input.length)
+    expect(tempoFollowsProject(clip.stretch)).toBe(false)
+    const heard = renderClipChannels([input], clip, store.project, 'hq')[0]
+    expect(heard.length).toBe(input.length)
+    expect(heard[1000]).toBeCloseTo(input[1000], 5)
+
+    store.selectClip(vocal.id, clip.id, false, false)
+    expect(store.copyClips()).toBe(true)
+    expect(store.pasteClips(input.length)).toBe(true)
+    const pasted = vocal.clips.find((item) => item.id !== clip.id)!
+    expect(pasted.playback).toBe('recorded')
+    expect(pasted.stretch?.markers).toEqual([])
+    store.autoWarpMarkers(vocal.id, pasted.id)
+    store.setStretchRatio(vocal.id, pasted.id, 50)
+    store.setClipStretch(vocal.id, pasted.id, { tempoMode: 'follow', followTempo: true, sourceBpm: 90 })
+    expect(pasted.stretch?.followTempo).toBe(false)
+    expect(pasted.stretch?.markers).toEqual([])
+    expect(pasted.durationSamples).toBe(input.length)
+    store.rememberClipHearing(vocal.id, pasted.id, {
+      key: 'A minor', root: 9, scale: 'aeolian', confidence: 0.8,
+      alt: '', altRoot: null, altScale: '', altConfidence: 0, clearKey: true,
+      bpm: 100, bpmConfidence: 0.9, cents: 0,
+    })
+    const before = pasted.durationSamples
+    store.useDetectedTempo(vocal.id, pasted.id)
+    expect(store.project.tempo).toBe(100)
+    expect(tempoFollowsProject(pasted.stretch)).toBe(false)
+    expect(pasted.durationSamples).toBe(before)
+    expect(clipNeedsStretch(pasted, store.project)).toBe(false)
+    store.undo()
+    expect(store.project.tempo).toBe(80)
+    expect(pasted.playback).toBe('recorded')
+    expect(pasted.durationSamples).toBe(before)
+    expect(clipPlaybackRate(pasted)).toBe(1)
+  })
+
+  it('fits a late native-rate take onto the context timeline without pitching it', () => {
+    const reference = sine(440, 0.2, 48000)
+    const late = new Float32Array(reference.length)
+    late.set(reference.subarray(0, reference.length - 80), 80)
+    const aligned = alignTakeToReference(reference, late)
+    expect(aligned.length).toBe(reference.length)
+    expect(aligned[400]).toBeCloseTo(reference[400], 4)
+    expect(aligned[1200]).toBeCloseTo(reference[1200], 4)
+    const frames = 4
+    const words = new Int16Array([16384, -16384, 32767, -32768])
+    const decoded = floatChannelsFromAudioData({
+      format: 's16',
+      numberOfFrames: frames,
+      numberOfChannels: 1,
+      copyTo: (destination) => destination.set(words),
+    })
+    expect(decoded[0][0]).toBeCloseTo(0.5, 5)
+    expect(decoded[0][2]).toBeCloseTo(32767 / 32768, 5)
+    const hot = new Float32Array([1.7, -1.2])
+    const floats = floatChannelsFromAudioData({
+      format: 'f32-planar',
+      numberOfFrames: 2,
+      numberOfChannels: 1,
+      copyTo: (destination) => destination.set(hot),
+    })
+    expect(floats[0][0]).toBeCloseTo(1.7, 5)
+    expect(floats[0][1]).toBeCloseTo(-1.2, 5)
   })
 })

@@ -1,3 +1,4 @@
+import { recordedClipFields } from '../audio/recordTake'
 import type { AudioClip, CompSegment, MidiNote, MidiTake, RecordSettings, SavedComp, TakeFolder, TakeLane } from './types'
 import { samplesPerBar } from './time'
 import type { TimeSignature } from './time'
@@ -150,23 +151,34 @@ export function compPieces(folder: TakeFolder, edgeFadeIn = 64, edgeFadeOut = 12
   })
 }
 
+/** A comp built from a mic take. Loops and imports are not takes. */
+export function laneIsTake(lane: TakeLane | undefined): boolean {
+  if (!lane) return false
+  if (lane.takeId) return true
+  return lane.source === 'local' || lane.source === 'guide' || lane.source === 'aligned-take'
+}
+
 export function folderClip(id: string, name: string, folder: TakeFolder, gain = 1): AudioClip {
   const span = folderSpan(folder)
   const first = folder.lanes[0]
-  return {
+  const duration = Math.max(1, span.end - span.start)
+  const clip: AudioClip = {
     id,
     name,
     bufferId: first?.bufferId || '',
     startSample: span.start,
     offsetSamples: 0,
-    durationSamples: Math.max(1, span.end - span.start),
+    durationSamples: duration,
     fadeInSamples: 64,
     fadeOutSamples: 128,
     gain,
     source: first?.source || 'local',
     peerId: first?.peerId,
+    takeId: first?.takeId,
     folder,
   }
+  if (!laneIsTake(first)) return clip
+  return { ...clip, ...recordedClipFields(duration) }
 }
 
 /** Flatten keeps each comp slice as its own clip. */

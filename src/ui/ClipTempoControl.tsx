@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from 'react'
+import { isRecordedClip } from '../audio/recordTake'
 import { altReadout, keyReadout, tempoForSong, tempoReadout } from '../model/clipHearing'
 import {
   CLIP_TEMPO_LABEL,
@@ -53,7 +54,8 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
   const sourceText = source ? `Source ${formatBpm(source)}` : 'No source tempo'
   const playsText = plays != null ? `Plays ${formatBpm(plays)}` : 'Plays with the file'
   const hearing = clip.hearing
-  const songTempo = hearing && hearing.bpm > 0 ? tempoForSong(hearing.bpm, source) : 0
+  const recorded = isRecordedClip(clip)
+  const songTempo = hearing && hearing.bpm > 0 ? tempoForSong(hearing.bpm, recorded ? null : source) : 0
   const summary = mode === 'free'
     ? `Original. ${sourceText}. ${playsText}. Pick Follow, half, double, or Lock. Detect reads the key and the tempo.`
     : `${modeName}. ${sourceText}. ${playsText}. Detect reads the key and the tempo.`
@@ -94,8 +96,8 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
   }
 
   return (
-    <div className="clip-tempo" role="group" aria-label={`Clip tempo. ${summary}`} data-clip-tempo={mode}>
-      {CLIP_TEMPO_MODES.map((id) => (
+    <div className="clip-tempo" role="group" aria-label={`Clip tempo. ${recorded ? 'Recorded take. It stays at the speed you sang.' : summary}`} data-clip-tempo={recorded ? 'recorded' : mode}>
+      {recorded ? <span className="clip-tempo-readout">Recorded. Plays as sung.</span> : CLIP_TEMPO_MODES.map((id) => (
         <button
           key={id}
           type="button"
@@ -153,7 +155,7 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
             </button>
           ) : null}
           {songTempo > 0 ? (
-            <button type="button" title={`Set the song to ${formatBpm(songTempo)}. Follow stays on.`} onClick={() => store.useDetectedTempo(trackId, clipId)}>
+            <button type="button" title={recorded ? `Set the song to ${formatBpm(songTempo)}. This take stays at the speed you sang.` : `Set the song to ${formatBpm(songTempo)}. Follow stays on.`} onClick={() => store.useDetectedTempo(trackId, clipId)}>
               Use for song
             </button>
           ) : null}

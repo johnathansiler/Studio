@@ -2107,6 +2107,12 @@ export class ProjectStore {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       const detected = clip?.hearing?.bpm ?? 0
       if (!clip || !(detected > 0)) return
+      if (isRecordedClip(clip)) {
+        const chosen = tempoForSong(detected, null)
+        if (chosen > 0) adaptProjectTempo(this.project, chosen)
+        this.retimeFollow()
+        return
+      }
       const chosen = tempoForSong(detected, clip.stretch?.sourceBpm ?? null)
       if (!(chosen > 0)) return
       const follow = clip.stretch?.followTempo
@@ -2127,6 +2133,13 @@ export class ProjectStore {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       if (!clip) return
+      if (isRecordedClip(clip)) {
+        const detected = clip.hearing?.bpm ?? 0
+        const chosen = tempoForSong(detected, null)
+        if (chosen > 0) adaptProjectTempo(this.project, chosen)
+        this.retimeFollow()
+        return
+      }
       const bpm = clipTempo(clip) ?? this.detectClipBpm(clip)
       if (bpm == null) return
       if (!clip.stretch) clip.stretch = { sourceSamples: clip.durationSamples, semitones: 0, cents: 0, mode: 'pro', followTempo: false, sourceBpm: bpm, markers: [] }
@@ -3589,7 +3602,7 @@ export class ProjectStore {
   setStretchRatio(trackId: string, clipId: string, percent: number) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const base = clip.stretch ?? defaultStretch(clip.durationSamples)
       const source = Math.max(1, base.sourceSamples || clip.durationSamples)
       const duration = Math.max(64, Math.round(source * (clamp(percent, 12.5, 800) / 100)))
@@ -3610,7 +3623,7 @@ export class ProjectStore {
   addWarpMarker(trackId: string, clipId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const base = clip.stretch ?? defaultStretch(clip.durationSamples)
       const source = Math.round(sourceSamplesOf(clip) / 2)
       const beats = (source / Math.max(1, base.sourceSamples)) * (clip.durationSamples / this.project.sampleRate) * (this.project.tempo / 60)
@@ -3623,7 +3636,7 @@ export class ProjectStore {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       const stretch = clip?.stretch
-      if (!clip || !stretch) return
+      if (!clip || !stretch || isRecordedClip(clip)) return
       stretch.markers = stretch.markers.map((marker) => (marker.id === markerId ? { ...marker, ...patch } : marker))
       this.commitClip(clip)
     })
@@ -3632,7 +3645,7 @@ export class ProjectStore {
   removeWarpMarker(trackId: string, clipId: string, markerId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip?.stretch) return
+      if (!clip?.stretch || isRecordedClip(clip)) return
       clip.stretch.markers = clip.stretch.markers.filter((marker) => marker.id !== markerId)
       this.commitClip(clip)
     })
@@ -3641,7 +3654,7 @@ export class ProjectStore {
   autoWarpMarkers(trackId: string, clipId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const asset = this.buffers.get(clip.bufferId)
       const channel = asset?.channels[0]
       if (!channel) return

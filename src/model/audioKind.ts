@@ -29,6 +29,11 @@ function clipIsTake(clip: AudioClip): boolean {
   return !!clip.folder?.lanes.some((lane) => lane.takeId || lane.source === 'local' || lane.source === 'guide' || lane.source === 'aligned-take')
 }
 
+/** A comp of take lanes is a take even when the parent never stored takeId. */
+function clipIsRecordedTake(clip: AudioClip): boolean {
+  return clipIsTake(clip)
+}
+
 /** A saved take, or a track that was already armed to record. */
 export function trackHoldsTake(track: Track): boolean {
   if (track.armed) return true
@@ -50,7 +55,7 @@ export function migrateAudioKinds(project: Project) {
     if (track.kind === 'vocal' && (track.inputGainDb == null || !Number.isFinite(track.inputGainDb))) track.inputGainDb = 0
     if (track.kind !== 'vocal') continue
     for (const clip of track.clips) {
-      if (!clip.takeId && clip.playback !== 'recorded' && clip.source !== 'guide' && clip.source !== 'aligned-take') continue
+      if (!clipIsRecordedTake(clip)) continue
       const source = Math.max(1, clip.stretch?.sourceSamples || clip.durationSamples)
       clip.playback = 'recorded'
       clip.warp = false

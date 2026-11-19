@@ -1253,11 +1253,12 @@ export function App() {
         }
         continue
       }
-      const length = capture.channels[0]?.length || 0
-      const rateScale = capture.sampleRate > 0 ? store.project.sampleRate / capture.sampleRate : 1
+      const projectRate = store.project.sampleRate
+      const rateScale = capture.sampleRate > 0 ? projectRate / capture.sampleRate : 1
+      const fittedAll = fitRecordedChannels(capture.channels, capture.sampleRate, projectRate)
       const slices = sliceCapture({
         captureStart: Math.round(capture.startSample * rateScale),
-        captureLength: length,
+        captureLength: fittedAll[0]?.length || 0,
         compensation: capture.source === 'guide' ? 0 : Math.round(compensation * rateScale),
         punchFrom: punched ? punched.recordFrom : undefined,
         punchTo: punched ? punched.recordTo : undefined,
@@ -1266,13 +1267,12 @@ export function App() {
       })
       if (!track || !slices.length) continue
       const makeLane = (slice: (typeof slices)[number], index: number): TakeLane => {
-        const raw = capture.channels.map((channel) => channel.slice(slice.captureOffset, slice.captureOffset + slice.durationSamples))
-        const channels = fitRecordedChannels(raw, capture.sampleRate, store.project.sampleRate)
+        const channels = fittedAll.map((channel) => channel.slice(slice.captureOffset, slice.captureOffset + slice.durationSamples))
         const bufferId = uid('buf')
         store.addAsset({
           id: bufferId,
           name: capture.source === 'guide' ? 'Live guide' : `Take ${index + 1}`,
-          sampleRate: store.project.sampleRate,
+          sampleRate: projectRate,
           channels,
         })
         return {
@@ -1281,7 +1281,7 @@ export function App() {
           bufferId,
           offsetSamples: 0,
           startSample: slice.startSample,
-          durationSamples: channels[0]?.length || Math.round(slice.durationSamples * rateScale),
+          durationSamples: channels[0]?.length || slice.durationSamples,
           peerId: capture.peerId,
           takeId: capture.takeId,
           source: capture.source === 'guide' ? 'guide' : 'local',
