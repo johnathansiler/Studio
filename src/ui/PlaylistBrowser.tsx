@@ -91,7 +91,7 @@ export function PlaylistBrowser({
       if (event.key !== 'Escape') return
       queueMicrotask(() => {
         if (event.defaultPrevented) return
-        if (document.querySelector('.anchored-menu[data-open="true"]:not([hidden])')) return
+        if (document.querySelector('.library-filter-sheet, .anchored-menu[data-open="true"]:not([hidden])')) return
         onClose()
       })
     }

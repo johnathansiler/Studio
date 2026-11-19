@@ -101,6 +101,7 @@ function parseEntry(input: unknown, share: (value: string) => string): { entry: 
       bpm: tempo(raw.bpm),
       bpmAlt: tempo(raw.bpm_alt),
       musicalKey: share(text(raw.musical_key)),
+      chord: share(text(raw.chord)),
       root: share(text(raw.root)),
       note: share(text(raw.note)),
       mood,
