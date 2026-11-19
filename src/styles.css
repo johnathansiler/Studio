@@ -4309,3 +4309,7 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 ) {
   bottom: var(--edit-bar);
 }
+
+button.is-muted {
+  opacity: 0.45;
+}

@@ -128,6 +128,20 @@
   padding: 0 5px;
 }
 
+.shell .phone-context .phone-hit.is-muted {
+  opacity: 0.45;
+}
+
+.shell.phone .phone-context .phone-hit[data-phone-action="paste"] {
+  flex: 1 0 48px;
+  width: auto;
+  min-width: 48px;
+}
+
+.shell .phone-context[data-edit-row="clips"] #transport-duplicate {
+  display: none;
+}
+
 .shell .phone-context .phone-hit.on,
 .shell .phone-context .phone-hit[aria-pressed="true"],
 .shell .phone-context .t-btn.on,

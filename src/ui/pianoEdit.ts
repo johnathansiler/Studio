@@ -99,9 +99,10 @@ export function forkNotes(notes: readonly MidiNote[], ids: readonly string[], ne
   const copies: MidiNote[] = []
   for (const note of notes) {
     if (!wanted.has(note.id)) continue
-    const id = newId()
-    copies.push({ ...note, id })
-    copyIds.push(id)
+    const copy = structuredClone(note)
+    copy.id = newId()
+    copies.push(copy)
+    copyIds.push(copy.id)
   }
   return { notes: [...notes, ...copies], copyIds }
 }

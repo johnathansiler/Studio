@@ -170,7 +170,32 @@ import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type P
 import { arrangeSong, chopsFor, chopsOntoPads, expandChord, humanizeNotes, kitFromSlices, mpcTempo, quantizeGridBeats, quantizeNotes, setStepVelocity, toggleStep, withLength } from '../instruments/mpc/model'
 import { renderMpcAudio } from '../instruments/mpc/render'
 import { applyLaneNotes, patternToMidiNotes, type LaneNote } from '../model/patternMidi'
-import { clipEndForContent, grownClipEnd, normalizeSnapDivision, snapEditBeat, subdivisionFor, type SnapDivisionId } from '../model/snapGrid'
+import { activeGridBeats, clipEndForContent, grownClipEnd, normalizeSnapDivision, snapEditBeat, subdivisionFor, type SnapDivisionId } from '../model/snapGrid'
+import {
+  applyArrangeDuplicate,
+  applyArrangePaste,
+  applyNoteDuplicate,
+  applyNotePaste,
+  applyStepDuplicate,
+  applyStepPaste,
+  captureArrange,
+  captureNotes,
+  captureSteps,
+  clearSteps,
+  clipPasteOffer,
+  notePasteBeat,
+  notePasteOffer,
+  stepPasteFits,
+  stepPasteIndex,
+  stepPasteOffer,
+  type ArrangeBoard,
+  type ArrangeSelection,
+  type EditCommand,
+  type NoteBoard,
+  type PasteOffer,
+  type StepBoard,
+} from '../model/editClipboard'
+import { pianoPlayheadBeat } from '../model/transportSync'
 import { applyFreshDrums, applySmartDrums, mulberry32 } from '../model/smartDrums'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
@@ -283,6 +308,12 @@ export class ProjectStore {
   private editGeneration = 0
   private savedGeneration = 0
   rowClipboard: StepCell[] | null = null
+  /** Arrange clip clipboard. Not part of the project, so Copy is not an undo step. */
+  arrangeClipboard: ArrangeBoard | null = null
+  /** Piano-roll and drum-editor notes. Starts are relative to the first note. */
+  noteClipboard: NoteBoard | null = null
+  /** Selected step-sequencer cells. */
+  stepClipboard: StepBoard | null = null
   private nextDrumSeed = 1
   /** Patch history. Transport, selection, zoom, and meters are not recorded. */
   private journal = new HistoryJournal()
@@ -3448,20 +3479,6 @@ export class ProjectStore {
 
   deleteSelectedClip() {
     this.mutate(() => {
-      const audio = new Set(this.selectedClipIds.length ? this.selectedClipIds : this.selectedClipId ? [this.selectedClipId] : [])
-      if (audio.size) {
-        for (const track of this.project.tracks) {
-          for (const clip of track.clips) {
-            if (!audio.has(clip.id)) continue
-            for (const other of linkedAudioTargets(this.project, track.id, clip)) audio.add(other.id)
-          }
-        }
-        for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
-        this.selectedClipId = null
-        this.selectedClipIds = []
-        this.dropSelectedPatterns()
-        return
-      }
       if (this.selectedNoteIds.length && this.selectedMidiClipId) {
         const notes = new Set(this.selectedNoteIds)
         for (const track of this.project.tracks) {
@@ -3472,13 +3489,7 @@ export class ProjectStore {
         this.selectedNoteIds = []
         return
       }
-      const midi = new Set(this.selectedMidiClipIds.length ? this.selectedMidiClipIds : this.selectedMidiClipId ? [this.selectedMidiClipId] : [])
-      if (midi.size) {
-        for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
-        this.selectedMidiClipId = null
-        this.selectedMidiClipIds = []
-      }
-      this.dropSelectedPatterns()
+      this.eraseArrangeSelection()
     })
   }
 
@@ -3798,174 +3809,352 @@ export class ProjectStore {
   }
 
   duplicateSelection() {
-    this.mutate(() => {
-      if (this.selectedNoteIds.length && this.selectedMidiClipId) {
-        const ids = new Set(this.selectedNoteIds)
-        for (const track of this.project.tracks) {
-          const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
-          if (!clip) continue
-          const copies = clip.notes.filter((note) => ids.has(note.id)).map((note) => ({ ...note, id: uid('note'), startBeat: note.startBeat + 1 }))
-          clip.notes.push(...copies)
-          this.selectedNoteIds = copies.map((note) => note.id)
-          this.selectedNoteId = this.selectedNoteIds.at(-1) ?? null
-        }
-        return
-      }
-      const audioIds = new Set(this.selectedClipIds)
-      const midiIds = new Set(this.selectedMidiClipIds)
-      const nextAudio: string[] = []
-      const nextMidi: string[] = []
+    if (this.selectedNoteIds.length && this.selectedMidiClipId) {
+      this.duplicateOpenNotes()
+      return
+    }
+    this.duplicateArrangeClips()
+  }
+
+  private arrangeSelection(): ArrangeSelection {
+    const audioIds = [...this.selectedClipIds]
+    if (this.selectedClipId && !audioIds.includes(this.selectedClipId)) audioIds.push(this.selectedClipId)
+    const midiIds = [...this.selectedMidiClipIds]
+    if (this.selectedMidiClipId && !midiIds.includes(this.selectedMidiClipId)) midiIds.push(this.selectedMidiClipId)
+    const patternIds = [...this.selectedPatternClipIds]
+    if (this.selectedPatternClipId && !patternIds.includes(this.selectedPatternClipId)) patternIds.push(this.selectedPatternClipId)
+    return { audioIds, midiIds, patternIds }
+  }
+
+  private openMidiClip() {
+    if (!this.selectedMidiClipId) return null
+    for (const track of this.project.tracks) {
+      const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
+      if (clip) return { track, clip }
+    }
+    return null
+  }
+
+  private selectPlaced(placed: { audioIds: string[]; midiIds: string[]; patternIds: string[] }) {
+    this.selectedClipIds = placed.audioIds
+    this.selectedClipId = placed.audioIds.at(-1) ?? null
+    this.selectedMidiClipIds = placed.midiIds
+    this.selectedMidiClipId = placed.midiIds.at(-1) ?? null
+    this.selectedPatternClipIds = placed.patternIds
+    this.selectedPatternClipId = placed.patternIds.at(-1) ?? null
+    if (!placed.midiIds.length) {
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    }
+  }
+
+  private eraseArrangeSelection() {
+    const audio = new Set(this.arrangeSelection().audioIds)
+    if (audio.size) {
       for (const track of this.project.tracks) {
-        for (const clip of [...track.clips]) {
-          if (!audioIds.has(clip.id)) continue
-          const copy: AudioClip = {
-            ...clip,
-            id: uid('clip'),
-            name: `${clip.name} copy`,
-            startSample: clip.startSample + clip.durationSamples,
-            stretch: clip.stretch ? { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) } : undefined,
-          }
-          track.clips.push(copy)
-          nextAudio.push(copy.id)
-        }
-        for (const clip of [...track.midiClips]) {
-          if (!midiIds.has(clip.id)) continue
-          const copy: MidiClip = {
-            ...clip,
-            id: uid('midi'),
-            name: `${clip.name} copy`,
-            startBeat: clip.startBeat + clip.durationBeats,
-            notes: clip.notes.map((note) => ({ ...note, id: uid('note') })),
-          }
-          track.midiClips.push(copy)
-          nextMidi.push(copy.id)
+        for (const clip of track.clips) {
+          if (!audio.has(clip.id)) continue
+          for (const other of linkedAudioTargets(this.project, track.id, clip)) audio.add(other.id)
         }
       }
-      if (nextAudio.length) {
-        this.selectedClipIds = nextAudio
-        this.selectedClipId = nextAudio.at(-1) ?? null
-      }
-      if (nextMidi.length) {
-        this.selectedMidiClipIds = nextMidi
-        this.selectedMidiClipId = nextMidi.at(-1) ?? null
-      }
-      const patternIds = new Set(this.selectedPatternClipIds)
-      const nextPattern: string[] = []
-      if (this.project.patternClips) {
-        for (const clip of [...this.project.patternClips]) {
-          if (!patternIds.has(clip.id)) continue
-          const copy = {
-            ...clip,
-            id: uid('pcl'),
-            placed: true,
-            startBeat: clip.startBeat + clip.lengthBeats,
-          }
-          this.project.patternClips.push(copy)
-          nextPattern.push(copy.id)
-        }
-      }
-      if (nextPattern.length) {
-        this.selectedPatternClipIds = nextPattern
-        this.selectedPatternClipId = nextPattern.at(-1) ?? null
-      }
+      for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
+      this.selectedClipId = null
+      this.selectedClipIds = []
+    }
+    const midi = new Set(this.arrangeSelection().midiIds)
+    if (midi.size) {
+      for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    }
+    this.dropSelectedPatterns()
+  }
+
+  clipPasteState(): PasteOffer {
+    return clipPasteOffer(this.project, this.arrangeClipboard, this.selectedTrackId)
+  }
+
+  notePasteState(): PasteOffer {
+    return notePasteOffer(this.noteClipboard, !!this.openMidiClip())
+  }
+
+  stepPasteState(): PasteOffer {
+    return stepPasteOffer(this.stepClipboard, !!this.activePattern())
+  }
+
+  copyClips() {
+    const board = captureArrange(this.project, this.arrangeSelection())
+    if (!board) {
+      this.toast('Select a clip first.', 'warn')
+      return false
+    }
+    this.arrangeClipboard = board
+    this.emit()
+    return true
+  }
+
+  cutClips() {
+    const board = captureArrange(this.project, this.arrangeSelection())
+    if (!board) {
+      this.toast('Select a clip first.', 'warn')
+      return false
+    }
+    this.arrangeClipboard = board
+    this.mutate(() => this.eraseArrangeSelection(), 'Cut')
+    return true
+  }
+
+  pasteClips(playheadSample: number) {
+    const board = this.arrangeClipboard
+    if (!board) {
+      this.toast('Copy a clip first.', 'warn')
+      return false
+    }
+    const offer = clipPasteOffer(this.project, board, this.selectedTrackId)
+    if (!offer.ready) {
+      this.toast(offer.reason || 'Copy a clip first.', 'warn')
+      return false
+    }
+    let ok = false
+    this.mutate(() => {
+      const result = applyArrangePaste(this.project, board, this.selectedTrackId, playheadSample)
+      if (!result.ok) return
+      ok = true
+      this.selectPlaced(result.placed)
+    }, 'Paste')
+    return ok
+  }
+
+  copyNotes() {
+    const open = this.openMidiClip()
+    const board = open ? captureNotes(open.clip.notes, this.selectedNoteIds) : null
+    if (!board) {
+      this.toast('Select notes first.', 'warn')
+      return false
+    }
+    this.noteClipboard = board
+    this.emit()
+    return true
+  }
+
+  cutNotes() {
+    const open = this.openMidiClip()
+    const board = open ? captureNotes(open.clip.notes, this.selectedNoteIds) : null
+    if (!open || !board) {
+      this.toast('Select notes first.', 'warn')
+      return false
+    }
+    this.noteClipboard = board
+    const ids = new Set(this.selectedNoteIds)
+    this.mutate(() => {
+      open.clip.notes = open.clip.notes.filter((note) => !ids.has(note.id))
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    }, 'Cut')
+    return true
+  }
+
+  /**
+   * Paste notes into the open MIDI clip.
+   * `visibleStart` and `visibleEnd` are clip-local beats of the editor view.
+   * A playhead inside that view wins. Otherwise the paste starts on the visible bar.
+   */
+  pasteNotes(playheadSample: number, visibleStart: number | null = null, visibleEnd: number | null = null) {
+    const open = this.openMidiClip()
+    const offer = notePasteOffer(this.noteClipboard, !!open)
+    if (!offer.visible) {
+      this.toast('Copy notes first.', 'warn')
+      return false
+    }
+    if (!offer.ready || !open || !this.noteClipboard) {
+      this.toast(offer.reason || 'Open a MIDI clip to paste these notes.', 'warn')
+      return false
+    }
+    const board = this.noteClipboard
+    const at = this.noteAnchor(open.clip, playheadSample, visibleStart, visibleEnd)
+    let ids: string[] = []
+    this.mutate(() => {
+      ids = applyNotePaste(open.clip, board, at, this.project)
+      this.selectedNoteIds = ids
+      this.selectedNoteId = ids.at(-1) ?? null
+    }, 'Paste')
+    return ids.length > 0
+  }
+
+  duplicateOpenNotes() {
+    const open = this.openMidiClip()
+    if (!open || !this.selectedNoteIds.length) {
+      this.toast('Select notes first.', 'warn')
+      return false
+    }
+    const held: { ids: string[] | null } = { ids: null }
+    this.mutate(() => {
+      held.ids = applyNoteDuplicate(open.clip, this.selectedNoteIds, this.project)
+      if (!held.ids?.length) return
+      this.selectedNoteIds = held.ids
+      this.selectedNoteId = held.ids.at(-1) ?? null
+    }, 'Duplicate')
+    return !!held.ids?.length
+  }
+
+  private noteAnchor(clip: { startBeat: number; durationBeats: number; loop?: boolean }, playheadSample: number, visibleStart: number | null, visibleEnd: number | null) {
+    const song = projectSampleBeat(this.project, Math.max(0, playheadSample))
+    const raw = song - clip.startBeat
+    const local = clip.loop ? pianoPlayheadBeat(song, clip) : (raw >= -1e-4 ? raw : null)
+    let start = visibleStart
+    let end = visibleEnd
+    if (start == null && this.midiEditor().mode === 'drums') {
+      start = this.midiEditor().page * 4
+      end = start + 4
+    }
+    const viewStart = start ?? 0
+    const viewEnd = end ?? (start == null ? Number.POSITIVE_INFINITY : viewStart)
+    return notePasteBeat({
+      playheadLocal: local,
+      visibleStart: viewStart,
+      visibleEnd: viewEnd,
+      barBeats: quartersPerBar(this.project.timeSignature),
+      grid: activeGridBeats(this.project),
     })
+  }
+
+  copySteps() {
+    const pattern = this.activePattern()
+    const board = pattern ? captureSteps(pattern, this.selectedRackSteps) : null
+    if (!board) {
+      this.toast('Select steps first.', 'warn')
+      return false
+    }
+    this.stepClipboard = board
+    this.emit()
+    return true
+  }
+
+  cutSteps() {
+    const pattern = this.activePattern()
+    const board = pattern ? captureSteps(pattern, this.selectedRackSteps) : null
+    if (!pattern || !board) {
+      this.toast('Select steps first.', 'warn')
+      return false
+    }
+    const selected = this.selectedRackSteps.map((step) => ({ ...step }))
+    this.stepClipboard = board
+    this.mutate(() => {
+      clearSteps(pattern, selected)
+      this.selectedRackSteps = []
+    }, 'Cut')
+    return true
+  }
+
+  pasteSteps(playheadSample: number) {
+    const pattern = this.activePattern()
+    const offer = stepPasteOffer(this.stepClipboard, !!pattern)
+    if (!offer.visible) {
+      this.toast('Copy steps first.', 'warn')
+      return false
+    }
+    if (!offer.ready || !pattern || !this.stepClipboard) {
+      this.toast(offer.reason || 'Open a pattern to paste these steps.', 'warn')
+      return false
+    }
+    const board = this.stepClipboard
+    const beat = projectSampleBeat(this.project, Math.max(0, playheadSample))
+    const index = stepPasteIndex(beat, pattern.steps, this.project)
+    if (!stepPasteFits(pattern, board, index)) {
+      this.toast('These steps do not fit on the pattern.', 'warn')
+      return false
+    }
+    let landed: { channelId: string; index: number }[] = []
+    this.mutate(() => {
+      landed = applyStepPaste(pattern, board, index)
+      if (landed.length) this.selectedRackSteps = landed
+    }, 'Paste')
+    return landed.length > 0
+  }
+
+  duplicateRackSteps() {
+    const pattern = this.activePattern()
+    if (!pattern || !this.selectedRackSteps.length) {
+      this.toast('Select steps first.', 'warn')
+      return false
+    }
+    const selected = this.selectedRackSteps.map((step) => ({ ...step }))
+    const board = captureSteps(pattern, selected)
+    const at = board ? Math.min(...selected.map((step) => step.index)) + board.span : 0
+    if (!board || !stepPasteFits(pattern, board, at)) {
+      this.toast(board ? 'These steps do not fit on the pattern.' : 'Select steps first.', 'warn')
+      return false
+    }
+    const held: { landed: { channelId: string; index: number }[] | null } = { landed: null }
+    this.mutate(() => {
+      held.landed = applyStepDuplicate(pattern, selected)
+      if (held.landed?.length) this.selectedRackSteps = held.landed
+    }, 'Duplicate')
+    if (!held.landed?.length) {
+      this.toast('These steps do not fit on the pattern.', 'warn')
+      return false
+    }
+    return true
+  }
+
+  /**
+   * Copy, cut, paste, or duplicate on the surface that is open.
+   * Notes and steps win when that surface has a selection or a matching clipboard.
+   * Otherwise the command edits arrange clips.
+   */
+  editCommand(command: EditCommand, surface: 'clips' | 'notes' | 'steps', playheadSample = 0, visibleStart: number | null = null, visibleEnd: number | null = null) {
+    if (surface === 'notes' && this.noteCommandApplies(command)) {
+      if (command === 'copy') return this.copyNotes()
+      if (command === 'cut') return this.cutNotes()
+      if (command === 'paste') return this.pasteNotes(playheadSample, visibleStart, visibleEnd)
+      return this.duplicateOpenNotes()
+    }
+    if (surface === 'steps' && this.stepCommandApplies(command)) {
+      if (command === 'copy') return this.copySteps()
+      if (command === 'cut') return this.cutSteps()
+      if (command === 'paste') return this.pasteSteps(playheadSample)
+      return this.duplicateRackSteps()
+    }
+    if (command === 'copy') return this.copyClips()
+    if (command === 'cut') return this.cutClips()
+    if (command === 'paste') return this.pasteClips(playheadSample)
+    return this.duplicateArrangeClips()
+  }
+
+  private noteCommandApplies(command: EditCommand) {
+    if (command === 'paste') return !!this.noteClipboard
+    return this.selectedNoteIds.length > 0 && !!this.selectedMidiClipId
+  }
+
+  private stepCommandApplies(command: EditCommand) {
+    if (command === 'paste') return !!this.stepClipboard
+    return this.selectedRackSteps.length > 0
   }
 
   /** Remove the selected arrange clips. Notes inside a clip stay until the clip goes. */
   deleteArrangeClips() {
-    this.mutate(() => {
-      const audio = new Set(this.selectedClipIds)
-      if (this.selectedClipId) audio.add(this.selectedClipId)
-      if (audio.size) {
-        for (const track of this.project.tracks) {
-          for (const clip of track.clips) {
-            if (!audio.has(clip.id)) continue
-            for (const other of linkedAudioTargets(this.project, track.id, clip)) audio.add(other.id)
-          }
-        }
-        for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
-        this.selectedClipId = null
-        this.selectedClipIds = []
-        this.dropSelectedPatterns()
-        return
-      }
-      const midi = new Set(this.selectedMidiClipIds)
-      if (this.selectedMidiClipId) midi.add(this.selectedMidiClipId)
-      if (midi.size) {
-        for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
-        this.selectedMidiClipId = null
-        this.selectedMidiClipIds = []
-        this.selectedNoteId = null
-        this.selectedNoteIds = []
-      }
-      this.dropSelectedPatterns()
-    })
+    this.mutate(() => this.eraseArrangeSelection())
   }
 
-  /** Copy the selected arrange clips and place each copy just after the original. */
+  /** Copy the selected arrange clips and place the group just after the selection. */
   duplicateArrangeClips() {
+    const selection = this.arrangeSelection()
+    if (!selection.audioIds.length && !selection.midiIds.length && !selection.patternIds.length) {
+      this.toast('Select a clip first.', 'warn')
+      return false
+    }
+    let placed: { audioIds: string[]; midiIds: string[]; patternIds: string[] } | null = null
     this.mutate(() => {
-      const audioIds = new Set(this.selectedClipIds)
-      if (this.selectedClipId) audioIds.add(this.selectedClipId)
-      const midiIds = new Set(this.selectedMidiClipIds)
-      if (this.selectedMidiClipId) midiIds.add(this.selectedMidiClipId)
-      const nextAudio: string[] = []
-      const nextMidi: string[] = []
-      for (const track of this.project.tracks) {
-        for (const clip of [...track.clips]) {
-          if (!audioIds.has(clip.id)) continue
-          const copy: AudioClip = {
-            ...clip,
-            id: uid('clip'),
-            name: `${clip.name} copy`,
-            startSample: clip.startSample + clip.durationSamples,
-            stretch: clip.stretch ? { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) } : undefined,
-          }
-          track.clips.push(copy)
-          nextAudio.push(copy.id)
-        }
-        for (const clip of [...track.midiClips]) {
-          if (!midiIds.has(clip.id)) continue
-          const copy: MidiClip = {
-            ...clip,
-            id: uid('midi'),
-            name: `${clip.name} copy`,
-            startBeat: clip.startBeat + clip.durationBeats,
-            notes: clip.notes.map((note) => ({ ...note, id: uid('note') })),
-          }
-          track.midiClips.push(copy)
-          nextMidi.push(copy.id)
-        }
-      }
-      if (nextAudio.length) {
-        this.selectedClipIds = nextAudio
-        this.selectedClipId = nextAudio.at(-1) ?? null
-      }
-      if (nextMidi.length) {
-        this.selectedMidiClipIds = nextMidi
-        this.selectedMidiClipId = nextMidi.at(-1) ?? null
-      }
-      const patternIds = new Set(this.selectedPatternClipIds)
-      if (this.selectedPatternClipId) patternIds.add(this.selectedPatternClipId)
-      const nextPattern: string[] = []
-      if (this.project.patternClips) {
-        for (const clip of [...this.project.patternClips]) {
-          if (!patternIds.has(clip.id)) continue
-          const copy = {
-            ...clip,
-            id: uid('pcl'),
-            placed: true,
-            startBeat: clip.startBeat + clip.lengthBeats,
-          }
-          this.project.patternClips.push(copy)
-          nextPattern.push(copy.id)
-        }
-      }
-      if (nextPattern.length) {
-        this.selectedPatternClipIds = nextPattern
-        this.selectedPatternClipId = nextPattern.at(-1) ?? null
-      }
-    })
+      placed = applyArrangeDuplicate(this.project, selection)
+      if (placed) this.selectPlaced(placed)
+    }, 'Duplicate')
+    if (!placed) {
+      this.toast('Those tracks are gone, so there is nowhere to paste.', 'warn')
+      return false
+    }
+    return true
   }
 
   /** Copy the track, its clips, instrument, plugins, and settings onto the lane below. */

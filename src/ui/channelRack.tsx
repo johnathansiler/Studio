@@ -689,6 +689,27 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
             />
             <TipButton label={rowCopy('copy').label} hint={`${focus.name}. ${rowCopy('copy').hint}`} onClick={() => store.copyRow(focus.id)} />
             <TipButton label={rowCopy('paste').label} hint={`${focus.name}. ${rowCopy('paste').hint}`} onClick={() => store.pasteRow(focus.id)} />
+            {store.stepPasteState().visible && (
+              <TipButton
+                className={store.stepPasteState().ready ? '' : 'is-muted'}
+                label="Paste steps"
+                hint={store.stepPasteState().ready ? 'Paste steps at the playhead.' : store.stepPasteState().reason}
+                onClick={() => {
+                  if (!store.stepPasteState().ready) {
+                    store.toast(store.stepPasteState().reason || 'Copy steps first.', 'warn')
+                    return
+                  }
+                  store.pasteSteps(engine.currentTimelineSample?.() ?? engine.positionSamples)
+                }}
+              />
+            )}
+            {store.selectedRackSteps.length > 0 && (
+              <>
+                <TipButton label="Copy steps" hint="Copy the selected steps." onClick={() => store.copySteps()} />
+                <TipButton label="Cut steps" hint="Cut the selected steps." onClick={() => store.cutSteps()} />
+                <TipButton label="Duplicate steps" hint="Copy the selected steps and place them just after." onClick={() => store.duplicateRackSteps()} />
+              </>
+            )}
             <label className="rack-field" title={rowCopy('output').hint}>
               <span>{focus.name}</span>
               <select

@@ -4,6 +4,7 @@ import { heardBeat } from '../model/midiClock'
 import { defaultRoll, quantizeNotes, arpeggiateSelection, humanizeNotes, snapBeat, strumSelection } from '../model/paint'
 import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats } from '../model/snapGrid'
+import { editShortcut } from '../model/editClipboard'
 import {
   NOTE_NAMES,
   SCALES,
@@ -44,7 +45,6 @@ import { setEditCursor } from '../remote/presence'
 import { RemoteRollCursors, remoteNoteMark, useRemotePeers } from './presenceMarks'
 import {
   commitMidiNotes,
-  duplicateNotes,
   forkNotes,
   hitNote,
   moveNotes,
@@ -503,17 +503,17 @@ export function PianoRoll({
     commitMidiNotes(store, track.id, clip.id, [...rest, ...humanizeNotes(chosen, current.timing || 0.02, current.velocity || 0.3)])
   }
 
+  function editNotes(command: 'copy' | 'cut' | 'paste' | 'duplicate') {
+    const roll = rollRef.current
+    const px = Math.max(1, pxRef.current)
+    const start = roll ? roll.scrollLeft / px : null
+    const end = start != null && roll ? start + roll.clientWidth / px : null
+    const sample = typeof engine.currentTimelineSample === 'function' ? engine.currentTimelineSample() : engine.positionSamples
+    return store.editCommand(command, 'notes', sample, start, end)
+  }
+
   function duplicate() {
-    if (!track || !clip) return false
-    const ids = store.selectedNoteIds.filter((id) => clip.notes.some((note) => note.id === id))
-    if (!ids.length) return false
-    const grid = (store.project.roll ?? defaultRoll()).grid
-    const next = duplicateNotes(clip.notes, ids, grid, () => uid('note'))
-    commitMidiNotes(store, track.id, clip.id, next.notes)
-    if (!next.copyIds.length) return false
-    store.selectNote(next.copyIds[0])
-    for (const id of next.copyIds.slice(1)) store.selectNote(id, true)
-    return true
+    return editNotes('duplicate')
   }
 
   function remove() {
@@ -536,9 +536,19 @@ export function PianoRoll({
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
       if (meta) {
-        if (key === 'd' && api.current.duplicate()) {
+        const chord = editShortcut(event)
+        if (chord) {
           event.preventDefault()
           event.stopImmediatePropagation()
+          if (chord === 'duplicate') api.current.duplicate()
+          else {
+            const roll = rollRef.current
+            const px = Math.max(1, pxRef.current)
+            const start = roll ? roll.scrollLeft / px : null
+            const end = start != null && roll ? start + roll.clientWidth / px : null
+            const sample = typeof engine.currentTimelineSample === 'function' ? engine.currentTimelineSample() : engine.positionSamples
+            store.editCommand(chord, 'notes', sample, start, end)
+          }
         }
         return
       }
@@ -877,6 +887,11 @@ export function PianoRoll({
         {!compact && <TipButton label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={quantize} />}
         {!compact && <TipButton label={sheet('arp').label} hint={sheet('arp').hint} onClick={arpeggiate} />}
         {!compact && <TipButton label={sheet('strum').label} hint={sheet('strum').hint} onClick={strum} />}
+        {!compact && store.selectedNoteIds.length > 0 && <TipButton label="Copy" hint="Copy the selected notes." onClick={() => store.copyNotes()} />}
+        {!compact && store.selectedNoteIds.length > 0 && <TipButton label="Cut" hint="Cut the selected notes." onClick={() => store.cutNotes()} />}
+        {!compact && store.notePasteState().visible && (
+          <TipButton className={store.notePasteState().ready ? '' : 'is-muted'} label="Paste" hint={store.notePasteState().ready ? 'Paste notes at the playhead.' : store.notePasteState().reason} onClick={() => editNotes('paste')} />
+        )}
         {!compact && <TipButton label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={duplicate} />}
         {!compact && <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />}
         </FitRow>
@@ -903,6 +918,9 @@ export function PianoRoll({
           <SheetRow label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={() => { quantize(); setNotesOpen(false) }} />
           <SheetRow label={sheet('arp').label} hint={sheet('arp').hint} onClick={() => { arpeggiate(); setNotesOpen(false) }} />
           <SheetRow label={sheet('strum').label} hint={sheet('strum').hint} onClick={() => { strum(); setNotesOpen(false) }} />
+          {store.selectedNoteIds.length > 0 && <SheetRow label="Copy" hint="Copy the selected notes." onClick={() => { store.copyNotes(); setNotesOpen(false) }} />}
+          {store.selectedNoteIds.length > 0 && <SheetRow label="Cut" hint="Cut the selected notes." onClick={() => { store.cutNotes(); setNotesOpen(false) }} />}
+          {store.notePasteState().visible && <SheetRow label="Paste" hint={store.notePasteState().ready ? 'Paste notes at the playhead.' : store.notePasteState().reason} onClick={() => { editNotes('paste'); setNotesOpen(false) }} />}
           <SheetRow label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={() => { duplicate(); setNotesOpen(false) }} />
           <SheetRow label={sheet('delete').label} hint={sheet('delete').hint} onClick={() => { remove(); setNotesOpen(false) }} />
       </AnchoredMenu>
@@ -966,7 +984,7 @@ export function PianoRoll({
           }}
         />
         <div className="roll-column" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-          <div className="roll" ref={rollRef} style={{ flex: 1, minHeight: 0, touchAction: 'none' }}>
+          <div className="roll" ref={rollRef} data-px-beat={pxBeat} style={{ flex: 1, minHeight: 0, touchAction: 'none' }}>
             <div
               ref={gridRef}
               style={{

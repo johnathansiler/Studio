@@ -64,6 +64,7 @@ import { BOTTOM_COVER_EVENT, CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
+import { editShortcut } from './model/editClipboard'
 import { claimComputerKey } from './model/keyboardPlay'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
@@ -910,6 +911,17 @@ export function App() {
         return
       }
       if (typing) return
+      const chord = editShortcut(event)
+      if (chord && !document.querySelector('[data-wave-editor="open"]')) {
+        event.preventDefault()
+        const roll = document.querySelector<HTMLElement>('.roll')
+        const px = Number(roll?.dataset.pxBeat)
+        const visibleStart = roll && px > 0 ? roll.scrollLeft / px : null
+        const visibleEnd = visibleStart != null && roll ? visibleStart + roll.clientWidth / px : null
+        const surface = pianoOpen ? 'notes' : store.stepTrackId ? 'steps' : 'clips'
+        store.editCommand(chord, surface, engine.currentTimelineSample(), visibleStart, visibleEnd)
+        return
+      }
       const claimed = claimComputerKey({
         enabled: store.keyboardMidi,
         typing: false,
