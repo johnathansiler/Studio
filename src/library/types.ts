@@ -38,6 +38,8 @@ export interface LibraryQuery {
   instrument: string
   genre: string
   musicalKey: string
+  /** Also keep the relative major or minor, and the parallel key. */
+  keyCompatible?: boolean
   mood: string
   pack: string
   bpmMin: number | null
@@ -61,6 +63,7 @@ export const EMPTY_LIBRARY_QUERY: LibraryQuery = {
   instrument: '',
   genre: '',
   musicalKey: '',
+  keyCompatible: false,
   mood: '',
   pack: '',
   bpmMin: null,

@@ -95,6 +95,48 @@ const catalog = {
       license: 'private',
       search: 'vinyl crackle texture sfx vintage',
     },
+    {
+      key: 'Guitar/riff_F#m_100.wav',
+      size: 200,
+      format: 'wav',
+      pack: 'Dusty Keys',
+      type: 'loop',
+      category: 'guitar',
+      instrument: 'electric guitar',
+      genre: ['lo-fi'],
+      bpm: 100,
+      bpm_source: 'label',
+      bpm_alt: null,
+      musical_key: null,
+      root: null,
+      note: null,
+      chord: null,
+      mood: [],
+      tags: ['riff'],
+      license: 'private',
+      search: 'guitar riff loop',
+    },
+    {
+      key: 'Pads/warm_A_minor.wav',
+      size: 200,
+      format: 'wav',
+      pack: 'Vocal Pads',
+      type: 'loop',
+      category: 'pad',
+      instrument: 'synth pad',
+      genre: ['ambient'],
+      bpm: 90,
+      bpm_source: 'label',
+      bpm_alt: null,
+      musical_key: '',
+      root: null,
+      note: null,
+      chord: null,
+      mood: [],
+      tags: ['warm'],
+      license: 'private',
+      search: 'warm pad loop',
+    },
   ],
 }
 
@@ -191,72 +233,98 @@ describe('my library on a phone', () => {
       await page.getByRole('button', { name: 'Unfavorite 139 Trap Click C' }).waitFor()
       await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.getByRole('button', { name: 'Favorites', exact: true }).click()
-      await page.keyboard.press('Escape')
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
       await page.locator('[data-library-key="Drums/139_Trap_Click_C.wav"]').waitFor()
       await page.screenshot({ path: '/opt/cursor/artifacts/browse_favorites_star_phone_390.png' })
       await page.getByRole('button', { name: 'Unfavorite 139 Trap Click C' }).click()
-      await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.getByRole('button', { name: /^Filter/ }).click()
       await page.getByRole('button', { name: 'Favorites', exact: true }).click()
-      await page.keyboard.press('Escape')
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
       await page.getByLabel('Search my library').fill('trap 808 C')
       await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.locator('.library-filter-sheet').waitFor()
       await page.evaluate(() => document.fonts.ready)
       await page.waitForFunction(() => {
         const menu = document.querySelector('.library-filter-sheet')
-        const facets = document.querySelectorAll('.library-filter-grid > button[data-facet]')
-        return !!menu && menu.getBoundingClientRect().width > 200 && facets.length === 8 && facets[0].getBoundingClientRect().height >= 40
+        const facets = document.querySelectorAll('.library-filter-chips > button[data-facet]')
+        const list = document.querySelectorAll('.library-filter-list > button')
+        return !!menu && menu.getBoundingClientRect().width > 200 && facets.length === 7 && list.length > 1 && (list[0] as HTMLElement).getBoundingClientRect().height >= 40
       })
       const grid = await page.evaluate(() => {
         const box = (node: Element) => node.getBoundingClientRect()
-        const facets = [...document.querySelectorAll('.library-filter-grid > button[data-facet]')]
-        const options = [...document.querySelectorAll('.library-filter-grid > button[data-value]')]
+        const facets = [...document.querySelectorAll('.library-filter-chips > button[data-facet]')]
+        const options = [...document.querySelectorAll('.library-filter-list > button')]
         const lock = document.querySelector('.library-lock-btn')
-        const widths = (nodes: Element[]) => nodes.map((node) => Math.round(box(node).width))
-        const heights = (nodes: Element[]) => nodes.map((node) => Math.round(box(node).height))
+        const search = document.querySelector('.library-search') as HTMLElement | null
+        const row = document.querySelector('.my-library .sound-row') as HTMLElement | null
         const clipped = (node: Element) => node.scrollWidth > node.clientWidth + 1
-        const facetBoxes = facets.map(box)
         return {
-          facetWidths: widths(facets),
-          facetHeights: heights(facets),
-          columns: new Set(facetBoxes.map((item) => Math.round(item.left))).size,
-          optionWidths: widths(options),
-          optionHeights: heights(options),
+          labels: facets.map((node) => node.textContent?.trim() ?? ''),
+          facetHeights: facets.map((node) => Math.round(box(node).height)),
+          optionHeights: options.map((node) => Math.round(box(node).height)),
           lockHeight: lock ? Math.round(box(lock).height) : 0,
-          lockInsideGrid: !!lock?.closest('.library-filter-grid'),
+          lockInsideList: !!lock?.closest('.library-filter-list, .library-filter-chips'),
           quick: [...document.querySelectorAll('.library-quick')].map((node) => ({ t: node.textContent?.trim() ?? '', w: Math.round(box(node).width), h: Math.round(box(node).height) })),
-          clipped: [...facets, ...options].some(clipped),
+          clipped: facets.some(clipped),
+          sticky: search ? getComputedStyle(search).position : '',
+          rowHeight: row ? getComputedStyle(row).height : '',
+          rowGap: row ? getComputedStyle(row).marginBottom : '',
         }
       })
+      expect(grid.labels).toEqual(['Type', 'Instrument', 'Key', 'BPM', 'Genre', 'Mood', 'Pack'])
       expect(grid.quick.map((item) => item.t)).toEqual(['Recent', 'Favorites'])
-      expect(grid.quick[0].w).toBe(grid.quick[1].w)
       expect(Math.min(...grid.quick.map((item) => item.h))).toBeGreaterThanOrEqual(40)
-      expect(grid.facetWidths).toHaveLength(8)
-      expect(grid.columns).toBe(4)
-      expect(new Set(grid.facetWidths).size).toBe(1)
       expect(Math.min(...grid.facetHeights)).toBeGreaterThanOrEqual(40)
-      expect(grid.optionWidths.length).toBeGreaterThan(1)
-      expect(new Set(grid.optionWidths).size).toBe(1)
-      expect(grid.optionWidths[0]).toBe(grid.facetWidths[0])
       expect(Math.min(...grid.optionHeights)).toBeGreaterThanOrEqual(40)
       expect(grid.lockHeight).toBeGreaterThanOrEqual(40)
-      expect(grid.lockInsideGrid).toBe(false)
+      expect(grid.lockInsideList).toBe(false)
       expect(grid.clipped).toBe(false)
+      expect(grid.sticky).toBe('sticky')
+      expect(grid.rowHeight).toBe('64px')
+      expect(grid.rowGap).toBe('6px')
       await page.getByRole('button', { name: 'One-shot', exact: true }).click()
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
+      await page.getByRole('button', { name: /^Filter/ }).click()
       await page.getByRole('button', { name: 'Genre', exact: true }).click()
       await page.getByRole('button', { name: 'Trap', exact: true }).click()
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
       await expect.poll(async () => page.locator('[data-library-key="Drums/139_Trap_Click_C.wav"]').count()).toBe(1)
       await expect.poll(async () => page.locator('[data-library-key="Bass/C_sharp.wav"]').count()).toBe(0)
       const overflow = async () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)
       expect(await overflow()).toBe(true)
       await page.screenshot({ path: '/opt/cursor/artifacts/my-library-search-390.png' })
-      await page.setViewportSize({ width: 360, height: 740 })
+      await page.setViewportSize({ width: 344, height: 844 })
       await page.locator('[data-library-key="Drums/139_Trap_Click_C.wav"]').scrollIntoViewIfNeeded()
       expect(await overflow()).toBe(true)
-      await page.screenshot({ path: '/opt/cursor/artifacts/my-library-search-360.png' })
-      await page.setViewportSize({ width: 390, height: 844 })
-      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+      await page.getByLabel('Search my library').fill('')
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.locator('.library-filter-sheet').waitFor()
+      await page.screenshot({ path: '/opt/cursor/artifacts/filter_chips_phone.png' })
+      await page.getByRole('button', { name: 'Key', exact: true }).click()
+      await page.getByRole('button', { name: 'Project key', exact: false }).waitFor()
+      await page.getByRole('button', { name: 'C major', exact: true }).waitFor()
+      await page.screenshot({ path: '/opt/cursor/artifacts/key_picker_phone.png' })
+      await page.getByRole('button', { name: 'F# minor', exact: true }).click()
       await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
+      await expect.poll(async () => page.locator('[data-library-key="Guitar/riff_F#m_100.wav"]').count()).toBe(1)
+      await expect.poll(async () => page.locator('[data-library-key="Pads/warm_A_minor.wav"]').count()).toBe(0)
+      await expect.poll(async () => page.locator('[data-sound-key="F#m"]').count()).toBe(1)
+      await page.screenshot({ path: '/opt/cursor/artifacts/key_results_phone.png' })
+      await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+      await page.setViewportSize({ width: 768, height: 1024 })
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.getByRole('button', { name: 'Key', exact: true }).click()
+      await page.getByRole('button', { name: 'Also relative', exact: true }).click()
+      await page.locator('.library-filter-sheet').waitFor()
+      await page.screenshot({ path: '/opt/cursor/artifacts/key_picker_fold.png' })
+      await page.getByRole('button', { name: 'C major', exact: true }).click()
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
+      await expect.poll(async () => page.locator('[data-sound-key="Am"]').count()).toBeGreaterThan(0)
+      await expect.poll(async () => page.locator('[data-library-key="Guitar/riff_F#m_100.wav"]').count()).toBe(0)
+      await page.screenshot({ path: '/opt/cursor/artifacts/key_results_fold.png' })
+      await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+      await page.getByLabel('Search my library').fill('trap 808 C')
       await page.getByRole('button', { name: 'Load 139 Trap Click C' }).click()
       const pads = page.locator('[data-pads="plugin"]')
       await pads.waitFor()
@@ -267,5 +335,5 @@ describe('my library on a phone', () => {
       await browser?.close()
       child.kill('SIGTERM')
     }
-  }, 60000)
+  }, 90000)
 })

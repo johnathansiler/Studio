@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type ReactNode } from 'react'
-import { AnchoredMenu } from './AnchoredMenu'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent } from 'react'
 import { SOUND_MIME } from '../audio/sample/slot'
 import { LibraryAuthError, clearLibraryAccessKey, libraryStatus, readLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { loadLibraryCatalog } from '../library/audio'
@@ -13,24 +12,25 @@ import { fetchAllLibraryInstruments } from '../library/instrumentsApi'
 import { libraryDragId, loadGroupedLibraryInstrument, loadLibraryDrag, loadLibraryEntry, placeLibraryInstrument, previewLibraryInstrument, publishLibrary } from '../library/place'
 import { prefetchLibrarySounds, previewLibrarySound } from '../library/stream'
 import { retargetLibraryMemory } from '../library/retarget'
+import { KEY_TONICS, libraryDetectKeys, parseMusicalKey, projectKeyFromScale, resolveEntryKey, type MusicalKey } from '../library/musicalKey'
 import { libraryRowWindow, searchLibrary, type LibraryIndex } from '../library/search'
-import type { LibraryDocument, LibraryEntry, LibraryQuery } from '../library/types'
+import { EMPTY_LIBRARY_QUERY, type LibraryDocument, type LibraryEntry, type LibraryQuery } from '../library/types'
 import type { ProjectStore } from '../state/store'
+import { useProjectVersion } from './playbackUi'
 
 /** The row is 64px tall plus the 6px margin under it. Virtualization uses that stride. */
 const ROW = 64 + 6
 const GROUPS = [
   { id: 'type', label: 'Type' },
-  { id: 'category', label: 'Category' },
   { id: 'instrument', label: 'Instrument' },
-  { id: 'genre', label: 'Genre' },
   { id: 'key', label: 'Key' },
   { id: 'bpm', label: 'BPM' },
+  { id: 'genre', label: 'Genre' },
   { id: 'mood', label: 'Mood' },
   { id: 'pack', label: 'Pack' },
 ] as const
 
-type Group = (typeof GROUPS)[number]['id']
+type Group = 'type' | 'category' | 'instrument' | 'genre' | 'key' | 'bpm' | 'mood' | 'pack'
 
 const BPM_PRESETS: { id: string; label: string; min: number | null; max: number | null }[] = [
   { id: 'any', label: 'Any BPM', min: null, max: null },
@@ -68,25 +68,6 @@ function chipLabel(value: string) {
   return TYPE_LABEL[value] ?? value.charAt(0).toUpperCase() + value.slice(1)
 }
 
-function filterAnchor() {
-  if (typeof document === 'undefined') return null
-  const button = document.querySelector('.my-library .library-filter-btn')
-  const panel = button?.closest('[data-playlist-browser="open"]')
-  if (!(button instanceof HTMLElement) || !(panel instanceof HTMLElement)) return null
-  const buttonBox = button.getBoundingClientRect()
-  const panelBox = panel.getBoundingClientRect()
-  return { left: panelBox.left, top: buttonBox.top, width: panelBox.width, height: buttonBox.height }
-}
-
-function syncFilterSheetWidth() {
-  if (typeof document === 'undefined') return
-  const panel = document.querySelector('[data-playlist-browser="open"]')
-  if (!panel) return
-  const raw = panel.getBoundingClientRect().width
-  const width = Math.max(240, Math.min(420, raw - 16, window.innerWidth - 16))
-  document.documentElement.style.setProperty('--library-filter-width', `${Math.round(width)}px`)
-}
-
 function scrollParent(node: HTMLElement) {
   const own = getComputedStyle(node).overflowY
   if (own === 'auto' || own === 'scroll') return node
@@ -117,10 +98,12 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const [focusId, setFocusId] = useState(saved.current.libraryFocus)
   const [quick, setQuick] = useState<'' | 'recent' | 'favorites'>(saved.current.libraryQuick)
   const [range, setRange] = useState({ start: 0, end: 16 })
+  const version = useProjectVersion(store)
+  const projectKey = useMemo(() => projectKeyFromScale(store.project.scale), [store, version])
+  const heard = useMemo(() => libraryDetectKeys(store.project), [store, version])
   const recent = useSyncExternalStore(subscribeRecent, recentSounds, recentSounds)
   const favorites = useSyncExternalStore(subscribeFavorites, favoriteSounds, favoriteSounds)
   const listRef = useRef<HTMLDivElement>(null)
-  const filterButton = useRef<HTMLButtonElement>(null)
   const previewGen = useRef(0)
   const previewAbort = useRef<AbortController | null>(null)
 
@@ -196,6 +179,17 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   }, [engine])
 
   useEffect(() => {
+    if (!filtersOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setFiltersOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [filtersOpen])
+
+  useEffect(() => {
     const allow = (event: DragEvent) => {
       const types = event.dataTransfer ? [...event.dataTransfer.types] : []
       if (!types.includes(SOUND_MIME) && !dragId.startsWith('library:')) return
@@ -223,10 +217,15 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     }
   }, [engine, store])
 
+  const searchQuery = useMemo(() => {
+    const musicalKey = query.musicalKey === 'project' ? projectKey.label : query.musicalKey
+    return { ...query, text, musicalKey }
+  }, [projectKey, query, text])
+
   const rows = useMemo<BrowseRow[]>(() => {
     if (!index) return []
-    const next = { ...query, text }
-    const listed = browseLibraryRows(index, searchLibrary(index, next), instruments, next, coveredKeys.current)
+    const next = searchQuery
+    const listed = browseLibraryRows(index, searchLibrary(index, next, heard), instruments, next, coveredKeys.current)
     const needle = text.trim().toLowerCase()
     const matches = (name: string) => !needle || name.toLowerCase().includes(needle)
     const picked: BrowseRow[] = []
@@ -252,9 +251,9 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
       return picked
     }
     return listed
-  }, [favorites, index, instruments, query, quick, recent, text])
+  }, [favorites, heard, index, instruments, quick, recent, searchQuery])
 
-  const filterKey = `${text}\0${JSON.stringify(query)}`
+  const filterKey = `${text}\0${JSON.stringify(query)}\0${projectKey.label}`
   const filterKeyRef = useRef(filterKey)
   const didRestore = useRef(false)
   useEffect(() => {
@@ -476,11 +475,34 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     event.dataTransfer.effectAllowed = 'copy'
   }
 
-  if (filtersOpen) syncFilterSheetWidth()
+  function applyFilter(patch: Partial<LibraryQuery>) {
+    setQuery((current) => ({ ...current, ...patch }))
+    setFiltersOpen(false)
+  }
+
+  function pickQuick(id: 'recent' | 'favorites') {
+    setQuick((current) => current === id ? '' : id)
+    setFiltersOpen(false)
+  }
+
+  function toggleCompatible() {
+    const hasKey = Boolean(query.musicalKey)
+    setQuery((current) => ({ ...current, keyCompatible: !current.keyCompatible }))
+    if (hasKey) setFiltersOpen(false)
+  }
+
+  function clearAllFilters() {
+    setQuery({ ...EMPTY_LIBRARY_QUERY })
+    setQuick('')
+  }
 
   const facets = index?.facets
-  const values = facetValues(group, facets, instruments.length > 0)
-  const active = activeFilters(query)
+  const panel: Group = group === 'category' ? 'instrument' : group
+  const values = panel === 'key' || panel === 'bpm' || panel === 'instrument' ? [] : facetValues(panel, facets, instruments.length > 0)
+  const categoryValues = facetValues('category', facets, false)
+  const instrumentValues = facetValues('instrument', facets, false)
+  const active = activeFilters(query, projectKey)
+  const activeCount = active.length + (quick ? 1 : 0)
   const shown = rows.slice(range.start, range.end)
   const instrumentCount = rows.filter((row) => row.kind === 'instrument').length
   const soundCount = rows.length - instrumentCount
@@ -516,60 +538,96 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
           <div className="sound-filters library-search">
             <input aria-label="Search my library" placeholder="Search" value={text} onChange={(event) => setText(event.target.value)} />
             <button
-              ref={filterButton}
               type="button"
-              className={`sound-filter library-filter-btn${active.length ? ' on' : ''}`}
+              className={`sound-filter library-filter-btn${activeCount ? ' on' : ''}`}
               aria-expanded={filtersOpen}
               aria-haspopup="dialog"
-              aria-label={active.length ? `Filter. ${active.length} active.` : 'Filter'}
-              title="Type, category, instrument, genre, key, and tempo."
+              aria-label={activeCount ? `Filter. ${activeCount} active.` : 'Filter'}
+              title="Type, instrument, key, tempo, and genre."
               onClick={() => setFiltersOpen((open) => !open)}
             >
               <FilterIcon />
-              {active.length > 0 && <span className="filter-badge">{active.length}</span>}
+              {activeCount > 0 && <span className="filter-badge">{activeCount}</span>}
             </button>
             <button type="button" className="sound-filter library-lock-btn" onClick={lock}>Lock</button>
-            <AnchoredMenu className="sound-filter-menu library-filter-sheet" open={filtersOpen} onClose={() => setFiltersOpen(false)} label="Filter" triggerRef={filterButton} anchor={filtersOpen ? filterAnchor() : null}>
-              <div className="library-filter-grid" role="group" aria-label="Filter groups">
-                <button type="button" className={`filter-choice library-quick${quick === 'recent' ? ' on' : ''}`} data-quick="recent" aria-pressed={quick === 'recent'} onClick={() => setQuick((current) => current === 'recent' ? '' : 'recent')}>Recent</button>
-                <button type="button" className={`filter-choice library-quick${quick === 'favorites' ? ' on' : ''}`} data-quick="favorites" aria-pressed={quick === 'favorites'} onClick={() => setQuick((current) => current === 'favorites' ? '' : 'favorites')}>Favorites</button>
+          </div>
+          {filtersOpen && <div className="sound-filter-menu library-filter-sheet" role="dialog" aria-label="Filter">
+              <div className="library-filter-chips" role="group" aria-label="Filter groups">
                 {GROUPS.map((item) => (
-                  <button key={item.id} type="button" data-facet={item.id} className={`filter-choice${group === item.id || groupActive(item.id, query) ? ' on' : ''}`} aria-pressed={group === item.id} onClick={() => setGroup(item.id)}>{item.label}</button>
-                ))}
-                {group === 'bpm' ? BPM_PRESETS.map((preset) => (
                   <button
-                    key={preset.id}
+                    key={item.id}
                     type="button"
-                    data-value={preset.id}
-                    className={`filter-choice${query.bpmMin === preset.min && query.bpmMax === preset.max ? ' on' : ''}`}
-                    aria-pressed={query.bpmMin === preset.min && query.bpmMax === preset.max}
-                    onClick={() => setQuery((current) => ({ ...current, bpmMin: preset.min, bpmMax: preset.max }))}
+                    data-facet={item.id}
+                    aria-pressed={panel === item.id}
+                    title={item.id === 'instrument' ? 'Instrument and category' : item.label}
+                    className={`filter-choice${panel === item.id || chipOn(item.id, query) ? ' on' : ''}`}
+                    onClick={() => setGroup(item.id)}
                   >
-                    {preset.label}
+                    {item.label}
                   </button>
-                )) : (
-                  <>
-                    <button type="button" data-value="any" className={`filter-choice${!selectedValue(group, query) ? ' on' : ''}`} aria-pressed={!selectedValue(group, query)} onClick={() => setQuery((current) => ({ ...current, ...cleared(group) }))}>Any</button>
-                    {values.map((value) => (
-                      <button key={value} type="button" data-value={value} className={`filter-choice${selectedValue(group, query) === value ? ' on' : ''}`} aria-pressed={selectedValue(group, query) === value} onClick={() => setQuery((current) => ({ ...current, ...picked(group, value) }))}>{chipLabel(value)}</button>
-                    ))}
-                  </>
-                )}
-                {group === 'bpm' && (
-                  <>
+                ))}
+                <button type="button" className={`filter-choice library-quick${quick === 'recent' ? ' on' : ''}`} data-quick="recent" aria-pressed={quick === 'recent'} onClick={() => pickQuick('recent')}>Recent</button>
+                <button type="button" className={`filter-choice library-quick${quick === 'favorites' ? ' on' : ''}`} data-quick="favorites" aria-pressed={quick === 'favorites'} onClick={() => pickQuick('favorites')}>Favorites</button>
+              </div>
+              {panel === 'key' ? (
+                <KeyPicker query={query} project={projectKey} onPick={(value) => applyFilter({ musicalKey: value })} onCompatible={toggleCompatible} />
+              ) : panel === 'bpm' ? (
+                <div className="library-filter-list" role="group" aria-label="BPM">
+                  {BPM_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      data-value={preset.id}
+                      className={`filter-choice${query.bpmMin === preset.min && query.bpmMax === preset.max ? ' on' : ''}`}
+                      aria-pressed={query.bpmMin === preset.min && query.bpmMax === preset.max}
+                      onClick={() => applyFilter({ bpmMin: preset.min, bpmMax: preset.max })}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                  <div className="library-bpm-range">
                     <input className="library-filter-bpm" aria-label="Minimum BPM" inputMode="numeric" placeholder="Min" value={query.bpmMin ?? ''} onChange={(event) => setQuery((current) => ({ ...current, bpmMin: readBpm(event.target.value) }))} />
                     <input className="library-filter-bpm" aria-label="Maximum BPM" inputMode="numeric" placeholder="Max" value={query.bpmMax ?? ''} onChange={(event) => setQuery((current) => ({ ...current, bpmMax: readBpm(event.target.value) }))} />
-                  </>
-                )}
-              </div>
-            </AnchoredMenu>
-          </div>
-          {active.length > 0 && (
-            <EqualSegments className="library-active btn-tray" label="Active filters">
+                  </div>
+                </div>
+              ) : panel === 'instrument' ? (
+                <div className="library-filter-list" role="group" aria-label="Instrument and category">
+                  <p className="filter-label">Category</p>
+                  <button type="button" data-value="any-category" className={`filter-choice${!query.category ? ' on' : ''}`} onClick={() => applyFilter({ category: '' })}>Any category</button>
+                  {categoryValues.map((value) => (
+                    <button key={`cat-${value}`} type="button" data-value={value} className={`filter-choice${query.category === value ? ' on' : ''}`} aria-pressed={query.category === value} onClick={() => applyFilter({ category: value })}>{chipLabel(value)}</button>
+                  ))}
+                  <p className="filter-label">Instrument</p>
+                  <button type="button" data-value="any-instrument" className={`filter-choice${!query.instrument ? ' on' : ''}`} onClick={() => applyFilter({ instrument: '' })}>Any instrument</button>
+                  {instrumentValues.map((value) => (
+                    <button key={`inst-${value}`} type="button" data-value={value} className={`filter-choice${query.instrument === value ? ' on' : ''}`} aria-pressed={query.instrument === value} onClick={() => applyFilter({ instrument: value })}>{chipLabel(value)}</button>
+                  ))}
+                </div>
+              ) : (
+                <div className="library-filter-list" role="group" aria-label={chipLabel(panel)}>
+                  <button type="button" data-value="any" className={`filter-choice${!selectedValue(panel, query) ? ' on' : ''}`} aria-pressed={!selectedValue(panel, query)} onClick={() => applyFilter(cleared(panel))}>Any</button>
+                  {values.map((value) => (
+                    <button key={value} type="button" data-value={value} className={`filter-choice${selectedValue(panel, query) === value ? ' on' : ''}`} aria-pressed={selectedValue(panel, query) === value} onClick={() => applyFilter(picked(panel, value))}>{chipLabel(value)}</button>
+                  ))}
+                </div>
+              )}
+          </div>}
+          {(active.length > 0 || quick) && (
+            <div className="library-active-bar" role="group" aria-label="Active filters">
+              {quick && (
+                <button type="button" className="library-active-chip" aria-label={`Clear ${quick === 'recent' ? 'Recent' : 'Favorites'}`} onClick={() => setQuick('')}>
+                  <span>{quick === 'recent' ? 'Recent' : 'Favorites'}</span>
+                  <span aria-hidden="true">×</span>
+                </button>
+              )}
               {active.map((item) => (
-                <button key={item.id} type="button" className="on" aria-label={`Clear ${item.label}`} onClick={() => setQuery((current) => ({ ...current, ...item.clear }))}>{item.label} ×</button>
+                <button key={item.id} type="button" className="library-active-chip" aria-label={`Clear ${item.label}`} onClick={() => setQuery((current) => ({ ...current, ...item.clear }))}>
+                  <span>{item.label}</span>
+                  <span aria-hidden="true">×</span>
+                </button>
               ))}
-            </EqualSegments>
+              <button type="button" className="library-clear-all" onClick={clearAllFilters}>Clear all</button>
+            </div>
           )}
           <div className="library-recent-head">
             <p className="sound-count library-count" data-library-count={rows.length}>{countLabel}</p>
@@ -598,6 +656,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
                     <SoundRow
                       key={id}
                       entry={row.entry}
+                      musical={resolveEntryKey(row.entry, heard.get(row.entry.key) ?? null)}
                       playing={playing === row.entry.key}
                       busy={busy === row.entry.key}
                       kept={focusId === id}
@@ -654,6 +713,7 @@ function InstrumentRow({
 
 function SoundRow({
   entry,
+  musical,
   playing,
   busy,
   kept,
@@ -664,6 +724,7 @@ function SoundRow({
   onDrag,
 }: {
   entry: LibraryEntry
+  musical: MusicalKey | null
   playing: boolean
   busy: boolean
   kept: boolean
@@ -673,11 +734,15 @@ function SoundRow({
   onLoad: () => void
   onDrag: (event: ReactDragEvent) => void
 }) {
-  const meta = busy ? 'Loading' : playing ? 'Playing' : [entry.type ? chipLabel(entry.type) : '', entry.category || entry.musicalKey || (entry.bpm ? `${entry.bpm} bpm` : '')].filter(Boolean).slice(0, 2).join(' · ')
+  const meta = busy ? 'Loading' : playing ? 'Playing' : [entry.type ? chipLabel(entry.type) : '', entry.category || (entry.bpm ? `${entry.bpm} bpm` : '')].filter(Boolean).slice(0, 2).join(' · ')
+  const keyTitle = musical?.source === 'filename' ? `${musical.label}, read from the file name` : musical?.source === 'detect' ? `${musical.label}, from Detect` : musical?.label
   return (
     <div className={`sound-row${playing ? ' is-playing' : ''}${kept ? ' is-kept' : ''}`} data-library-key={entry.key} data-browse-id={`sound:${entry.key}`}>
       <button type="button" className="sound-copy" draggable aria-label={playing ? `Stop ${entry.name}` : `Play ${entry.name}`} onDragStart={onDrag} onClick={onPlay}>
-        <strong>{entry.name}</strong>
+        <span className="sound-title">
+          <strong>{entry.name}</strong>
+          {musical && <span className="sound-key-chip" data-sound-key={musical.short} title={keyTitle}>{musical.short}</span>}
+        </span>
         <span className="sound-meta">{busy ? 'Loading' : meta}</span>
       </button>
       <FavoriteStar name={entry.name} pressed={starred} onToggle={onStar} />
@@ -686,53 +751,45 @@ function SoundRow({
   )
 }
 
-/** One row of equal cells. Cells share the row, and scroll at the widest label so nothing clips. */
-function EqualSegments({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const row = ref.current
-    if (!row) return
-    let cancel = false
-    const measure = () => {
-      if (cancel) return
-      const buttons = [...row.querySelectorAll<HTMLButtonElement>(':scope > button')]
-      if (!buttons.length) return
-      for (const button of buttons) {
-        button.style.flex = '0 0 auto'
-        button.style.width = 'max-content'
-        button.style.minWidth = '40px'
-      }
-      const widest = Math.max(40, ...buttons.map((button) => Math.ceil(button.getBoundingClientRect().width))) + 1
-      const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0
-      const available = row.getBoundingClientRect().width
-      const share = (available - gap * Math.max(0, buttons.length - 1)) / buttons.length
-      const locked = widest > share + 0.5
-      for (const button of buttons) {
-        if (locked) {
-          button.style.flex = `0 0 ${widest}px`
-          button.style.width = `${widest}px`
-          button.style.minWidth = `${widest}px`
-        } else {
-          button.style.flex = '1 1 0px'
-          button.style.width = '0px'
-          button.style.minWidth = '0px'
-        }
-      }
-    }
-    measure()
-    const frame = requestAnimationFrame(measure)
-    const observer = new ResizeObserver(measure)
-    observer.observe(row)
-    void document.fonts?.ready.then(measure)
-    return () => {
-      cancel = true
-      cancelAnimationFrame(frame)
-      observer.disconnect()
-    }
-  })
+function KeyPicker({
+  query,
+  project,
+  onPick,
+  onCompatible,
+}: {
+  query: LibraryQuery
+  project: MusicalKey
+  onPick: (value: string) => void
+  onCompatible: () => void
+}) {
+  const selected = query.musicalKey === 'project' ? project.label : query.musicalKey
   return (
-    <div ref={ref} className={['library-filter-options', className].filter(Boolean).join(' ')} role="group" aria-label={label}>
-      {children}
+    <div className="library-key-picker" role="group" aria-label="Key">
+      <div className="library-key-actions">
+        <button type="button" className={`filter-choice library-key-project${query.musicalKey === 'project' ? ' on' : ''}`} data-value="project" aria-label="Project key" aria-pressed={query.musicalKey === 'project'} onClick={() => onPick('project')}>
+          Project · {project.short}
+        </button>
+        <button type="button" className={`filter-choice${!query.musicalKey ? ' on' : ''}`} data-value="any" aria-pressed={!query.musicalKey} onClick={() => onPick('')}>Any key</button>
+        <button type="button" className={`filter-choice${query.keyCompatible ? ' on' : ''}`} data-value="compatible" aria-label="Also relative" aria-pressed={query.keyCompatible === true} title="Also show the relative major or minor, and the parallel key." onClick={onCompatible}>Relative</button>
+      </div>
+      <p className="filter-label">Major</p>
+      <div className="library-key-grid" role="group" aria-label="Major keys">
+        {KEY_TONICS.map((name) => {
+          const label = `${name} major`
+          return (
+            <button key={label} type="button" data-value={label} className={`filter-choice${selected === label ? ' on' : ''}`} aria-label={label} aria-pressed={selected === label} onClick={() => onPick(label)}>{name}</button>
+          )
+        })}
+      </div>
+      <p className="filter-label">Minor</p>
+      <div className="library-key-grid" role="group" aria-label="Minor keys">
+        {KEY_TONICS.map((name) => {
+          const label = `${name} minor`
+          return (
+            <button key={label} type="button" data-value={label} className={`filter-choice${selected === label ? ' on' : ''}`} aria-label={label} aria-pressed={selected === label} onClick={() => onPick(label)}>{name}m</button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -807,16 +864,27 @@ function valuePatch(group: Group, value: string): Partial<LibraryQuery> {
 
 function groupActive(group: Group, query: LibraryQuery) {
   if (group === 'bpm') return query.bpmMin != null || query.bpmMax != null
+  if (group === 'key') return Boolean(query.musicalKey)
   return Boolean(selectedValue(group, query))
 }
 
-function activeFilters(query: LibraryQuery) {
+function chipOn(group: Group, query: LibraryQuery) {
+  if (group === 'instrument') return Boolean(query.category || query.instrument)
+  return groupActive(group, query)
+}
+
+function activeFilters(query: LibraryQuery, project: MusicalKey) {
   const rows: { id: string; label: string; clear: Partial<LibraryQuery> }[] = []
   if (query.type) rows.push({ id: 'type', label: chipLabel(query.type), clear: { type: '' } })
   if (query.category) rows.push({ id: 'category', label: chipLabel(query.category), clear: { category: '' } })
   if (query.instrument) rows.push({ id: 'instrument', label: chipLabel(query.instrument), clear: { instrument: '' } })
   if (query.genre) rows.push({ id: 'genre', label: chipLabel(query.genre), clear: { genre: '' } })
-  if (query.musicalKey) rows.push({ id: 'key', label: query.musicalKey, clear: { musicalKey: '' } })
+  if (query.musicalKey) {
+    const parsed = query.musicalKey === 'project' ? project : parseMusicalKey(query.musicalKey)
+    const name = query.musicalKey === 'project' ? `Project · ${project.short}` : (parsed?.short ?? query.musicalKey)
+    const label = query.keyCompatible ? `${name} +rel` : name
+    rows.push({ id: 'key', label, clear: { musicalKey: '', keyCompatible: false } })
+  }
   if (query.mood) rows.push({ id: 'mood', label: chipLabel(query.mood), clear: { mood: '' } })
   if (query.pack) rows.push({ id: 'pack', label: query.pack, clear: { pack: '' } })
   if (query.bpmMin != null || query.bpmMax != null) {
