@@ -219,6 +219,22 @@ describe('clip key and tempo', () => {
     const bed = new Float32Array(rate * 3)
     for (let i = 0; i < bed.length; i++) bed[i] = noise(i) * (i < rate ? 0.02 : 0.8)
     expect(detectKey(bed, rate).clear).toBe(false)
+    const white = new Float32Array(rate * 3)
+    let seed = 1
+    for (let i = 0; i < white.length; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      white[i] = (seed / 2 ** 32) * 2 - 1
+    }
+    expect(detectKey(white, rate).clear).toBe(false)
+    const brown = new Float32Array(rate * 3)
+    let prev = 0
+    for (let i = 0; i < brown.length; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      const sample = (seed / 2 ** 32) * 2 - 1
+      prev = prev * 0.98 + sample * 0.02
+      brown[i] = prev
+    }
+    expect(detectKey(brown, rate).clear).toBe(false)
   })
 
   it('says there is no clear key on a drum loop', () => {
