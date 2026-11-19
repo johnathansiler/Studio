@@ -300,6 +300,33 @@ export interface AudioClip {
   spectral?: SpectralRepair
   /** Session color. Missing uses the track color. */
   color?: string
+  /** Last key and tempo read from this clip. Missing until Detect runs. */
+  hearing?: ClipHearing
+}
+
+/**
+ * Key and tempo Detect stored on a clip so the dock can show them again
+ * without running the analyzer. `bpm` is the source tempo, not the stretched one.
+ */
+export interface ClipHearing {
+  /** "A minor". Empty when the clip has no clear key. */
+  key: string
+  root: number | null
+  /** ionian or aeolian when a key was found. */
+  scale: '' | 'ionian' | 'aeolian'
+  /** 0–1 profile fit of the chosen key. */
+  confidence: number
+  /** Second candidate, often the relative major or minor. */
+  alt: string
+  altRoot: number | null
+  altScale: '' | 'ionian' | 'aeolian'
+  altConfidence: number
+  clearKey: boolean
+  /** Source tempo in BPM. 0 when the onsets do not settle. */
+  bpm: number
+  bpmConfidence: number
+  /** How far the sounded audio sits from A440, in cents. */
+  cents: number
 }
 
 /** One recorded pass inside a take folder. */
