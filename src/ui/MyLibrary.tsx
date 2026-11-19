@@ -570,7 +570,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
                 <button type="button" className={`filter-choice library-quick${quick === 'favorites' ? ' on' : ''}`} data-quick="favorites" aria-pressed={quick === 'favorites'} onClick={() => pickQuick('favorites')}>Favorites</button>
               </div>
               {panel === 'key' ? (
-                <KeyPicker query={query} project={projectKey} onPick={(value) => applyFilter({ musicalKey: value })} onCompatible={toggleCompatible} />
+                <KeyPicker query={query} project={projectKey} onPick={(value) => applyFilter(value ? { musicalKey: value } : { musicalKey: '', keyCompatible: false })} onCompatible={toggleCompatible} />
               ) : panel === 'bpm' ? (
                 <div className="library-filter-list" role="group" aria-label="BPM">
                   {BPM_PRESETS.map((preset) => (
@@ -735,7 +735,7 @@ function SoundRow({
   onDrag: (event: ReactDragEvent) => void
 }) {
   const meta = busy ? 'Loading' : playing ? 'Playing' : [entry.type ? chipLabel(entry.type) : '', entry.category || (entry.bpm ? `${entry.bpm} bpm` : '')].filter(Boolean).slice(0, 2).join(' · ')
-  const keyTitle = musical?.source === 'filename' ? `${musical.label}, read from the file name` : musical?.source === 'detect' ? `${musical.label}, from Detect` : musical?.label
+  const keyTitle = musical?.source === 'filename' ? `${musical.label}, read from the name` : musical?.source === 'detect' ? `${musical.label}, from Detect` : musical?.label
   return (
     <div className={`sound-row${playing ? ' is-playing' : ''}${kept ? ' is-kept' : ''}`} data-library-key={entry.key} data-browse-id={`sound:${entry.key}`}>
       <button type="button" className="sound-copy" draggable aria-label={playing ? `Stop ${entry.name}` : `Play ${entry.name}`} onDragStart={onDrag} onClick={onPlay}>
@@ -766,7 +766,7 @@ function KeyPicker({
   return (
     <div className="library-key-picker" role="group" aria-label="Key">
       <div className="library-key-actions">
-        <button type="button" className={`filter-choice library-key-project${query.musicalKey === 'project' ? ' on' : ''}`} data-value="project" aria-label="Project key" aria-pressed={query.musicalKey === 'project'} onClick={() => onPick('project')}>
+        <button type="button" className={`filter-choice library-key-project${query.musicalKey === 'project' ? ' on' : ''}`} data-value="project" aria-label="Project key" aria-pressed={query.musicalKey === 'project'} title={`Filter to the song key, ${project.label}.`} onClick={() => onPick('project')}>
           Project · {project.short}
         </button>
         <button type="button" className={`filter-choice${!query.musicalKey ? ' on' : ''}`} data-value="any" aria-pressed={!query.musicalKey} onClick={() => onPick('')}>Any key</button>

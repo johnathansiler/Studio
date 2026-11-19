@@ -15,6 +15,8 @@ export interface LibraryEntry {
   bpm: number | null
   bpmAlt: number | null
   musicalKey: string
+  /** Chord symbol from the catalog, when the file has one. Empty when it does not. */
+  chord?: string
   root: string
   note: string
   mood: string[]

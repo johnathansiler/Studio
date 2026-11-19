@@ -19,7 +19,10 @@ export interface MusicalKey {
 export const KEY_TONICS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
 
 const LETTER: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }
-const MODE = /^(major|minor|maj|min|m)(?:7|9|11|13)?$/
+/** A mode word, an optional chord extension, or one octave digit such as Amin3. */
+const MODE = /^(major|minor|maj|min|m)(?:7|9|11|13|-1|[0-9])?$/i
+const MODE_WORD = /^(major|minor|maj|min)$/i
+const TOKEN = /[\s_\-./]+/
 
 const baseKey = new WeakMap<object, MusicalKey | null>()
 
@@ -38,28 +41,38 @@ function make(root: number, mode: 'major' | 'minor', source: MusicalKey['source'
 }
 
 /**
- * "C", "C major", "Cm", "Cmin", "F#m", "A minor", "Bb", "Eb".
- * A bare tonic is major. A single trailing m is minor, so "F#m" is F# minor.
- * "C4" and other octave notes are not keys.
+ * Spell "F sharp" and "D flat" before the letters are pushed together.
+ * Brackets and parentheses become spaces, so "(F minor)" and "[D# Min]" stay readable.
  */
-export function parseMusicalKey(value: string | null | undefined, requireMode = false): MusicalKey | null {
-  const compact = (value ?? '')
-    .trim()
-    .toLowerCase()
+function spellKey(value: string) {
+  return value
+    .replace(/[()[\]{}]/g, ' ')
     .replace(/♯/g, '#')
     .replace(/♭/g, 'b')
+    .replace(/\b([A-Ga-g])[\s_\-]+sharp\b/gi, '$1#')
+    .replace(/\b([A-Ga-g])[\s_\-]+flat\b/gi, '$1b')
+}
+
+/**
+ * "C", "C major", "Cm", "Cmin", "F#m", "A minor", "Bbmaj", "Eb", "F sharp minor".
+ * A bare tonic is major. A lowercase m is minor ("Am", "F#m") and an uppercase M is major ("AM", "F#M").
+ * "C4" and other octave notes are not keys. Db and C# are the same pitch.
+ */
+export function parseMusicalKey(value: string | null | undefined, requireMode = false): MusicalKey | null {
+  const compact = spellKey(value ?? '')
+    .trim()
     .replace(/[_./-]+/g, ' ')
     .replace(/\s+/g, '')
   if (!compact) return null
-  const match = compact.match(/^([a-g])(.*)$/)
+  const match = compact.match(/^([A-Ga-g])(.*)$/)
   if (!match) return null
-  const letter = match[1]
+  const letter = match[1].toLowerCase()
   let rest = match[2]
   let accidental = ''
   if (rest.startsWith('#')) {
     accidental = '#'
     rest = rest.slice(1)
-  } else if (rest.startsWith('b') && !MODE.test(rest)) {
+  } else if ((rest.startsWith('b') || rest.startsWith('B')) && !MODE.test(rest)) {
     const after = rest.slice(1)
     if (after === '' || MODE.test(after)) {
       accidental = 'b'
@@ -68,28 +81,59 @@ export function parseMusicalKey(value: string | null | undefined, requireMode = 
   }
   if (rest && !MODE.test(rest)) return null
   if (!rest && requireMode) return null
-  const minor = rest === 'm' || rest.startsWith('min') || /^m\d/.test(rest)
+  const minor = /^min/i.test(rest) || (rest.startsWith('m') && !/^maj/i.test(rest))
   let semi = LETTER[letter]
   if (accidental === '#') semi += 1
   if (accidental === 'b') semi -= 1
   return make(semi, minor ? 'minor' : 'major', 'catalog')
 }
 
-/** Loop names such as "riff_F#m_100", "Cmin", and "A_minor". A bare "C" or "C4" is not enough. */
-export function keyFromFilename(path: string): MusicalKey | null {
-  const base = path.split('/').pop() || path
-  const stem = base.replace(/\.[a-z0-9]+$/i, '')
-  const tokens = stem.split(/[\s_\-./]+/).filter(Boolean)
+/** One label, filename, folder, tag, or pack name. A bare "C" or "C4" is not enough. */
+export function keyFromText(text: string): MusicalKey | null {
+  const tokens = spellKey(text).split(TOKEN).filter(Boolean)
   for (let i = 0; i < tokens.length; i++) {
     const one = parseMusicalKey(tokens[i], true)
-    if (one) return { ...one, source: 'filename' }
+    if (one) return one
     const next = tokens[i + 1]
-    if (next && /^(major|minor|maj|min)$/i.test(next)) {
+    if (next && MODE_WORD.test(next)) {
       const pair = parseMusicalKey(`${tokens[i]} ${next}`, true)
-      if (pair) return { ...pair, source: 'filename' }
+      if (pair) return pair
     }
   }
   return null
+}
+
+/**
+ * Loop names such as "riff_F#m_100", "Cmin", "Bbmaj", "A_minor", "f-sharp-minor", and "(F minor)".
+ * A key folder counts when the file itself has none. A bare "C" or "C4" is not enough.
+ */
+export function keyFromFilename(path: string): MusicalKey | null {
+  const parts = path.split('/').filter(Boolean)
+  const base = parts.pop() || path
+  const stem = base.replace(/\.[a-z0-9]+$/i, '')
+  const fromFile = keyFromText(stem)
+  if (fromFile) return { ...fromFile, source: 'filename' }
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const fromFolder = keyFromText(parts[i])
+    if (fromFolder) return { ...fromFolder, source: 'filename' }
+  }
+  return null
+}
+
+function keyFromTags(tags: readonly string[] | undefined): MusicalKey | null {
+  if (!tags) return null
+  for (const tag of tags) {
+    const found = keyFromText(tag)
+    if (found) return { ...found, source: 'filename' }
+  }
+  return null
+}
+
+/** A chord symbol with a mode, such as Bbmaj. A bare "C" or a note "C4" is not a key. */
+function keyFromChord(value: string | undefined): MusicalKey | null {
+  if (!value) return null
+  const parsed = parseMusicalKey(value, true)
+  return parsed ? { ...parsed, source: 'catalog' } : null
 }
 
 export function keyFromCatalog(value: string | null | undefined): MusicalKey | null {
@@ -101,18 +145,38 @@ export function keyFromCatalog(value: string | null | undefined): MusicalKey | n
  * Catalog metadata wins. A stored Detect reading beats a filename guess.
  * Filename keys are only for loops, so a one-shot named "Kick C" stays unkeyed.
  */
-export function resolveEntryKey(entry: Pick<LibraryEntry, 'key' | 'name' | 'type' | 'musicalKey'>, detect?: MusicalKey | null): MusicalKey | null {
+export function resolveEntryKey(entry: Pick<LibraryEntry, 'key' | 'name' | 'type' | 'musicalKey' | 'pack' | 'tags'> & { chord?: string }, detect?: MusicalKey | null): MusicalKey | null {
   if (!baseKey.has(entry)) {
-    const catalog = keyFromCatalog(entry.musicalKey)
-    const named = catalog || entry.type !== 'loop'
-      ? null
-      : (keyFromFilename(entry.key) ?? (entry.name ? keyFromFilename(entry.name) : null))
+    const catalog = keyFromCatalog(entry.musicalKey) ?? keyFromChord(entry.chord)
+    const named = catalog || entry.type !== 'loop' ? null : guessedKey(entry)
     baseKey.set(entry, catalog ?? named)
   }
   const base = baseKey.get(entry) ?? null
   if (base?.source === 'catalog') return base
   if (detect) return { ...detect, source: 'detect' }
   return base
+}
+
+function namedKey(text: string | undefined): MusicalKey | null {
+  if (!text) return null
+  const found = keyFromText(text)
+  return found ? { ...found, source: 'filename' } : null
+}
+
+/**
+ * The file name wins. A display name that still has a sharp beats a slug that
+ * dropped it ("fmin" from "F#min"). Then a key-shaped tag, then the pack name.
+ */
+function guessedKey(entry: Pick<LibraryEntry, 'key' | 'name' | 'pack' | 'tags'>): MusicalKey | null {
+  const fromPath = keyFromFilename(entry.key)
+  const fromName = namedKey(entry.name)
+  if (fromName?.short.includes('#') && (!fromPath || !fromPath.short.includes('#'))) return fromName
+  if (fromPath) return fromPath
+  if (fromName) return fromName
+  const fromTags = keyFromTags(entry.tags)
+  if (fromTags) return fromTags
+  if (entry.pack) return namedKey(entry.pack)
+  return null
 }
 
 /** Relative major/minor, plus the parallel key. C major also keeps A minor and C minor. */
@@ -187,7 +251,7 @@ export interface LoopKeyCoverage {
 }
 
 /** How many loops can be filtered by key. Client-side only. */
-export function loopKeyCoverage(entries: Pick<LibraryEntry, 'key' | 'name' | 'type' | 'musicalKey'>[], detect?: ReadonlyMap<string, MusicalKey>): LoopKeyCoverage {
+export function loopKeyCoverage(entries: Pick<LibraryEntry, 'key' | 'name' | 'type' | 'musicalKey' | 'pack' | 'tags'>[], detect?: ReadonlyMap<string, MusicalKey>): LoopKeyCoverage {
   let loops = 0
   let keyed = 0
   let catalog = 0
