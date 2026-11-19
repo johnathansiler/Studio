@@ -912,7 +912,7 @@ export function App() {
       }
       if (typing) return
       const chord = editShortcut(event)
-      if (chord) {
+      if (chord && !document.querySelector('[data-wave-editor="open"]')) {
         event.preventDefault()
         const roll = document.querySelector<HTMLElement>('.roll')
         const px = Number(roll?.dataset.pxBeat)

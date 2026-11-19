@@ -65,24 +65,24 @@ export function DrumEditor({ store, engine }: { store: ProjectStore; engine: Aud
             onPointerCancel={() => store.endDraft()}
           />
         </label>
+        {store.notePasteState().visible && (
+          <TipButton
+            className={store.notePasteState().ready ? '' : 'is-muted'}
+            label="Paste"
+            hint={store.notePasteState().ready ? 'Paste hits at the playhead.' : store.notePasteState().reason}
+            onClick={() => {
+              if (!store.notePasteState().ready) {
+                store.toast(store.notePasteState().reason || 'Copy notes first.', 'warn')
+                return
+              }
+              store.pasteNotes(engine.currentTimelineSample())
+            }}
+          />
+        )}
         {selected && (
           <>
             <TipButton label="Copy" hint="Copy the selected hits." onClick={() => store.copyNotes()} />
             <TipButton label="Cut" hint="Cut the selected hits." onClick={() => store.cutNotes()} />
-            {store.notePasteState().visible && (
-              <TipButton
-                className={store.notePasteState().ready ? '' : 'is-muted'}
-                label="Paste"
-                hint={store.notePasteState().ready ? 'Paste hits at the playhead.' : store.notePasteState().reason}
-                onClick={() => {
-                  if (!store.notePasteState().ready) {
-                    store.toast(store.notePasteState().reason || 'Copy notes first.', 'warn')
-                    return
-                  }
-                  store.pasteNotes(engine.currentTimelineSample())
-                }}
-              />
-            )}
             <TipButton label="Duplicate" hint="Copy the selected hits and place them just after." onClick={() => store.duplicateOpenNotes()} />
             <label className="me-vel">
               Hit

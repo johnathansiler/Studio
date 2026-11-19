@@ -1,5 +1,8 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { editShortcut, notePasteBeat, stepPasteIndex } from '../model/editClipboard'
+import { PhoneDock } from '../ui/phoneDock'
 import { projectBeatSample } from '../model/tempoMap'
 import { createEmptyProject, type AudioClip, type ClipStretch, type MidiNote } from '../model/types'
 import { ProjectStore } from '../state/store'
@@ -37,6 +40,7 @@ describe('edit shortcuts', () => {
     expect(editShortcut({ key: 'v', metaKey: true })).toBe('paste')
     expect(editShortcut({ key: 'd', ctrlKey: true })).toBe('duplicate')
     expect(editShortcut({ key: 'd', metaKey: true, shiftKey: true })).toBeNull()
+    expect(editShortcut({ key: 'v', ctrlKey: true, repeat: true })).toBeNull()
     expect(editShortcut({ key: 'c' })).toBeNull()
   })
 })
@@ -176,6 +180,60 @@ describe('arrange copy, cut, paste, and duplicate', () => {
     expect(track.clips[0].startSample).toBe(projectBeatSample(store.project, 2))
   })
 
+  it('pastes at the end of a long song, and a second paste may overlap without sharing settings', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const track = audioTrack(store)
+    store.drawRegion(track.id, 0, 48000)
+    const original = track.clips[0]
+    original.gain = 0.7
+    store.copyClips()
+    const far = projectBeatSample(store.project, 64.2)
+    expect(store.pasteClips(far)).toBe(true)
+    expect(track.clips[1].startSample).toBe(projectBeatSample(store.project, 64))
+    expect(store.pasteClips(far)).toBe(true)
+    expect(track.clips).toHaveLength(3)
+    expect(track.clips[2].startSample).toBe(track.clips[1].startSample)
+    expect(track.clips[2].id).not.toBe(track.clips[1].id)
+    track.clips[2].gain = 0.15
+    expect(track.clips[1].gain).toBe(0.7)
+    expect(original.gain).toBe(0.7)
+    store.undo()
+    expect(track.clips).toHaveLength(2)
+  })
+
+  it('keeps Paste on the phone row after Cut, and greys it on the wrong track', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const track = audioTrack(store)
+    store.drawRegion(track.id, 0, 48000)
+    store.cutClips()
+    expect(track.clips).toHaveLength(0)
+    expect(store.selectedClipId).toBeNull()
+    const props = {
+      store,
+      place: 'arrange' as const,
+      menuOpen: false,
+      browseOpen: false,
+      ideasOpen: false,
+      onMenu() {},
+      onBrowse() {},
+      onIdeas() {},
+      onMenuAction() {},
+      onUndo() {},
+      onRedo() {},
+      canUndo: true,
+      canRedo: false,
+      playheadSample: () => 0,
+    }
+    const html = renderToStaticMarkup(createElement(PhoneDock, props))
+    expect(html).toContain('data-phone-action="paste"')
+    expect(html).toContain('data-phone-action="undo"')
+    expect(html).not.toContain('phone-hit is-muted')
+    store.selectTrack(midiTrack(store).id)
+    const blocked = renderToStaticMarkup(createElement(PhoneDock, props))
+    expect(blocked).toContain('phone-hit is-muted')
+    expect(blocked).toContain('Select an audio track to paste this clip.')
+  })
+
   it('duplicates a pattern clip just after itself', () => {
     const store = new ProjectStore(createEmptyProject(48000))
     store.placePattern(4)
@@ -231,8 +289,12 @@ describe('note and step clipboard', () => {
     expect(notePasteBeat({ playheadLocal: 1.3, visibleStart: 0, visibleEnd: 8, barBeats: 4, grid: 1 })).toBe(1)
     expect(notePasteBeat({ playheadLocal: null, visibleStart: 6, visibleEnd: 10, barBeats: 4, grid: 0.5 })).toBe(4)
     expect(stepPasteIndex(1.3, 16, store.project)).toBe(4)
+    expect(stepPasteIndex(5.3, 16, store.project)).toBe(4)
+    expect(stepPasteIndex(4, 16, store.project)).toBe(0)
+    expect(stepPasteIndex(3.9, 16, store.project)).toBe(0)
     store.project.snap = false
     expect(stepPasteIndex(1.3, 16, store.project)).toBe(5)
+    expect(stepPasteIndex(5.3, 16, store.project)).toBe(5)
   })
 
   it('copies steps without sharing cells, and duplicate lands just after the selection', () => {
@@ -254,6 +316,10 @@ describe('note and step clipboard', () => {
     expect(kick.cells[4].velocity).toBe(velocity)
     expect(kick.cells[4]).not.toBe(kick.cells[0])
     expect(kick.cells[0].velocity).toBe(0.15)
+    store.undo()
+    expect(store.pasteSteps(projectBeatSample(store.project, 5))).toBe(true)
+    expect(kick.cells[4].on).toBe(true)
+    expect(kick.cells[6].on).toBe(true)
     store.undo()
     store.selectRackSteps([
       { channelId: kick.id, index: 0 },

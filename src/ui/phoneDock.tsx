@@ -135,6 +135,42 @@ function EditActions({
   )
 }
 
+/** Paste stays available after Cut clears the selection. Copy does not. */
+function ClipboardPaste({
+  store,
+  mode,
+  playheadSample,
+}: {
+  store: ProjectStore
+  mode: 'clips' | 'notes' | 'steps'
+  playheadSample: () => number
+}) {
+  const offer = mode === 'notes' ? store.notePasteState() : mode === 'steps' ? store.stepPasteState() : store.clipPasteState()
+  if (!offer.visible) return null
+  const noun = mode === 'notes' ? 'notes' : mode === 'steps' ? 'steps' : 'clips'
+  return (
+    <Hit
+      action="paste"
+      className={offer.ready ? '' : 'is-muted'}
+      label="Paste"
+      title={offer.ready ? `Paste ${noun} at the playhead.` : offer.reason}
+      onClick={() => {
+        if (!offer.ready) {
+          store.toast(offer.reason || `Copy ${noun} first.`, 'warn')
+          return
+        }
+        const seen = rollView()
+        store.editCommand('paste', mode, playheadSample(), seen?.start ?? null, seen?.end ?? null)
+      }}
+    />
+  )
+}
+
+function noteEditorOpen() {
+  if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return false
+  return Boolean(document.querySelector('.roll, .drum-roll'))
+}
+
 function Hit({
   action,
   label,
@@ -433,6 +469,11 @@ export function PhoneDock({
         )}
         {kind === 'plugin' && !(store.stepTrackId && store.selectedRackSteps.length > 0) && (
           <>
+            {store.stepTrackId ? (
+              <ClipboardPaste store={store} mode="steps" playheadSample={playheadSample} />
+            ) : noteEditorOpen() ? (
+              <ClipboardPaste store={store} mode="notes" playheadSample={playheadSample} />
+            ) : null}
             <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
             <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
             <Hit action="metronome" label="Metronome" title="Metronome while you play and record." pressed={store.project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
@@ -451,6 +492,7 @@ export function PhoneDock({
         )}
         {kind === 'arrange' && !clip && (
           <>
+            <ClipboardPaste store={store} mode="clips" playheadSample={playheadSample} />
             <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
             <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
             <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>Snap</Hit>

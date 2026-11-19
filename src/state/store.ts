@@ -184,6 +184,7 @@ import {
   clipPasteOffer,
   notePasteBeat,
   notePasteOffer,
+  stepPasteFits,
   stepPasteIndex,
   stepPasteOffer,
   type ArrangeBoard,
@@ -3937,7 +3938,10 @@ export class ProjectStore {
 
   duplicateOpenNotes() {
     const open = this.openMidiClip()
-    if (!open || !this.selectedNoteIds.length) return false
+    if (!open || !this.selectedNoteIds.length) {
+      this.toast('Select notes first.', 'warn')
+      return false
+    }
     const held: { ids: string[] | null } = { ids: null }
     this.mutate(() => {
       held.ids = applyNoteDuplicate(open.clip, this.selectedNoteIds, this.project)
@@ -4011,22 +4015,31 @@ export class ProjectStore {
     const board = this.stepClipboard
     const beat = projectSampleBeat(this.project, Math.max(0, playheadSample))
     const index = stepPasteIndex(beat, pattern.steps, this.project)
+    if (!stepPasteFits(pattern, board, index)) {
+      this.toast('These steps do not fit on the pattern.', 'warn')
+      return false
+    }
     let landed: { channelId: string; index: number }[] = []
     this.mutate(() => {
       landed = applyStepPaste(pattern, board, index)
       if (landed.length) this.selectedRackSteps = landed
     }, 'Paste')
-    if (!landed.length) {
-      this.toast('These steps do not fit on the pattern.', 'warn')
-      return false
-    }
-    return true
+    return landed.length > 0
   }
 
   duplicateRackSteps() {
     const pattern = this.activePattern()
-    if (!pattern || !this.selectedRackSteps.length) return false
+    if (!pattern || !this.selectedRackSteps.length) {
+      this.toast('Select steps first.', 'warn')
+      return false
+    }
     const selected = this.selectedRackSteps.map((step) => ({ ...step }))
+    const board = captureSteps(pattern, selected)
+    const at = board ? Math.min(...selected.map((step) => step.index)) + board.span : 0
+    if (!board || !stepPasteFits(pattern, board, at)) {
+      this.toast(board ? 'These steps do not fit on the pattern.' : 'Select steps first.', 'warn')
+      return false
+    }
     const held: { landed: { channelId: string; index: number }[] | null } = { landed: null }
     this.mutate(() => {
       held.landed = applyStepDuplicate(pattern, selected)
@@ -4081,12 +4094,20 @@ export class ProjectStore {
   /** Copy the selected arrange clips and place the group just after the selection. */
   duplicateArrangeClips() {
     const selection = this.arrangeSelection()
+    if (!selection.audioIds.length && !selection.midiIds.length && !selection.patternIds.length) {
+      this.toast('Select a clip first.', 'warn')
+      return false
+    }
     let placed: { audioIds: string[]; midiIds: string[]; patternIds: string[] } | null = null
     this.mutate(() => {
       placed = applyArrangeDuplicate(this.project, selection)
       if (placed) this.selectPlaced(placed)
     }, 'Duplicate')
-    return !!placed
+    if (!placed) {
+      this.toast('Those tracks are gone, so there is nowhere to paste.', 'warn')
+      return false
+    }
+    return true
   }
 
   /** Copy the track, its clips, instrument, plugins, and settings onto the lane below. */

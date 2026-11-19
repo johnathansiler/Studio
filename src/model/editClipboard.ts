@@ -58,9 +58,9 @@ export interface PlacedIds {
 
 const EMPTY: PasteOffer = { visible: false, ready: false, reason: '' }
 
-/** Ctrl/Cmd+C, X, V, and D. Shift and Alt stay with other commands. */
-export function editShortcut(event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean }): EditCommand | null {
-  if (event.altKey || event.shiftKey) return null
+/** Ctrl/Cmd+C, X, V, and D. Shift, Alt, and a held repeat stay with other commands. */
+export function editShortcut(event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; repeat?: boolean }): EditCommand | null {
+  if (event.repeat || event.altKey || event.shiftKey) return null
   if (!(event.metaKey || event.ctrlKey)) return null
   const key = event.key.toLowerCase()
   if (key === 'c') return 'copy'
@@ -382,6 +382,19 @@ export function clearSteps(pattern: BeatPattern, selected: readonly { channelId:
   }
 }
 
+/** True when at least one copied step lands inside its channel. */
+export function stepPasteFits(pattern: BeatPattern, board: StepBoard, at: number): boolean {
+  const start = Math.max(0, Math.round(at))
+  for (const hit of board.hits) {
+    const channel = pattern.channels.find((row) => row.id === hit.channelId)
+    if (!channel) continue
+    const count = channel.steps || pattern.steps
+    const index = start + hit.offset
+    if (index >= 0 && index < count && index < channel.cells.length) return true
+  }
+  return false
+}
+
 export function applyStepPaste(pattern: BeatPattern, board: StepBoard, at: number): { channelId: string; index: number }[] {
   const landed: { channelId: string; index: number }[] = []
   const start = Math.max(0, Math.round(at))
@@ -411,12 +424,14 @@ export function stepPasteOffer(board: StepBoard | null, pattern: boolean): Paste
   return { visible: true, ready: true, reason: '' }
 }
 
-/** Step under the playhead, snapped. Outside the pattern, the first step. */
+/**
+ * Step under the playhead. The beat folds into the pattern the way the rack
+ * line does, then snaps, so bar 2 lands on the same step as bar 1.
+ */
 export function stepPasteIndex(playheadBeat: number, steps: number, project: SnapProject): number {
   const count = Math.max(1, steps)
-  const length = count * STEP_BEAT
-  const raw = Math.max(0, playheadBeat)
-  const inside = raw < length
-  const beat = inside ? snapEditBeat(raw, project) : 0
-  return stepIndexAt(Math.min(beat, length - 1e-6), count)
+  const length = Math.max(STEP_BEAT, count * STEP_BEAT)
+  const fold = (beat: number) => ((beat % length) + length) % length
+  const snapped = snapEditBeat(fold(Math.max(0, playheadBeat)), project)
+  return stepIndexAt(fold(snapped), count)
 }

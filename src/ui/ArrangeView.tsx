@@ -1805,7 +1805,7 @@ export function ArrangeView({
       <AnchoredMenu
         open={!!patternMenu}
         onClose={() => setPatternMenu(null)}
-        label="Pattern clip"
+        label={patternMenu?.kind === 'audio' ? 'Audio clip' : patternMenu?.kind === 'midi' ? 'MIDI clip' : 'Pattern clip'}
         anchor={patternMenu ? { left: patternMenu.x, top: patternMenu.y, width: 28, height: 28 } : null}
         prefer="down"
       >
@@ -1816,7 +1816,7 @@ export function ArrangeView({
         {patternMenu?.kind === 'pattern' && (
           <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
         )}
-        <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
+        <button type="button" title="Remove the selected clips." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
       </AnchoredMenu>
       <StemSheet store={store} />
       {store.clipSheet && selected ? (
