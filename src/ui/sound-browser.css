@@ -803,11 +803,21 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   line-height: 1.2;
   opacity: 0.72;
 }
-.my-library .sound-row {
-  height: 48px;
-  min-height: 48px;
-  max-height: 48px;
-  margin: 0 0 4px;
+/* Search, Filter, and Lock stay put while .bottom-sheet-body scrolls the rows. */
+.playlist-browser.bottom-sheet .my-library.sound-panel {
+  overflow: visible;
+}
+.playlist-browser.bottom-sheet .my-library .library-search {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background-color: #141c18;
+  padding: 4px 0 8px;
+  box-shadow: 0 12px 0 #141c18;
+}
+.playlist-browser.bottom-sheet > .bottom-sheet-body {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 .my-library .sound-copy,
 .shell.phone .my-library .sound-copy {
