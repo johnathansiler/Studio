@@ -9,6 +9,8 @@ export interface RecordStreamInput {
   peerId?: string
   takeId?: string
   channel?: number
+  /** Track input trim in dB. Applied before the samples are stored. */
+  gainDb?: number
 }
 
 export async function collectRecordInputs(opts: {
@@ -18,6 +20,8 @@ export async function collectRecordInputs(opts: {
   remoteStream: (peerId: string) => MediaStream | null
   setLocalMic: (stream: MediaStream) => void
   openMic: (audio: MediaTrackConstraints) => Promise<MediaStream>
+  /** AudioContext rate. The mic is asked for this rate so the take is not pitched. */
+  sampleRate?: number
 }): Promise<RecordStreamInput[]> {
   const routes = planAudioRoutes(opts.tracks)
   const inputs: RecordStreamInput[] = []
@@ -40,6 +44,7 @@ export async function collectRecordInputs(opts: {
           source: 'local',
           takeId: opts.takeId,
           channel: route.channel ?? undefined,
+          gainDb: opts.tracks.find((track) => track.id === route.trackId)?.inputGainDb ?? 0,
         })
       }
     }
@@ -48,7 +53,7 @@ export async function collectRecordInputs(opts: {
     const count = streamChannels(group)
     try {
       const stream = await opts.openMic({
-        ...channelConstraints(count),
+        ...channelConstraints(count, opts.sampleRate),
         deviceId: { exact: deviceId },
       })
       for (const route of group) {
@@ -58,6 +63,7 @@ export async function collectRecordInputs(opts: {
           source: 'local',
           takeId: opts.takeId,
           channel: route.channel ?? undefined,
+          gainDb: opts.tracks.find((track) => track.id === route.trackId)?.inputGainDb ?? 0,
         })
       }
     } catch {
@@ -81,16 +87,17 @@ function streamChannels(routes: AudioRoute[]): number {
 
 async function openShared(
   routes: AudioRoute[],
-  opts: { localStream: () => MediaStream | null; openMic: (audio: MediaTrackConstraints) => Promise<MediaStream> },
+  opts: { localStream: () => MediaStream | null; openMic: (audio: MediaTrackConstraints) => Promise<MediaStream>; sampleRate?: number },
 ): Promise<MediaStream | null> {
   const existing = opts.localStream()
   if (existing) return existing
   const count = streamChannels(routes)
+  const rate = opts.sampleRate
   try {
-    return await opts.openMic(channelConstraints(count))
+    return await opts.openMic(channelConstraints(count, rate))
   } catch {
     try {
-      return await opts.openMic(channelConstraints(1))
+      return await opts.openMic(channelConstraints(1, rate))
     } catch {
       return null
     }

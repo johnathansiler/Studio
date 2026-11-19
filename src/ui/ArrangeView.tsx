@@ -4,7 +4,6 @@ import { browserWidthFor, usePushPhase } from './dockPush'
 import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { subscribeFrame, wakeTicker } from '../audio/ticker'
-import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
 import { clipPlayRatio, snapClipTimeline } from '../audio/clipSnap'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
@@ -18,8 +17,6 @@ import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { editorForGesture, hasStepSequencer } from '../model/editorOpen'
-import { showsOnscreenPiano } from '../model/onscreenPiano'
-import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { watchLevel } from './levelMeter'
 import { placePlayhead, playheadContentX, playheadStripWidth } from './playhead'
 import { patternToMidiNotes } from '../model/patternMidi'
@@ -37,11 +34,13 @@ import type { SessionClient } from '../remote/session'
 import type { BrowserTab } from './PlaylistBrowser'
 import { PlaylistBrowser, preloadView } from './lazyViews'
 import { readBrowsePlace, writeBrowsePlace } from './browsePlace'
-import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
+import { AutomationOverlay, LanePicker } from './AutomationLane'
+import { showsOpenBeatMachine } from '../instruments/pads/identity'
+import { InputMonitor, RecordWave } from './InputMonitor'
+import { TrackSquare } from './TrackSquare'
+import { OpenBeatMachineButton } from './BeatMachineButton'
 import { AutoTuneLaneMark } from './AutoTuneFace'
 import { AddTrackButton } from './AddTrack'
-import { OpenBeatMachineButton } from './BeatMachineButton'
-import { KeyboardToggle } from './keyboardChrome'
 import type { TrackChoice } from '../model/addTrack'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
@@ -51,10 +50,8 @@ import { ARRANGE_SHEET_EVENT, popSheetHistory, publishArrangeSheet, rememberShee
 import { BOTTOM_COVER_EVENT, BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS } from './phoneContext'
 import { setPhoneFocus } from './phoneFocus'
 import { PluginsDrawer } from './PluginsDrawer'
-import { TRACK_ROW, copyOf } from './chrome'
 import { useFormFactor } from './form'
 import './guideSheet.css'
-import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, patternHoldOpensMenu, patternMenuPoint, patternPointerIntent, trimZone } from './touchEdit'
@@ -1308,6 +1305,7 @@ export function ArrangeView({
                 </span>
                 <TrackPresence trackId={track.id} />
               </div>
+              <div className="track-main">
               <div className="track-title-slot">
                 <TrackTitle
                   name={track.name}
@@ -1318,37 +1316,20 @@ export function ArrangeView({
                   }}
                   onRename={(next) => store.updateTrack(track.id, { name: next })}
                 />
-                {track.type === 'midi' ? (
-                  <button
-                    type="button"
-                    className="piano-open"
-                    data-piano={track.id}
-                    aria-label="Piano roll"
-                    title="Piano roll"
-                    onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
-                  >
-                    <span>Roll</span>
-                  </button>
-                ) : null}
-                {showsOpenBeatMachine(track) ? (
+              </div>
+              </div>
+              <TrackSquare
+                store={store}
+                engine={engine}
+                track={track}
+                onOpenPiano={onOpenPiano}
+                onOpenBeat={onOpenBeatMachine}
+                onOpenSteps={onOpenSteps}
+                onOpenTrack={toggleTrack}
+                beatButton={showsOpenBeatMachine(track) ? (
                   <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
-                ) : null}
-              </div>
-              <div className="track-controls" data-track-controls="">
-              <MixFlags store={store} trackId={track.id} compact />
-              {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
-                <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
-                  <span className="mini-mark">R</span>
-                  <span className="mini-word">Arm</span>
-                </TipButton>
-              )}
-              {store.selectedTrackId === track.id && showsOnscreenPiano(track) && !showsOpenBeatMachine(track) ? (
-                <KeyboardToggle store={store} engine={engine} word="Piano" />
-              ) : null}
-              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); toggleTrack(track.id) }}>
-                ⋮
-              </TipButton>
-              </div>
+                ) : undefined}
+              />
             </div>
             <LanePicker store={store} trackId={track.id} />
           </div>
@@ -1490,6 +1471,12 @@ export function ArrangeView({
               }}
             >
               <AutoTuneLaneMark plugins={track.plugins} />
+              {track.type === 'audio' && track.kind !== 'loop' && track.armed && (
+                <InputMonitor store={store} engine={engine} trackId={track.id} gainDb={track.inputGainDb ?? 0} />
+              )}
+              {track.type === 'audio' && track.kind !== 'loop' && track.armed && (
+                <RecordWave engine={engine} trackId={track.id} px={px} sampleRate={project.sampleRate} color={track.color} />
+              )}
               {dragView?.trackId === track.id && (
                 <>
                   <div className="snap-shadow" data-snap-shadow="1" style={{ left: dragView.snapLeft, width: dragView.snapWidth }} />

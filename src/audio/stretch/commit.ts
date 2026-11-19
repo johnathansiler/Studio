@@ -190,6 +190,7 @@ export function publishStretch(key: string, channels: Float32Array[], clipId = '
 }
 
 function formantPitchPending(clip: AudioClip, channels: Float32Array[], sampleRate: number) {
+  if (clip.playback === 'recorded') return false
   const stretch = clip.stretch
   if (!stretch?.formant || !(stretch.semitones || stretch.cents)) return false
   if (stretch.mode !== 'pro' && stretch.mode !== 'tonal') return false

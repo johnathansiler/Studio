@@ -11,6 +11,7 @@ import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
 import { bindPatternClips, normalizeBeats, repairArrangementIdentities } from '../../model/steps'
 import { adoptStepSequencers, createStepsPlugin } from '../../model/stepPlugin'
+import { migrateAudioKinds } from '../../model/audioKind'
 import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
 import { tuneLiveLatency } from './autoTune'
@@ -250,6 +251,7 @@ export function normalizeProject(project: Project): Project {
     limiter.enabled = false
     project.masterPlugins.push(limiter)
   }
+  migrateAudioKinds(project)
   return normalizeMix(project)
 }
 

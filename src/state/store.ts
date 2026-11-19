@@ -137,6 +137,8 @@ import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK
 import type { AudioAsset, AudioClip, AutomationWriteMode, ClipHearing, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track, TrackInstrument } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { relateTempo, tempoForSong } from '../model/clipHearing'
+import { canArmAudio, clipWantsLoopTrack } from '../model/audioKind'
+import { clampInputDb, isRecordedClip } from '../audio/recordTake'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { applyFreeze } from '../audio/bounce'
 import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead, stampMidiAtBeat } from '../model/playheadPlace'
@@ -2126,7 +2128,7 @@ export class ProjectStore {
     this.keyShiftOffer = null
     this.mutate(() => {
       const clip = this.track(input.trackId)?.clips.find((item) => item.id === input.clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const base = clip.stretch ?? defaultStretch(clip.durationSamples)
       const formantBefore = base.formant === true
       const mode = base.mode === 'tonal' ? 'tonal' : 'pro'
@@ -2156,7 +2158,7 @@ export class ProjectStore {
   revertKeyShift(trackId: string, clipId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip?.stretch) return
+      if (!clip?.stretch || isRecordedClip(clip)) return
       const formant = clip.keyShift?.formantBefore === true
       clip.stretch = { ...clip.stretch, semitones: 0, formant, markers: clip.stretch.markers }
       delete clip.keyShift
@@ -2181,6 +2183,12 @@ export class ProjectStore {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       const detected = clip?.hearing?.bpm ?? 0
       if (!clip || !(detected > 0)) return
+      if (isRecordedClip(clip)) {
+        const chosen = tempoForSong(detected, null)
+        if (chosen > 0) adaptProjectTempo(this.project, chosen)
+        this.retimeFollow()
+        return
+      }
       const chosen = tempoForSong(detected, clip.stretch?.sourceBpm ?? null)
       if (!(chosen > 0)) return
       const follow = clip.stretch?.followTempo
@@ -2201,6 +2209,13 @@ export class ProjectStore {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       if (!clip) return
+      if (isRecordedClip(clip)) {
+        const detected = clip.hearing?.bpm ?? 0
+        const chosen = tempoForSong(detected, null)
+        if (chosen > 0) adaptProjectTempo(this.project, chosen)
+        this.retimeFollow()
+        return
+      }
       const bpm = clipTempo(clip) ?? this.detectClipBpm(clip)
       if (bpm == null) return
       if (!clip.stretch) clip.stretch = { sourceSamples: clip.durationSamples, semitones: 0, cents: 0, mode: 'pro', followTempo: false, sourceBpm: bpm, markers: [] }
@@ -2215,7 +2230,7 @@ export class ProjectStore {
   conformClipTempo(trackId: string, clipId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const bpm = clipTempo(clip) ?? this.detectClipBpm(clip)
       if (bpm == null) return
       const base = clip.stretch ?? { sourceSamples: clip.durationSamples, semitones: 0, cents: 0, mode: 'pro' as const, followTempo: false, sourceBpm: bpm, markers: [] }
@@ -2310,7 +2325,15 @@ export class ProjectStore {
       this.stepTrackId = null
     }
     if (spec.choice === 'instrument' && made[0]) made[0].name = nextTrackName(this.project.tracks, 'Instrument')
-    if (spec.choice === 'audio' && made[0]) made[0].armed = true
+    if ((spec.choice === 'audio' || spec.choice === 'vocal') && made[0]) {
+      made[0].kind = 'vocal'
+      made[0].armed = true
+      made[0].inputGainDb = made[0].inputGainDb ?? 0
+    }
+    if (spec.choice === 'loop' && made[0]) {
+      made[0].kind = 'loop'
+      made[0].armed = false
+    }
     if (spec.choice === 'steps' && made[0]) {
       made[0].name = nextTrackName(this.project.tracks, 'Step Sequencer')
       if (!made[0].plugins.some((plugin) => plugin.pluginId === 'steps')) made[0].plugins.push(createPlugin('steps'))
@@ -2566,6 +2589,8 @@ export class ProjectStore {
       delete rest.mute
       delete rest.solo
       delete rest.soloSafe
+      if (rest.armed === true && track.type === 'audio' && !canArmAudio({ ...track, ...rest })) rest.armed = false
+      if (rest.inputGainDb != null) rest.inputGainDb = clampInputDb(rest.inputGainDb)
       Object.assign(track, rest)
     })
   }
@@ -3488,9 +3513,15 @@ export class ProjectStore {
   /** Host plus clip, inside the caller's undo step. Does not open a new one. */
   private commitArrangedClip(trackId: string | null, clip: AudioClip | MidiClip): { trackId: string; clipId: string } | null {
     const audio = isAudioArrangeClip(clip)
-    const host = this.hostForArrange(audio ? 'audio' : 'midi', trackId, clip.name || (audio ? 'Audio' : 'MIDI'))
+    const preferLoop = audio && clipWantsLoopTrack(clip)
+    const host = this.hostForArrange(audio ? 'audio' : 'midi', trackId, clip.name || (audio ? 'Audio' : 'MIDI'), preferLoop)
     if (!host) return null
     if (audio && host.type === 'audio') {
+      if (host.kind === 'loop' && host.loopFollow === false && clip.stretch) {
+        clip.stretch = { ...clip.stretch, followTempo: false, tempoMode: undefined }
+        clip.durationSamples = Math.max(1, clip.stretch.sourceSamples || clip.durationSamples)
+        delete clip.stretch.tempoMode
+      }
       host.clips.push(clip)
       this.selectedTrackId = host.id
       this.selectedClipId = clip.id
@@ -3510,15 +3541,28 @@ export class ProjectStore {
     return null
   }
 
-  /** Given track, then the selected track, then a new one. Audio or MIDI only. */
-  private hostForArrange(kind: 'audio' | 'midi', trackId: string | null, name: string): Track | null {
+  /** Given track, then the selected track, then a new one. Audio or MIDI only. A loop dropped on a Vocal track uses a Loop track. */
+  private hostForArrange(kind: 'audio' | 'midi', trackId: string | null, name: string, preferLoop = false): Track | null {
+    const blocksLoop = (track: Track | null | undefined) => preferLoop && track?.type === 'audio' && track.kind === 'vocal'
     const given = trackId ? this.track(trackId) : null
-    if (given?.type === kind) return given
+    if (given?.type === kind && !blocksLoop(given)) return given
+    if (preferLoop) {
+      const loop = this.project.tracks.find((track) => track.type === 'audio' && track.kind === 'loop')
+      if (loop) return loop
+    }
     if (this.selectedTrackId) {
       const selected = this.track(this.selectedTrackId)
-      if (selected?.type === kind) return selected
+      if (selected?.type === kind && !blocksLoop(selected)) return selected
     }
-    const made = tracksFor({ kind, count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false }, this.project.tracks)
+    const made = tracksFor({
+      kind,
+      count: 1,
+      instrument: 'none',
+      input: 'mic',
+      channels: preferLoop ? 2 : 1,
+      armed: false,
+      choice: preferLoop ? 'loop' : undefined,
+    }, this.project.tracks)
     const created = made[0]
     if (!created) return null
     created.name = name || (kind === 'audio' ? 'Audio' : 'MIDI')
@@ -3529,6 +3573,7 @@ export class ProjectStore {
   }
 
   private offerSmartTempo(trackId: string, clip: AudioClip) {
+    if (isRecordedClip(clip)) return
     if (clip.slotOnly || (clip.source !== 'import' && clip.source !== 'local')) return
     const bpm = clip.stretch?.sourceBpm
     if (bpm == null || Math.abs(bpm - this.project.tempo) < 0.5) return
@@ -3591,7 +3636,7 @@ export class ProjectStore {
   stretchClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const original = { ...clip }
       const edgeAt = edge === 'start' ? clip.startSample : clip.startSample + clip.durationSamples
       const delta = sample - edgeAt
@@ -3609,7 +3654,7 @@ export class ProjectStore {
   setClipStretch(trackId: string, clipId: string, patch: Partial<ClipStretch>) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const base = clip.stretch ?? defaultStretch(clip.durationSamples)
       const modePatch = patch.tempoMode ? clipTempoPatch(base, patch.tempoMode, this.project.tempo, clip.durationSamples) : null
       const next: ClipStretch = { ...base, ...modePatch, ...patch, markers: patch.markers ?? base.markers }
@@ -3633,7 +3678,7 @@ export class ProjectStore {
   setStretchRatio(trackId: string, clipId: string, percent: number) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const base = clip.stretch ?? defaultStretch(clip.durationSamples)
       const source = Math.max(1, base.sourceSamples || clip.durationSamples)
       const duration = Math.max(64, Math.round(source * (clamp(percent, 12.5, 800) / 100)))
@@ -3654,7 +3699,7 @@ export class ProjectStore {
   addWarpMarker(trackId: string, clipId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const base = clip.stretch ?? defaultStretch(clip.durationSamples)
       const source = Math.round(sourceSamplesOf(clip) / 2)
       const beats = (source / Math.max(1, base.sourceSamples)) * (clip.durationSamples / this.project.sampleRate) * (this.project.tempo / 60)
@@ -3667,7 +3712,7 @@ export class ProjectStore {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       const stretch = clip?.stretch
-      if (!clip || !stretch) return
+      if (!clip || !stretch || isRecordedClip(clip)) return
       stretch.markers = stretch.markers.map((marker) => (marker.id === markerId ? { ...marker, ...patch } : marker))
       this.commitClip(clip)
     })
@@ -3676,7 +3721,7 @@ export class ProjectStore {
   removeWarpMarker(trackId: string, clipId: string, markerId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip?.stretch) return
+      if (!clip?.stretch || isRecordedClip(clip)) return
       clip.stretch.markers = clip.stretch.markers.filter((marker) => marker.id !== markerId)
       this.commitClip(clip)
     })
@@ -3685,7 +3730,7 @@ export class ProjectStore {
   autoWarpMarkers(trackId: string, clipId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || isRecordedClip(clip)) return
       const asset = this.buffers.get(clip.bufferId)
       const channel = asset?.channels[0]
       if (!channel) return
@@ -6153,8 +6198,12 @@ export class ProjectStore {
       this.stepTrackId = null
       return ids[0] ?? null
     }
-    if (choice === 'audio') {
-      const ids = this.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', inputIndex: 1, channels: 1, armed: true, choice })
+    if (choice === 'audio' || choice === 'vocal') {
+      const ids = this.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', inputIndex: 1, channels: 1, armed: true, choice: 'vocal' })
+      return ids[0] ?? null
+    }
+    if (choice === 'loop') {
+      const ids = this.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 2, armed: false, choice: 'loop' })
       return ids[0] ?? null
     }
     if (choice === 'steps') {

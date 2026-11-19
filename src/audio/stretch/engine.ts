@@ -159,6 +159,7 @@ export function sourceSamplesOf(clip: AudioClip) {
 }
 
 export function clipNeedsStretch(clip: AudioClip, project: Project) {
+  if (clip.playback === 'recorded') return false
   const stretch = clip.stretch
   if (!stretch) return false
   if ((stretch.semitones || 0) !== 0 || (stretch.cents || 0) !== 0) return true
@@ -168,6 +169,7 @@ export function clipNeedsStretch(clip: AudioClip, project: Project) {
 }
 
 export function timelineSamples(clip: AudioClip, project: Project) {
+  if (clip.playback === 'recorded') return Math.max(1, clip.durationSamples)
   const stretch = clip.stretch
   const source = sourceSamplesOf(clip)
   const sourceBpm = stretch?.sourceBpm
@@ -213,6 +215,7 @@ export function formantEnabled(mode: StretchMode, formant?: boolean) {
 
 /** Pitch PCM rendered offline. Missing means the clip still uses the live shifter. */
 function cachedFormantPitch(clip: AudioClip, sliced: Float32Array[], sampleRate: number) {
+  if (clip.playback === 'recorded') return null
   const stretch = clip.stretch
   if (!stretch || !(stretch.semitones || stretch.cents)) return null
   if (stretch.mode !== 'pro' && stretch.mode !== 'tonal') return null

@@ -5,7 +5,8 @@ import { AnchoredMenu } from './AnchoredMenu'
 
 function ChoiceIcon({ id }: { id: TrackChoice }) {
   const common = { width: 28, height: 28, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true as const }
-  if (id === 'audio') return <svg {...common}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0012 0M12 17v3" /></svg>
+  if (id === 'vocal' || id === 'audio') return <svg {...common}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0012 0M12 17v3" /></svg>
+  if (id === 'loop') return <svg {...common}><path d="M4 8h10a3 3 0 010 6H8" /><path d="M8 4l-4 4 4 4" /><path d="M14 10h-2a3 3 0 000 6h6" /></svg>
   if (id === 'instrument') return <svg {...common}><path d="M4 8h16M4 16h16M8 8v8M12 8v8M16 8v8" /></svg>
   if (id === 'steps') return <svg {...common}><rect x="3" y="5" width="4" height="4" rx="1" /><rect x="10" y="5" width="4" height="4" rx="1" /><rect x="17" y="5" width="4" height="4" rx="1" /><rect x="3" y="15" width="4" height="4" rx="1" /><rect x="10" y="15" width="4" height="4" rx="1" /></svg>
   return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>

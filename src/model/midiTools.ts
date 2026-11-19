@@ -584,7 +584,7 @@ export function midiDestinations(tracks: Track[], portId: string, selectedId: st
 export function planAudioRoutes(tracks: Track[]): AudioRoute[] {
   const routes: AudioRoute[] = []
   for (const track of tracks) {
-    if (track.type !== 'audio' || !track.armed) continue
+    if (track.type !== 'audio' || track.kind === 'loop' || !track.armed) continue
     const parsed = parseAudioInput(track.input)
     if (!parsed) continue
     routes.push({ trackId: track.id, input: track.input, ...parsed })

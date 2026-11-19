@@ -1,3 +1,4 @@
+import { isRecordedClip } from '../audio/recordTake'
 import type { ProjectStore } from '../state/store'
 import {
   clipIsRecordedTake,
@@ -82,7 +83,7 @@ async function planLoopKeyShift(
   const track = store.track(trackId)
   const clip = track?.clips.find((item) => item.id === clipId)
   if (!track || !clip || !trackAcceptsLoopKey(track)) return null
-  if (clipIsRecordedTake(clip.source)) return null
+  if (isRecordedClip(clip) || clipIsRecordedTake(clip.source)) return null
   if (hint.drum || clip.stretch?.mode === 'beats' || nameIsDrum(clip.name, hint.tags)) return null
   const project = projectMusicalKey(store.scaleState())
   if (!project) return null

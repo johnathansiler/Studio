@@ -70,8 +70,9 @@ function VolumeRange({ store, engine, trackId, volume, label, title }: { store: 
   )
 }
 
-export function trackCanArm(track: { type: string }, userAgent = '') {
-  return track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(userAgent))
+export function trackCanArm(track: { type: string; kind?: string }, userAgent = '') {
+  if (track.type === 'audio') return track.kind !== 'loop'
+  return track.type === 'midi' && hardwareMidiAllowed(userAgent)
 }
 
 export interface TrackTile {

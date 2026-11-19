@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { chromium } from 'playwright'
 import { detectKey } from '../analysis/clipKey'
 import { handleClipDetect } from '../analysis/clipWorker'
+import { recordedClipFields } from '../audio/recordTake'
 import { renderClipChannels } from '../audio/stretch/engine'
 import { formantPitchChannels, formantPitchShift, pitchFactorOf } from '../audio/stretch/formantPitch'
 import { resampleSinc } from '../audio/quality/resample'
@@ -522,6 +523,64 @@ describe('drop prompt', () => {
     expect(dock).toContain('data-key-revert')
     writeFormantPitch(key, formantPitchChannels([audio], rate, { semitones: 3, formant: true }))
   }, 120000)
+
+  it('offers the shift on a loop or an untyped track, and never pitches a recorded take', async () => {
+    const rate = 48000
+    const store = new ProjectStore(createEmptyProject(rate))
+    store.setScale({ root: 0, scale: 'aeolian' })
+    const music = store.project.tracks.find((item) => item.name === 'Music')!
+    const vocal = store.project.tracks.find((item) => item.name === 'Vocal')!
+    expect(trackAcceptsLoopKey(music)).toBe(true)
+    expect(trackAcceptsLoopKey({ type: 'audio' })).toBe(true)
+    expect(trackAcceptsLoopKey(vocal)).toBe(false)
+    const audio = new Float32Array(rate)
+    for (let i = 0; i < audio.length; i++) audio[i] = Math.sin((2 * Math.PI * 440 * i) / rate) * 0.4
+    const placed = placeLoop(store, audio, rate, 'Key loop')
+    await offerLoopKeyShift(store, placed.trackId, placed.clipId, { loop: true, catalogKey: 'A minor' })
+    expect(store.keyShiftOffer?.semitones).toBe(3)
+    store.dismissKeyShiftOffer()
+    music.kind = undefined
+    await offerLoopKeyShift(store, placed.trackId, placed.clipId, { loop: true, catalogKey: 'A minor' })
+    expect(store.keyShiftOffer?.semitones).toBe(3)
+    store.dismissKeyShiftOffer()
+    music.kind = 'loop'
+    store.addAsset({ id: 'take-buf', name: 'Sung', sampleRate: rate, channels: [audio] })
+    store.addAudioClip(music.id, {
+      id: 'sung',
+      name: 'Sung',
+      bufferId: 'take-buf',
+      startSample: 0,
+      offsetSamples: 0,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'guide',
+      ...recordedClipFields(audio.length),
+    })
+    await offerLoopKeyShift(store, music.id, 'sung', { loop: true, catalogKey: 'A minor' })
+    expect(store.keyShiftOffer).toBeNull()
+    store.applyKeyShift({
+      trackId: music.id,
+      clipId: 'sung',
+      semitones: 5,
+      from: 'A minor',
+      to: 'C minor',
+      tonicOnly: false,
+      always: true,
+    })
+    const take = store.track(music.id)!.clips.find((item) => item.id === 'sung')!
+    expect(take.playback).toBe('recorded')
+    expect(take.stretch?.semitones).toBe(0)
+    expect(take.keyShift).toBeUndefined()
+    expect(store.project.keyShift).not.toBe('always')
+    const forced = {
+      ...take,
+      stretch: { ...take.stretch!, semitones: 5, cents: 0, formant: true, mode: 'pro' as const },
+    }
+    const heard = renderClipChannels([audio], forced, store.project, 'hq')[0]
+    expect(heard.length).toBe(audio.length)
+    expect(heard[1000]).toBeCloseTo(audio[1000], 5)
+  })
 
   it('keeps the shift through paste and tempo follow, and the always choice can be turned off', async () => {
     const rate = 48000

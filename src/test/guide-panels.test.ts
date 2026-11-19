@@ -11,12 +11,13 @@ import { ToolBar } from '../ui/ToolBar'
 describe('add track panel', () => {
   const base = { kind: 'audio' as const, count: 1, instrument: 'synth' as const, input: 'mic' as const, inputIndex: 1, channels: 1 as const, armed: false }
 
-  it('offers four one-tap choices and a large Add Track button', () => {
+  it('offers Vocal and Loop beside the instrument choices', () => {
     expect(TRACK_CHOICES.map((item) => `${item.name} (${item.detail})`)).toEqual([
       'Instrument (Play keys)',
       'Step Sequencer (Program beats)',
       'Beat Machine (Pads)',
-      'Audio / Vocal (Record mic)',
+      'Vocal (Record mic)',
+      'Loop (Follow tempo)',
     ])
     const store = new ProjectStore(createEmptyProject())
     const html = renderToStaticMarkup(createElement(AddTrackButton, { store, prominent: true }))

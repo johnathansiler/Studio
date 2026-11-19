@@ -37,7 +37,7 @@ async function layout(page: Page) {
     const rows = [...document.querySelectorAll<HTMLElement>('.head')].map((head) => {
       const headBox = head.getBoundingClientRect()
       const controls = head.querySelector<HTMLElement>('[data-track-controls]')
-      const buttons = [...head.querySelectorAll<HTMLElement>('.track-controls button')].map((button) => {
+      const buttons = [...head.querySelectorAll<HTMLElement>('[data-track-controls] button')].map((button) => {
         const box = button.getBoundingClientRect()
         return {
           name: button.getAttribute('aria-label') || '',
@@ -49,7 +49,7 @@ async function layout(page: Page) {
       })
       const beat = head.querySelector<HTMLElement>('.beat-open')
       const beatBox = beat?.getBoundingClientRect()
-      const mute = head.querySelector<HTMLElement>('.track-controls .mini')
+      const mute = head.querySelector<HTMLElement>('[data-track-controls] button')
       return {
         name: head.getAttribute('data-track-name') || '',
         nameWidth: round(head.getBoundingClientRect().width),
@@ -124,7 +124,7 @@ describe('beat machine arrange header', () => {
           expect(beat!.controls, `${viewport.name} controls ${beat!.controls} vs ${widest}`).toBeLessThanOrEqual(widest + 48)
           expect(beat!.head, `${viewport.name} head`).toBeLessThanOrEqual(widestHead + 48)
           for (const row of closed.rows) {
-            expect(row.rows, `${viewport.name} ${row.name}`).toBe(1)
+            expect(row.rows, `${viewport.name} ${row.name}`).toBe(2)
             expect(row.clipped, `${viewport.name} ${row.name}`).toBe(false)
           }
           expect(closed.add?.text, viewport.name).toContain('Add Track')
@@ -157,7 +157,7 @@ describe('beat machine arrange header', () => {
           expect(dockBeat.controls, `${viewport.name} browser`).toBeLessThanOrEqual(dockWidest + 48)
           expect(dockBeat.head, `${viewport.name} browser head`).toBeLessThanOrEqual(Math.max(...docked.rows.filter((row) => row.name !== 'Beat Machine 1').map((row) => row.head)) + 48)
           for (const row of docked.rows) {
-            expect(row.rows, `${viewport.name} browser ${row.name}`).toBe(1)
+            expect(row.rows, `${viewport.name} browser ${row.name}`).toBe(2)
             expect(row.clipped, `${viewport.name} browser ${row.name}`).toBe(false)
           }
           if (viewport.name === 'phone') {

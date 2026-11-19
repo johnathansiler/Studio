@@ -277,6 +277,11 @@ export interface AudioClip {
   /** Sample-editor edits. Missing means the clip is a plain window into the buffer. */
   wave?: WaveEdit
   source: ClipSource
+  /**
+   * Recorded take. Playback is the captured samples: no stretch, no tempo
+   * follow, no warp, playbackRate 1. Loops leave this unset.
+   */
+  playback?: 'recorded'
   peerId?: string
   takeId?: string
   alignmentMs?: number
@@ -517,6 +522,16 @@ export interface Track {
   id: string
   name: string
   type: TrackType
+  /**
+   * Audio tracks only. Vocal records dry and can be armed.
+   * Loop follows the song tempo and is never armed.
+   * Another pass checks this before offering a key-shift.
+   */
+  kind?: 'vocal' | 'loop'
+  /** Input trim in dB, applied before the recorded samples. 0 is unity. */
+  inputGainDb?: number
+  /** Loop tracks. False keeps dropped audio at its file tempo. Missing means follow. */
+  loopFollow?: boolean
   color: string
   volume: number
   pan: number
@@ -709,8 +724,8 @@ export function makeTrack(partial: Partial<Track> & Pick<Track, 'name' | 'type'>
 }
 
 export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'): Project {
-  const vocal = makeTrack({ name: 'Vocal', type: 'audio', color: TRACK_COLORS[0], armed: false, monitor: false })
-  const music = makeTrack({ name: 'Music', type: 'audio', color: TRACK_COLORS[1], input: 'none' })
+  const vocal = makeTrack({ name: 'Vocal', type: 'audio', kind: 'vocal', inputGainDb: 0, color: TRACK_COLORS[0], armed: false, monitor: false })
+  const music = makeTrack({ name: 'Music', type: 'audio', kind: 'loop', color: TRACK_COLORS[1], input: 'none' })
   const keys = makeTrack({ name: 'Keys', type: 'midi', color: TRACK_COLORS[2], input: 'none' })
   const bar = Math.round(sampleRate * 2) // 1 bar at 120bpm is 2s; tempo applied by caller via loop length
   return {

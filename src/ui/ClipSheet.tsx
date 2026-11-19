@@ -1,3 +1,4 @@
+import { isRecordedClip } from '../audio/recordTake'
 import { tempoFollowsProject } from '../model/clipTempo'
 import type { AudioClip, StretchMode } from '../model/types'
 import { sourceSamplesOf } from '../audio/stretch/engine'
@@ -21,6 +22,30 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
   const stretch = shown.stretch
   const source = sourceSamplesOf(shown)
   const percent = Math.round((shown.durationSamples / Math.max(1, source)) * 1000) / 10
+  const recorded = isRecordedClip(shown)
+  if (recorded) {
+    return (
+      <div className="clip-sheet fit-sheet" data-screen-overlay="" role="dialog" aria-label="Clip">
+        <header>
+          <strong>{shown.name}</strong>
+          <button type="button" className="text-btn" title="Play as instrument. Pitch this recording across the keyboard." onClick={() => {
+            const asset = store.buffers.get(shown.bufferId)
+            const midi = store.project.tracks.find((item) => item.id === store.selectedTrackId && item.type === 'midi')
+              || store.project.tracks.find((item) => item.type === 'midi')
+            if (!asset || !midi) {
+              store.toast('Add an instrument track to play this as keys.', 'warn')
+              return
+            }
+            store.loadSamplerSound(midi.id, { ...asset, name: shown.name })
+            onClose()
+          }}>As keys</button>
+          <button type="button" className="text-btn" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onClick={() => store.openSpectral(trackId, shown.id)}>Repair</button>
+          <button type="button" className="text-btn overlay-close" onClick={onClose}>Close</button>
+        </header>
+        <p>This take plays exactly as sung. Tempo, warp, and pitch stay off.</p>
+      </div>
+    )
+  }
   return (
     <div className="clip-sheet fit-sheet" data-screen-overlay="" role="dialog" aria-label="Clip">
       <header>
