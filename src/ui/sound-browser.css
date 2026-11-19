@@ -780,23 +780,66 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   line-height: 14px;
   text-align: center;
 }
-.my-library .library-active.btn-tray {
+.my-library .library-active-bar {
   display: flex;
-  flex-flow: row nowrap;
-  align-items: stretch;
-  justify-content: flex-start;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   max-width: 100%;
-  min-height: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  min-width: 0;
 }
-.my-library .library-active > button {
+.my-library .library-active-chip,
+.my-library .library-clear-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 40px;
   min-height: 40px;
   max-height: 40px;
-  padding: 0 8px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-family: var(--font, Outfit, sans-serif);
   font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.my-library .library-active-chip {
+  background: color-mix(in srgb, var(--accent, #73c48f) 18%, #121a16);
+  border: 1px solid color-mix(in srgb, var(--accent, #73c48f) 55%, transparent);
+  color: var(--text, #f2f6f0);
+}
+.my-library .library-clear-all {
+  background: transparent;
+  border: 1px solid var(--line, #2a312b);
+  color: var(--muted, #8d9a90);
+}
+.my-library .sound-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.my-library .sound-title strong {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.my-library .sound-key-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--accent, #8ee0ae) 22%, transparent);
+  color: var(--accent, #8ee0ae);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 16px;
 }
 .my-library .library-count {
   font-size: 11px;
@@ -814,6 +857,12 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   background-color: #141c18;
   padding: 4px 0 8px;
   box-shadow: 0 12px 0 #141c18;
+}
+.playlist-browser.bottom-sheet .my-library .library-filter-sheet {
+  position: sticky;
+  top: 52px;
+  z-index: 5;
+  background-color: #141c18;
 }
 .playlist-browser.bottom-sheet > .bottom-sheet-body {
   padding-bottom: calc(96px + env(safe-area-inset-bottom));
@@ -840,54 +889,124 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   height: 40px;
 }
 
-/* Filter sheet: one recessed tray, equal cells, columns that line up. */
-.anchored-menu.library-filter-sheet,
-.anchored-menu.library-filter-sheet[data-menu-size='dock'] {
+/* Filter lives in the browser sheet, above the dock. A pick applies and closes. */
+.my-library .library-filter-sheet {
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
   align-items: stretch;
   justify-content: flex-start;
-  width: var(--library-filter-width, min(420px, calc(100vw - 16px)));
+  gap: 8px;
+  width: 100%;
   min-width: 0;
-  max-width: min(var(--library-filter-width, 420px), calc(100vw - 16px));
+  max-width: 100%;
   box-sizing: border-box;
+  padding: 2px 0 4px;
+  overflow-x: clip;
+}
+.library-filter-chips {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+.my-library .library-filter-sheet .library-filter-chips > button,
+.my-library .library-filter-sheet .library-filter-list > button,
+.my-library .library-filter-sheet .library-key-actions > button,
+.my-library .library-filter-sheet .library-key-grid > button {
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  font-family: var(--font, Outfit, sans-serif);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.15;
+}
+.my-library .library-filter-sheet .library-filter-chips > button {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.library-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-height: min(42vh, 280px);
   overflow-x: hidden;
   overflow-y: auto;
 }
-.anchored-menu.library-filter-sheet[data-side='down'],
-.anchored-menu.library-filter-sheet[data-side='up'] {
-  border-radius: var(--tray-radius, 18px);
+.my-library .library-filter-sheet .library-filter-list > button {
+  width: 100%;
+  padding: 0 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.library-filter-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--tray-gap, 5px);
+.library-key-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   width: 100%;
   min-width: 0;
 }
-.library-filter-grid > .library-quick {
-  grid-column: span 2;
+.my-library .library-filter-sheet .filter-label {
+  margin: 2px 2px 0;
 }
-.anchored-menu.library-filter-sheet .library-filter-grid > button,
-.anchored-menu.library-filter-sheet .library-filter-grid > input {
+.library-key-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.9fr) minmax(0, 1fr);
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.my-library .library-filter-sheet .library-key-actions > button {
+  min-width: 0;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.library-key-grid {
+  display: flex;
+  flex-flow: row nowrap;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+.my-library .library-filter-sheet .library-key-grid > button {
+  flex: 1 0 44px;
+  width: auto;
+  min-width: 44px;
+  padding: 0 2px;
+  font-size: 12px;
+}
+.library-bpm-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.library-bpm-range input,
+.my-library .library-filter-sheet .library-filter-bpm {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  max-width: none;
-  height: auto;
-  min-height: 40px;
-  max-height: none;
-  margin: 0;
-  padding: 4px;
+  min-height: 44px;
+  text-align: center;
   font-family: var(--font, Outfit, sans-serif);
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.15;
-  letter-spacing: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  overflow: hidden;
 }
 .my-library .library-lock-btn,
 .my-library .library-clear-recent {

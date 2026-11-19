@@ -1,3 +1,4 @@
+import { keyFits, parseMusicalKey, resolveEntryKey, type MusicalKey } from './musicalKey'
 import type { LibraryEntry, LibraryFacets, LibraryQuery } from './types'
 
 export interface LibraryIndex {
@@ -166,12 +167,12 @@ function intersect(a: Uint32Array, b: Uint32Array) {
   return Uint32Array.from(out)
 }
 
-export function entryMatchesFilters(entry: LibraryEntry, query: LibraryQuery) {
+export function entryMatchesFilters(entry: LibraryEntry, query: LibraryQuery, heard?: ReadonlyMap<string, MusicalKey> | null) {
   if (query.type && entry.type !== query.type) return false
   if (query.category && entry.category !== query.category) return false
   if (query.instrument && entry.instrument !== query.instrument) return false
   if (query.genre && !entry.genre.includes(query.genre)) return false
-  if (query.musicalKey && entry.musicalKey !== query.musicalKey) return false
+  if (query.musicalKey && !keyQueryHits(entry, query, heard)) return false
   if (query.mood && !entry.mood.includes(query.mood)) return false
   if (query.pack && entry.pack !== query.pack) return false
   if (query.bpmMin == null && query.bpmMax == null) return true
@@ -179,7 +180,13 @@ export function entryMatchesFilters(entry: LibraryEntry, query: LibraryQuery) {
   return tempos.some((bpm) => (query.bpmMin == null || bpm >= query.bpmMin) && (query.bpmMax == null || bpm <= query.bpmMax))
 }
 
-export function searchLibrary(index: LibraryIndex, query: LibraryQuery): LibraryHits {
+function keyQueryHits(entry: LibraryEntry, query: LibraryQuery, heard?: ReadonlyMap<string, MusicalKey> | null) {
+  const wanted = parseMusicalKey(query.musicalKey)
+  if (!wanted) return entry.musicalKey === query.musicalKey
+  return keyFits(resolveEntryKey(entry, heard?.get(entry.key) ?? null), wanted, query.keyCompatible === true)
+}
+
+export function searchLibrary(index: LibraryIndex, query: LibraryQuery, heard?: ReadonlyMap<string, MusicalKey> | null): LibraryHits {
   const tokens = queryTokens(query.text || '')
   let ids: Uint32Array | null = null
   if (tokens.length) {
@@ -199,7 +206,7 @@ export function searchLibrary(index: LibraryIndex, query: LibraryQuery): Library
   const kept: number[] = []
   for (let n = 0; n < count; n++) {
     const id = source ? source[n] : n
-    if (entryMatchesFilters(index.entries[id], query)) kept.push(id)
+    if (entryMatchesFilters(index.entries[id], query, heard)) kept.push(id)
   }
   return { total: kept.length, ids: Uint32Array.from(kept) }
 }
