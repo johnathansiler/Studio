@@ -1,5 +1,6 @@
 import { monoMix } from '../analysis/mix'
 import { isRecordedClip } from '../audio/recordTake'
+import { keyFromFilename, keyFromText } from '../library/musicalKey'
 import type { ProjectStore } from '../state/store'
 import {
   clipIsRecordedTake,
@@ -36,6 +37,9 @@ export async function offerLoopKeyShift(
 ) {
   if (hint.loop === false) return
   const generation = ++offerGeneration
+  const clip = store.track(trackId)?.clips.find((item) => item.id === clipId)
+  const tagged = loopKeyLabel(hint, clip?.name)
+  if (tagged) store.rememberLoopKey(trackId, clipId, tagged)
   const plan = await planLoopKeyShift(store, trackId, clipId, hint)
   if (generation !== offerGeneration || !plan) return
   const request = {
@@ -52,6 +56,31 @@ export async function offerLoopKeyShift(
     return
   }
   store.presentKeyShiftOffer({ ...request, line: keyShiftPrompt(plan.fit) })
+}
+
+/** Shift offer for a selected clip that was left in its own key. Null when it already matches. */
+export function clipShiftPlan(store: ProjectStore, trackId: string, clipId: string): KeyShiftRequest | null {
+  const track = store.track(trackId)
+  const clip = track?.clips.find((item) => item.id === clipId)
+  if (!track || !clip || !trackAcceptsLoopKey(track)) return null
+  if (isRecordedClip(clip) || clipIsRecordedTake(clip.source)) return null
+  if (clip.stretch?.mode === 'beats' || nameIsDrum(clip.name)) return null
+  if ((clip.stretch?.semitones ?? 0) !== 0 && clip.keyShift) return null
+  const project = projectMusicalKey(store.scaleState())
+  if (!project) return null
+  const label = clip.loopKey || (clip.hearing?.clearKey ? clip.hearing.key : '') || loopKeyLabel({ tags: [clip.name] }, clip.name)
+  const loop = label ? parseMusicalKey(label) : null
+  if (!loop) return null
+  const fit = fitToProject(loop, project)
+  if (fit.semitones === 0) return null
+  return {
+    trackId,
+    clipId,
+    semitones: fit.semitones,
+    from: fit.from,
+    to: fit.to,
+    tonicOnly: fit.modesDiffer,
+  }
 }
 
 export async function runKeyShift(store: ProjectStore, request: KeyShiftRequest, always: boolean) {
@@ -92,7 +121,8 @@ async function planLoopKeyShift(
   if (hint.drum || clip.stretch?.mode === 'beats' || nameIsDrum(clip.name, hint.tags)) return null
   const project = projectMusicalKey(store.scaleState())
   if (!project) return null
-  let loop = parseMusicalKey(hint.catalogKey)
+  const tagged = clip.loopKey || loopKeyLabel(hint, clip.name)
+  let loop = tagged ? parseMusicalKey(tagged) : null
   if (!loop) {
     const asset = store.buffers.get(clip.bufferId)
     if (!asset?.channels.length) return null
@@ -126,4 +156,23 @@ async function planLoopKeyShift(
     tonicOnly: fit.modesDiffer,
     fit,
   }
+}
+
+/** Catalog text, a filename, or a tag. A bare note name is not a key. */
+export function loopKeyLabel(
+  hint: { catalogKey?: string; tags?: string[] },
+  name?: string,
+): string | null {
+  const candidates = [hint.catalogKey, ...(hint.tags ?? []), name]
+  for (const candidate of candidates) {
+    const text = candidate?.trim()
+    if (!text) continue
+    const direct = parseMusicalKey(text)
+    if (direct && /minor|major|maj|min|m/i.test(text.replace(/[_./-]+/g, ' '))) return direct.label
+    const fromFile = keyFromFilename(text)
+    if (fromFile && parseMusicalKey(fromFile.label)) return fromFile.label
+    const fromText = keyFromText(text)
+    if (fromText && parseMusicalKey(fromText.label)) return fromText.label
+  }
+  return null
 }

@@ -627,6 +627,20 @@
 }
 
 /* One transport row. The tray fills the transport area and the controls share it. */
+.song-key-readout,
+.library-song-key {
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #73c48f) 16%, #121a16);
+  color: var(--text, #f2f6f0);
+  font: 700 13px/1.3 var(--font, Outfit, sans-serif);
+  letter-spacing: 0.01em;
+}
+
 .shell .transport.simple {
   display: flex;
   flex-wrap: wrap;

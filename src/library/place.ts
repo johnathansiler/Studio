@@ -6,6 +6,8 @@ import { offerLoopKeyShift } from '../ui/offerKeyShift'
 import type { SoundEntry } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
 import { fetchLibraryBytes } from './audio'
+import { isLoopEntry } from './contentType'
+import { resolveEntryKey } from './musicalKey'
 import { midiName, summarizeInstrument, type LibraryInstrument } from './group'
 import { fetchLibraryInstrument } from './instrumentsApi'
 import { programFromLibraryInstrument } from './instrumentProgram'
@@ -66,7 +68,7 @@ export async function readLibraryAsset(entry: LibraryEntry, decode?: (bytes: Arr
 }
 
 function asSound(entry: LibraryEntry, sampleRate: number): SoundEntry {
-  const type = entry.type === 'loop' ? 'loop' : entry.type === 'instrument' ? 'instrument' : 'one-shot'
+  const type = isLoopEntry(entry) ? 'loop' : entry.type === 'instrument' ? 'instrument' : 'one-shot'
   return {
     id: libraryBufferId(entry.key),
     path: entry.key,
@@ -107,7 +109,7 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
     rememberLibrarySound(entry)
     return `${entry.name} is in the ${slot.kind}.`
   }
-  if (entry.type === 'loop') {
+  if (isLoopEntry(entry)) {
     const placed = placeSound({
       entry: asSound(entry, asset.sampleRate),
       channels: asset.channels,
@@ -123,9 +125,10 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
     const landed = store.placeClipAtPlayhead(host, placed.clip, startSample)
     if (!landed) throw new Error('Could not add that sound onto the track.')
     rememberLibrarySound(entry)
+    const resolved = resolveEntryKey(entry)
     void offerLoopKeyShift(store, landed.trackId, landed.clipId, {
-      catalogKey: entry.musicalKey,
-      drum: entry.type !== 'loop' || /drum|perc/i.test(`${entry.category} ${entry.tags.join(' ')}`),
+      catalogKey: resolved?.label || entry.musicalKey || entry.key,
+      drum: /drum|perc/i.test(`${entry.category} ${entry.tags.join(' ')} ${entry.name}`),
       loop: true,
       tags: entry.tags,
     })

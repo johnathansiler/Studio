@@ -827,6 +827,10 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   width: auto;
   min-width: 0;
 }
+.my-library .sound-meta {
+  width: 100%;
+  max-width: 100%;
+}
 .my-library .sound-key-chip {
   flex: none;
   display: inline-flex;

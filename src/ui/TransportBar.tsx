@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, TEMPO_MIN, TEMPO_MAX, type TapMemory, type TapSource } from '../model/tap'
@@ -7,6 +7,7 @@ import { dragNumeric } from '../model/dragNumeric'
 import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { quartersPerBar } from '../model/time'
+import { songKeyChip } from '../model/keyFit'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -158,6 +159,11 @@ export function TransportBar({
   const lastPointer = useRef('')
   const tempoWrap = useRef<HTMLDivElement>(null)
   const tempo = live ?? project.tempo
+  const songKey = useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => songKeyChip(store.scaleState()) ?? '',
+    () => songKeyChip(store.scaleState()) ?? '',
+  )
   const tempoCopy = copyOf(TRANSPORT_COPY, 'tempo')
 
   useEffect(
@@ -656,6 +662,7 @@ export function TransportBar({
           ) : null}
         </div>
       </ButtonTray>
+      {songKey ? <p className="song-key-readout" data-song-key={songKey}>Song key: {songKey}</p> : null}
       {extrasHost ? createPortal(extras, extrasHost) : extras}
       {contextualDelete}
       {trackDelete ? createPortal(

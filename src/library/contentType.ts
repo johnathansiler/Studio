@@ -31,6 +31,7 @@ export function isUploadEntry(entry: Pick<LibraryEntry, 'key' | 'pack' | 'licens
 
 export function isDrumKitEntry(entry: Pick<LibraryEntry, 'type' | 'category' | 'instrument' | 'pack' | 'tags' | 'name'>): boolean {
   const type = clean(entry.type)
+  if (LOOP_TYPES.has(type) || ONE_SHOT_TYPES.has(type) || SFX_TYPES.has(type) || type === 'multisample note' || type === 'instrument') return false
   const category = clean(entry.category)
   if (type === 'drum-kit' || type === 'drum kit' || type === 'kit') return true
   if (category === 'drum-kit' || category === 'drum kit' || category === 'kit') return true
@@ -52,7 +53,10 @@ export function isLoopEntry(entry: LibraryEntry): boolean {
   const type = clean(entry.type)
   if (LOOP_TYPES.has(type)) return true
   if (ONE_SHOT_TYPES.has(type) || SFX_TYPES.has(type) || type === 'multisample note' || type === 'instrument') return false
-  if (isDrumKitEntry(entry)) return false
+  return loopSignal(entry)
+}
+
+function loopSignal(entry: Pick<LibraryEntry, 'key' | 'category' | 'tags'>): boolean {
   const key = entry.key.replace(/\\/g, '/')
   if (/(^|\/)loops?\//i.test(key)) return true
   const category = clean(entry.category)

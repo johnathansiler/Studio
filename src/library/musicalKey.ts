@@ -204,7 +204,7 @@ export function keyFits(have: Pick<MusicalKey, 'root' | 'mode'> | null, wanted: 
   return compatibleKeys(wanted).some((item) => item.root === have.root && item.mode === have.mode)
 }
 
-/** Project key from the song scale. Detect's "Set project key" writes ionian or aeolian. */
+/** Project key from the song scale. Detect's "Set song key" writes ionian or aeolian. */
 export function projectKeyFromScale(scale: { root?: number; scale?: string } | null | undefined): MusicalKey {
   const spec = scaleById(scale?.scale)
   const intervals = spec.intervals as readonly number[]

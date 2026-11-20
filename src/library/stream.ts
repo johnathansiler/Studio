@@ -194,6 +194,10 @@ export async function previewLibrarySound(options: {
     options.onStart?.()
   } catch (error) {
     if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
+    if (started) {
+      if (streamDecodeMiss(error)) return
+      throw error
+    }
     if (!options.decode || !streamDecodeMiss(error)) throw error
     const impl = options.fetchImpl
     const bytes = await fetchLibraryBytes(options.entry.key, impl ? ((input, init) => impl(String(input), init)) : fetch)

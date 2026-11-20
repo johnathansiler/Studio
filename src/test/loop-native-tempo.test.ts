@@ -256,7 +256,7 @@ describe('808 loop preview and track playback', () => {
     expect(store.smartTempo?.bpm).toBe(105)
     const offer = renderToStaticMarkup(createElement(SmartTempoBar, { store }))
     expect(offer).toContain('already following the song')
-    expect(offer).toContain('Use for song')
+    expect(offer).toContain('Set song tempo to 105')
     expect(offer).not.toContain('Fit to song')
     expect(offer).not.toContain('Stretch this clip')
     const sheet = renderToStaticMarkup(createElement(ClipSheet, {
@@ -265,7 +265,7 @@ describe('808 loop preview and track playback', () => {
       clip,
       onClose: () => undefined,
     }))
-    expect(sheet).toContain('Use for song')
+    expect(sheet).toContain('Set song tempo to 105')
     expect(sheet).not.toContain('Fit to song')
     expect(sheet).not.toContain('Stretch this clip')
     expect(sheet).not.toContain('data-tempo-mode')

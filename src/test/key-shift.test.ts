@@ -17,6 +17,7 @@ import {
   keyShiftReadout,
   parseMusicalKey,
   projectMusicalKey,
+  songKeyChip,
   trackAcceptsLoopKey,
   type MusicalKey,
 } from '../model/keyFit'
@@ -25,7 +26,7 @@ import { encodeWav } from '../model/wav'
 import { ProjectStore } from '../state/store'
 import { ClipTempoControl } from '../ui/ClipTempoControl'
 import { KeyShiftPrompt } from '../ui/KeyShiftPrompt'
-import { offerLoopKeyShift, runKeyShift } from '../ui/offerKeyShift'
+import { clipShiftPlan, offerLoopKeyShift, runKeyShift } from '../ui/offerKeyShift'
 
 function midiHz(note: number) {
   return 440 * 2 ** ((note - 69) / 12)
@@ -149,11 +150,11 @@ describe('project key fit', () => {
     const intoMinor = fitToProject(aMinor, cMinor)
     expect(intoMinor.semitones).toBe(3)
     expect(intoMinor.modesDiffer).toBe(false)
-    expect(keyShiftPrompt(intoMinor)).toBe('Loop is A minor — shift to project key C minor? (+3 st)')
+    expect(keyShiftPrompt(intoMinor)).toBe('Change this loop to the song key (C minor)?')
     const tonic = fitToProject(aMinor, key(2, false))
     expect(tonic.semitones).toBe(5)
     expect(tonic.modesDiffer).toBe(true)
-    expect(keyShiftPrompt(tonic)).toContain('(+5 st, tonic)')
+    expect(keyShiftPrompt(tonic)).toBe('Change this loop to the song key (D major)?')
     expect(fitToProject(key(6, false), cMajor).semitones).toBe(6)
     expect(fitToProject(key(7, false), cMajor).semitones).toBe(5)
     expect(fitToProject(key(1, false), cMajor).semitones).toBe(-1)
@@ -426,7 +427,7 @@ describe('drop prompt', () => {
 
     store.setScale({ root: 0, scale: 'aeolian' })
     await offerLoopKeyShift(store, placed.trackId, placed.clipId, { loop: true, catalogKey: 'A minor' })
-    expect(store.keyShiftOffer?.line).toBe('Loop is A minor — shift to project key C minor? (+3 st)')
+    expect(store.keyShiftOffer?.line).toBe('Change this loop to the song key (C minor)?')
     expect(store.keyShiftOffer?.semitones).toBe(3)
 
     const vocal = store.project.tracks.find((item) => item.name === 'Vocal')!
@@ -511,13 +512,14 @@ describe('drop prompt', () => {
       from: 'A minor',
       to: 'C minor',
       tonicOnly: false,
-      line: 'Loop is A minor — shift to project key C minor? (+3 st)',
+      line: 'Change this loop to the song key (C minor)?',
     })
     const prompt = renderToStaticMarkup(createElement(KeyShiftPrompt, { store }))
     expect(prompt).toContain('data-key-shift-prompt')
-    expect(prompt).toContain('Loop is A minor — shift to project key C minor? (+3 st)')
-    expect(prompt).toContain('Always do this')
-    expect(prompt).toContain('Keep original')
+    expect(prompt).toContain('Change this loop to the song key (C minor)?')
+    expect(prompt).toContain('Always for new loops')
+    expect(prompt).toContain('Yes')
+    expect(prompt).toContain('No')
     const dock = renderToStaticMarkup(createElement(ClipTempoControl, { store, trackId: placed.trackId, clipId: placed.clipId }))
     expect(dock).toContain('Key: C min (shifted +3)')
     expect(dock).toContain('data-key-revert')
@@ -660,7 +662,7 @@ describe('drop prompt', () => {
     const audio = progression(MINOR, 9, rate)
     const placed = placeLoop(store, audio, rate, 'Heard')
     await offerLoopKeyShift(store, placed.trackId, placed.clipId, { loop: true })
-    expect(store.keyShiftOffer?.line).toBe('Loop is A minor — shift to project key C minor? (+3 st)')
+    expect(store.keyShiftOffer?.line).toBe('Change this loop to the song key (C minor)?')
     expect(store.keyShiftOffer?.semitones).toBe(3)
     store.dismissKeyShiftOffer()
     expect(store.keyShiftOffer).toBeNull()
@@ -737,7 +739,7 @@ describe('drop prompt', () => {
       from: 'A minor',
       to: 'C minor',
       tonicOnly: false,
-      line: 'Loop is A minor — shift to project key C minor? (+3 st)',
+      line: 'Change this loop to the song key (C minor)?',
     })
     const body = renderToStaticMarkup(createElement('div', { className: 'shell phone', style: { minHeight: '100%' } },
       createElement(ClipTempoControl, { store, trackId: track.id, clipId: clip.id }),
@@ -762,7 +764,7 @@ describe('drop prompt', () => {
         </style></head><body>${body}</body></html>`)
         const prompt = page.locator('[data-key-shift-prompt]')
         await prompt.waitFor()
-        expect(await prompt.innerText()).toContain('shift to project key C minor')
+        expect(await prompt.innerText()).toContain('Change this loop to the song key (C minor)?')
         await page.locator('[data-key-shift="apply"]').click({ trial: true })
         await page.locator('[data-key-revert]').click({ trial: true })
         await page.screenshot({ path: `${dir}/${view.name}-prompt-dock.png`, fullPage: false })
@@ -772,4 +774,64 @@ describe('drop prompt', () => {
       await browser.close()
     }
   }, 60000)
+
+  it('sets the song key from Detect without touching tempo, then asks on a tagged loop', async () => {
+    const rate = 48000
+    const store = new ProjectStore(createEmptyProject(rate))
+    const tempo = store.project.tempo
+    expect(songKeyChip(store.scaleState())).toBeNull()
+    const audio = new Float32Array(32)
+    const first = placeLoop(store, audio, rate, 'Detected')
+    store.rememberClipHearing(first.trackId, first.clipId, {
+      key: 'A minor',
+      root: 9,
+      scale: 'aeolian',
+      confidence: 0.8,
+      alt: 'C major',
+      altRoot: 0,
+      altScale: 'ionian',
+      altConfidence: 0.4,
+      clearKey: true,
+      bpm: 96,
+      bpmConfidence: 0.5,
+      cents: 0,
+    })
+    const detected = renderToStaticMarkup(createElement(ClipTempoControl, { store, trackId: first.trackId, clipId: first.clipId }))
+    expect(detected).toContain('Set song key to A minor')
+    expect(detected).toContain('Scale: natural minor')
+    expect(detected).not.toContain('Use for song')
+    expect(detected).not.toContain('Set song tempo')
+    expect(detected).not.toContain('data-hearing-bpm')
+    store.useDetectedKey(first.trackId, first.clipId)
+    expect(store.project.tempo).toBe(tempo)
+    expect(songKeyChip(store.scaleState())).toBe('Am')
+    expect(projectMusicalKey(store.scaleState())?.label).toBe('A minor')
+
+    const dropped = placeLoop(store, audio, rate, 'Guitar/riff_F#m_100.wav')
+    await offerLoopKeyShift(store, dropped.trackId, dropped.clipId, {
+      loop: true,
+      catalogKey: 'Guitar/riff_F#m_100.wav',
+      tags: ['riff'],
+    })
+    expect(store.project.tempo).toBe(tempo)
+    expect(store.keyShiftOffer?.line).toBe('Change this loop to the song key (A minor)?')
+    const clip = store.track(dropped.trackId)!.clips.find((item) => item.id === dropped.clipId)!
+    expect(clip.loopKey).toBe('F# minor')
+    expect(clip.stretch?.semitones ?? 0).toBe(0)
+    store.dismissKeyShiftOffer()
+    expect(clip.stretch?.semitones ?? 0).toBe(0)
+    const waiting = renderToStaticMarkup(createElement(ClipTempoControl, { store, trackId: dropped.trackId, clipId: dropped.clipId }))
+    expect(waiting).toContain('Shift to song key (A minor)')
+    const plan = clipShiftPlan(store, dropped.trackId, dropped.clipId)
+    expect(plan?.to).toBe('A minor')
+    await runKeyShift(store, plan!, false)
+    expect(store.project.tempo).toBe(tempo)
+    expect(clip.stretch?.semitones).not.toBe(0)
+    const shifted = renderToStaticMarkup(createElement(ClipTempoControl, { store, trackId: dropped.trackId, clipId: dropped.clipId }))
+    expect(shifted).toContain('Revert to original')
+    store.revertKeyShift(dropped.trackId, dropped.clipId)
+    expect(clip.stretch?.semitones).toBe(0)
+    expect(store.project.tempo).toBe(tempo)
+    expect(songKeyChip(store.scaleState())).toBe('Am')
+  })
 })
