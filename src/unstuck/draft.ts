@@ -9,6 +9,8 @@ export interface DraftNote {
   velocity: number
   fine?: number
   slide?: boolean
+  /** Beats of human timing, applied on top of the grid. */
+  nudge?: number
 }
 
 export interface DraftClip {
@@ -16,6 +18,8 @@ export interface DraftClip {
   startBeat: number
   durationBeats: number
   notes: DraftNote[]
+  /** 0–0.9. Odd sixteenths sound later. */
+  swing?: number
 }
 
 export interface DraftTrack {
@@ -29,6 +33,8 @@ export interface DraftTrack {
   pan: number
   seed: number
   scaler?: Partial<ScalerState>
+  /** An existing library, sampler, or Beat Machine keeps its instrument. */
+  leaveInstrument?: boolean
   clips: DraftClip[]
 }
 

@@ -12,7 +12,7 @@ import { sectionKind } from '../model/sections'
 import { normalizeScale } from '../model/scale'
 import { stampMidiAtBeat } from '../model/playheadPlace'
 import { makeTrack, uid, type MidiClip, type MidiNote, type Project, type Track } from '../model/types'
-import { ensureScale, roleById, roleLabel, scaleIsBuiltin } from './brief'
+import { ensureScale, roleLabel, scaleIsBuiltin } from './brief'
 import type { SongDraft } from './draft'
 
 const CLIP_MARKS = ['Ideas ', 'Unstuck '] as const
@@ -75,18 +75,18 @@ function applyKey(project: Project, key: number, scaleId: string) {
 }
 
 function ensureTrack(project: Project, spec: SongDraft['tracks'][number]) {
-  const meta = roleById(spec.role)
   let track = project.tracks.find((item) => item.type === 'midi' && item.name === spec.name)
   const fresh = !track
   if (!track) {
     track = makeTrack({ name: spec.name, type: 'midi', color: spec.color, input: 'none', volume: spec.volume, pan: spec.pan })
     project.tracks.push(track)
   }
-  claim(track, spec, fresh, meta.instrument)
+  claim(track, spec, fresh, spec.instrument)
   return track
 }
 
 function claim(track: Track, spec: SongDraft['tracks'][number], fresh: boolean, instrument: string) {
+  if (spec.leaveInstrument && !fresh) return
   const open = fresh || !track.instrument || track.instrument === 'none'
   if (instrument === 'pads' && (open || track.instrument === 'drum-machine' || track.instrument === 'pads')) {
     track.instrument = 'pads'
@@ -127,6 +127,7 @@ function pushClip(track: Track, clip: SongDraft['tracks'][number]['clips'][numbe
     velocity: Math.max(0.05, Math.min(1, note.velocity)),
     ...(note.fine ? { fine: Math.max(-100, Math.min(100, Math.round(note.fine))) } : {}),
     ...(note.slide ? { slide: true } : {}),
+    ...(note.nudge ? { nudge: Math.max(-0.25, Math.min(0.25, note.nudge)) } : {}),
   }))
   const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0.25)
   const created: MidiClip = stampMidiAtBeat({
@@ -135,6 +136,7 @@ function pushClip(track: Track, clip: SongDraft['tracks'][number]['clips'][numbe
     startBeat: 0,
     durationBeats: Math.max(clip.durationBeats, end),
     notes,
+    ...(clip.swing ? { swing: Math.max(0, Math.min(0.9, clip.swing)) } : {}),
   }, clip.startBeat)
   track.midiClips.push(created)
   return created.id

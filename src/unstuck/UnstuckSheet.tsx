@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { projectSampleBeat } from '../model/tempoMap'
 import { quartersPerBar } from '../model/time'
@@ -11,6 +11,8 @@ import { IdeasPop } from '../ui/IdeasPop'
 import { PlayersSheet } from '../ui/PlayersSheet'
 import '../ui/guideSheet.css'
 import type { IdeasPage } from './ideasPage'
+
+const PartsGenerator = lazy(() => import('../ui/PartsGenerator').then((mod) => ({ default: mod.PartsGenerator })))
 import {
   AMOUNTS,
   FEELS,
@@ -241,10 +243,11 @@ export function UnstuckSheet({
             </div>
             <SheetClose className="guide-x" onClick={onClose} />
           </header>
-          <div className="unstuck-pages eq-grid" style={{ ['--eq-cols' as string]: '3' }} role="tablist" aria-label="Ideas pages">
+          <div className="unstuck-pages eq-grid" style={{ ['--eq-cols' as string]: '4' }} role="tablist" aria-label="Ideas pages">
             <button type="button" role="tab" id="ideas-tab-write" aria-selected={page === 'write'} aria-controls="ideas-panel" className={page === 'write' ? 'on' : ''} onClick={() => choose('write')}>Write</button>
             <button type="button" role="tab" id="ideas-tab-progressions" aria-selected={page === 'progressions'} aria-controls="ideas-panel" className={page === 'progressions' ? 'on' : ''} onClick={() => choose('progressions')}>Progressions</button>
             <button type="button" role="tab" id="ideas-tab-players" aria-selected={page === 'players'} aria-controls="ideas-panel" className={page === 'players' ? 'on' : ''} onClick={() => choose('players')}>Players</button>
+            <button type="button" role="tab" id="ideas-tab-generate" aria-selected={page === 'generate'} aria-controls="ideas-panel" className={page === 'generate' ? 'on' : ''} onClick={() => choose('generate')}>Generate</button>
           </div>
         </div>
         {page === 'players' ? (
@@ -254,6 +257,12 @@ export function UnstuckSheet({
         ) : page === 'progressions' ? (
           <div id="ideas-panel" role="tabpanel" aria-labelledby="ideas-tab-progressions" data-ideas-page="progressions">
             <IdeasPop embedded store={store} engine={engine} />
+          </div>
+        ) : page === 'generate' ? (
+          <div id="ideas-panel" role="tabpanel" aria-labelledby="ideas-tab-generate" data-ideas-page="generate">
+            <Suspense fallback={<p className="guide-note">Loading parts…</p>}>
+              <PartsGenerator store={store} engine={engine} />
+            </Suspense>
           </div>
         ) : <div id="ideas-panel" role="tabpanel" aria-labelledby="ideas-tab-write" data-ideas-page="write">
         <div className="unstuck-grid" data-unstuck="parts">
@@ -410,6 +419,7 @@ export function UnstuckSheet({
 function pageBlurb(page: IdeasPage) {
   if (page === 'players') return 'A drummer, bass, and keys that follow the song. Hear a take, then Write puts editable MIDI on the tracks.'
   if (page === 'progressions') return 'Hear a progression, then Use writes chords, bass, and drums.'
+  if (page === 'generate') return 'Pick a key, a genre, and the parts. Hear them, then add editable MIDI.'
   return 'Pick one part. Full song always writes two verses and two choruses, then any extra sections the seed keeps. Shuffle again keeps the locks.'
 }
 
