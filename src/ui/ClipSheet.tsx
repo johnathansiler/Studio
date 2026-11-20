@@ -145,8 +145,8 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
       </div>
       <div className="smart-row">
         <span>{stretch?.sourceBpm ? `${stretch.sourceBpm.toFixed(1)} BPM in this clip` : 'No tempo in this clip yet'}</span>
-        <button type="button" title="Set the song tempo to this clip" disabled={stretch?.sourceBpm == null} onClick={() => store.adaptClipTempo(trackId, clip.id)}>
-          Use for song
+        <button type="button" title="Set the song tempo to this clip. The song key stays put." disabled={stretch?.sourceBpm == null} onClick={() => store.adaptClipTempo(trackId, clip.id)}>
+          {stretch?.sourceBpm ? `Set song tempo to ${Number.isInteger(stretch.sourceBpm) ? String(stretch.sourceBpm) : stretch.sourceBpm.toFixed(1)}` : 'Set song tempo'}
         </button>
         {tempoFollowsProject(stretch) ? null : (
           <button type="button" title="Stretch this clip to the song tempo without changing its pitch" disabled={stretch?.sourceBpm == null} onClick={() => store.conformClipTempo(trackId, clip.id)}>

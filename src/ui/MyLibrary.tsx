@@ -3,6 +3,7 @@ import { SOUND_MIME } from '../audio/sample/slot'
 import { LibraryAuthError, clearLibraryAccessKey, libraryStatus, readLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { loadLibraryCatalog } from '../library/audio'
 import { browseLibraryRows, type BrowseRow } from '../library/browse'
+import { contentTypeChoices, contentTypeLabel, isLoopEntry } from '../library/contentType'
 import { browseIndexForId, browseRowId, readBrowsePlace, scrollTopForIndex, writeBrowsePlace } from './browsePlace'
 import { clearRecent, recentSounds, subscribeRecent } from '../library/recent'
 import { absorbLegacyFavoriteIds, favoriteSounds, isFavorite, subscribeFavorites, toggleFavorite } from '../library/favorites'
@@ -41,10 +42,12 @@ const BPM_PRESETS: { id: string; label: string; min: number | null; max: number 
 ]
 
 const TYPE_LABEL: Record<string, string> = {
-  instrument: 'Instruments',
+  instrument: 'Instrument',
   'one-shot': 'One-shot',
   loop: 'Loop',
   sfx: 'SFX',
+  'drum-kit': 'Drum kit',
+  upload: 'Upload',
 }
 
 type Engine = {
@@ -373,6 +376,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
         token: gen,
         signal: controller.signal,
         engine,
+        decode: decodeOf(engine),
         onStart: () => {
           if (gen !== previewGen.current || controller.signal.aborted) return
           setPlaying(key)
@@ -498,7 +502,11 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
 
   const facets = index?.facets
   const panel: Group = group === 'category' ? 'instrument' : group
-  const values = panel === 'key' || panel === 'bpm' || panel === 'instrument' ? [] : facetValues(panel, facets, instruments.length > 0)
+  const values = panel === 'key' || panel === 'bpm' || panel === 'instrument' || panel === 'type' ? [] : facetValues(panel, facets, instruments.length > 0)
+  const typeChoices = useMemo(() => contentTypeChoices(
+    (index?.entries ?? []).filter((entry) => entry.type !== 'multisample note' && !coveredKeys.current.has(entry.key)),
+    instruments,
+  ), [index, instruments])
   const categoryValues = facetValues('category', facets, false)
   const instrumentValues = facetValues('instrument', facets, false)
   const active = activeFilters(query, projectKey)
@@ -535,6 +543,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
       {phase === 'load' && <p className="sound-status">{message}</p>}
       {phase === 'ready' && index && (
         <>
+          <div className="library-sticky">
           <div className="sound-filters library-search">
             <input aria-label="Search my library" placeholder="Search" value={text} onChange={(event) => setText(event.target.value)} />
             <button
@@ -542,8 +551,8 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
               className={`sound-filter library-filter-btn${activeCount ? ' on' : ''}`}
               aria-expanded={filtersOpen}
               aria-haspopup="dialog"
-              aria-label={activeCount ? `Filter. ${activeCount} active.` : 'Filter'}
-              title="Type, instrument, key, tempo, and genre."
+              aria-label={activeCount ? `Filter. ${activeCount} active. ${[quick === 'recent' ? 'Recent' : quick === 'favorites' ? 'Favorites' : '', ...active.map((item) => item.label)].filter(Boolean).join(', ')}.` : 'Filter'}
+              title="Loops, type, instrument, key, tempo, and genre."
               onClick={() => setFiltersOpen((open) => !open)}
             >
               <FilterIcon />
@@ -603,6 +612,24 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
                     <button key={`inst-${value}`} type="button" data-value={value} className={`filter-choice${query.instrument === value ? ' on' : ''}`} aria-pressed={query.instrument === value} onClick={() => applyFilter({ instrument: value })}>{chipLabel(value)}</button>
                   ))}
                 </div>
+              ) : panel === 'type' ? (
+                <div className="library-filter-list" role="group" aria-label="Type. Loops, one-shots, instruments, and the other kinds in this library.">
+                  <button type="button" data-value="any" className={`filter-choice${!query.type ? ' on' : ''}`} aria-pressed={!query.type} onClick={() => applyFilter({ type: '' })}>Any</button>
+                  {typeChoices.map((choice) => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      data-value={choice.id}
+                      data-content-type={choice.id}
+                      className={`filter-choice${query.type === choice.id ? ' on' : ''}`}
+                      aria-pressed={query.type === choice.id}
+                      aria-label={choice.label}
+                      onClick={() => applyFilter({ type: choice.id })}
+                    >
+                      {choice.label}
+                    </button>
+                  ))}
+                </div>
               ) : (
                 <div className="library-filter-list" role="group" aria-label={chipLabel(panel)}>
                   <button type="button" data-value="any" className={`filter-choice${!selectedValue(panel, query) ? ' on' : ''}`} aria-pressed={!selectedValue(panel, query)} onClick={() => applyFilter(cleared(panel))}>Any</button>
@@ -629,6 +656,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
               <button type="button" className="library-clear-all" onClick={clearAllFilters}>Clear all</button>
             </div>
           )}
+          </div>
           <div className="library-recent-head">
             <p className="sound-count library-count" data-library-count={rows.length}>{countLabel}</p>
             {quick === 'recent' && recent.length > 0 && <button type="button" className="library-clear-recent" onClick={() => clearRecent()}>Clear recent</button>}
@@ -734,10 +762,17 @@ function SoundRow({
   onLoad: () => void
   onDrag: (event: ReactDragEvent) => void
 }) {
-  const meta = busy ? 'Loading' : playing ? 'Playing' : [entry.type ? chipLabel(entry.type) : '', entry.category || (entry.bpm ? `${entry.bpm} bpm` : '')].filter(Boolean).slice(0, 2).join(' · ')
+  const bpmLabel = entry.bpm != null && entry.bpm > 0 ? `${Math.round(entry.bpm)} bpm` : ''
+  const meta = busy
+    ? 'Loading'
+    : playing
+      ? 'Playing'
+      : isLoopEntry(entry)
+        ? ['Loop', bpmLabel, musical?.short ?? '', entry.category ? chipLabel(entry.category) : ''].filter(Boolean).join(' · ')
+        : [entry.type ? chipLabel(entry.type) : '', entry.category || bpmLabel].filter(Boolean).slice(0, 2).join(' · ')
   const keyTitle = musical?.source === 'filename' ? `${musical.label}, read from the name` : musical?.source === 'detect' ? `${musical.label}, from Detect` : musical?.label
   return (
-    <div className={`sound-row${playing ? ' is-playing' : ''}${kept ? ' is-kept' : ''}`} data-library-key={entry.key} data-browse-id={`sound:${entry.key}`}>
+    <div className={`sound-row${playing ? ' is-playing' : ''}${kept ? ' is-kept' : ''}`} data-library-key={entry.key} data-browse-id={`sound:${entry.key}`} data-sound-bpm={bpmLabel ? String(Math.round(entry.bpm ?? 0)) : undefined} data-content-type={isLoopEntry(entry) ? 'loop' : entry.type || undefined}>
       <button type="button" className="sound-copy" draggable aria-label={playing ? `Stop ${entry.name}` : `Play ${entry.name}`} onDragStart={onDrag} onClick={onPlay}>
         <span className="sound-title">
           <strong>{entry.name}</strong>
@@ -875,7 +910,7 @@ function chipOn(group: Group, query: LibraryQuery) {
 
 function activeFilters(query: LibraryQuery, project: MusicalKey) {
   const rows: { id: string; label: string; clear: Partial<LibraryQuery> }[] = []
-  if (query.type) rows.push({ id: 'type', label: chipLabel(query.type), clear: { type: '' } })
+  if (query.type) rows.push({ id: 'type', label: contentTypeLabel(query.type), clear: { type: '' } })
   if (query.category) rows.push({ id: 'category', label: chipLabel(query.category), clear: { category: '' } })
   if (query.instrument) rows.push({ id: 'instrument', label: chipLabel(query.instrument), clear: { instrument: '' } })
   if (query.genre) rows.push({ id: 'genre', label: chipLabel(query.genre), clear: { genre: '' } })

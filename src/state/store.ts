@@ -2097,6 +2097,16 @@ export class ProjectStore {
     })
   }
 
+  /** Remember a loop's own key without an undo step and without touching the song tempo. */
+  rememberLoopKey(trackId: string, clipId: string, key: string) {
+    const clean = key.trim()
+    if (!clean) return
+    const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+    if (!clip || clip.loopKey === clean) return
+    clip.loopKey = clean
+    this.emit()
+  }
+
   /**
    * Project key and scale from a stored Detect reading.
    * Auto-Tune follows this when its key is Project, which is the default.

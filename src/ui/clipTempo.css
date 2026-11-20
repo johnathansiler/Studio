@@ -165,6 +165,13 @@
   font: 700 13px/1.2 var(--font, inherit);
 }
 
+.clip-hearing button.primary,
+.clip-hearing button[data-set-song-key],
+.clip-hearing button[data-shift-to-song],
+.clip-hearing button[data-key-revert] {
+  flex: 1 1 100%;
+}
+
 .clip-hearing button.primary {
   background-color: var(--accent, #73c48f);
   color: var(--accent-ink, #102117);

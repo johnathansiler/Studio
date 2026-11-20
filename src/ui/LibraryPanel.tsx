@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { bindLocalSamples, importInstrument } from '../audio/multisample/import'
 import { readLibraryAccessKey } from '../library/access'
+import { isLoopEntry } from '../library/contentType'
 import { groupLibraryInstruments } from '../library/group'
 import { placeLibraryInstrument } from '../library/place'
 import { rememberCatalogSound, rememberLibrarySound } from '../library/recent'
@@ -38,6 +39,12 @@ export function LibraryPanel({
   const libraryGroups = useMemo(() => groupLibraryInstruments(librarySounds).filter((item) => item.samples >= 2 || item.notes >= 2), [librarySounds])
   const coveredLibrary = useMemo(() => new Set(libraryGroups.flatMap((item) => item.layers.map((layer) => layer.key))), [libraryGroups])
   const looseSounds = useMemo(() => presentSoundEntries(sounds), [sounds])
+  const visibleLibrary = useMemo(
+    () => librarySounds.filter((entry) => !coveredLibrary.has(entry.key) && entry.type !== 'multisample note'),
+    [coveredLibrary, librarySounds],
+  )
+  const libraryLoops = useMemo(() => visibleLibrary.filter((entry) => isLoopEntry(entry)), [visibleLibrary])
+  const libraryOther = useMemo(() => visibleLibrary.filter((entry) => !isLoopEntry(entry)), [visibleLibrary])
   const show = (text: string) => setHint(text)
 
   useEffect(() => {
@@ -189,7 +196,14 @@ export function LibraryPanel({
           {libraryGroups.map((item) => (
             <option key={item.id} value={`libgroup:${item.id}`}>{item.name} · My Library</option>
           ))}
-          {librarySounds.filter((entry) => !coveredLibrary.has(entry.key)).map((entry) => (
+          {libraryLoops.length > 0 && (
+            <optgroup label="Loops">
+              {libraryLoops.map((entry) => (
+                <option key={entry.key} value={entry.key}>{entry.name}{entry.bpm ? ` · ${Math.round(entry.bpm)} bpm` : ''}{entry.musicalKey ? ` · ${entry.musicalKey}` : ''}</option>
+              ))}
+            </optgroup>
+          )}
+          {libraryOther.map((entry) => (
             <option key={entry.key} value={entry.key}>{entry.name} · My Library</option>
           ))}
           {looseSounds.map((entry) => (
