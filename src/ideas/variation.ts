@@ -11,6 +11,7 @@ import { quartersPerBar } from '../model/time'
 import { clonePattern, type BeatPattern, type PatternClip } from '../model/steps'
 import { uid, type AudioClip, type MidiClip, type Project, type WaveEdit, type WaveRegion } from '../model/types'
 import { readClip } from '../unstuck/read'
+import { settleNotes } from './phrase'
 import { fitsScale, nearestInScale } from './scaleFit'
 import type { PartNote, VaryAmount } from './types'
 
@@ -74,7 +75,7 @@ export function varyNotes(input: {
   else if (input.role === 'chords' || input.role === 'pad') next = varyChords(source, input.amount, input.generation, input.seed, input.key, input.scaleId, length)
   else if (input.role === 'bass') next = varyBass(source, input.amount, input.generation, input.seed, input.key, input.scaleId, length)
   else next = varyMelody(source, input.amount, input.generation, input.seed, input.key, input.scaleId, length)
-  return fitLength(next, length, input.role !== 'drums', input.scaleId, input.key)
+  return settleNotes(fitLength(next, length, input.role !== 'drums', input.scaleId, input.key), input.role)
 }
 
 export function varyBeatPattern(pattern: BeatPattern, amount: VaryAmount, seed: number, generation: number): BeatPattern {
@@ -141,21 +142,28 @@ export function varyAudioEdit(clip: AudioClip, sourceLength: number, amount: Var
     arranged[swapAt] = arranged[right]
     arranged[right] = hold
   }
-  if (!vocal && (amount !== 'subtle' || generation >= 2) && arranged.length) {
-    const last = arranged[arranged.length - 1]
-    arranged[arranged.length - 1] = { ...last, reverse: true }
-  }
   if (amount === 'bold' && !vocal && arranged.length >= 4) {
     const half = arranged.slice(0, Math.floor(arranged.length / 2))
     arranged = half.flatMap((piece) => [{ ...piece, reverse: false }, { ...piece, reverse: false }])
   }
   if ((amount !== 'subtle' || generation >= 2) && arranged.length >= 2) {
     const tail = arranged[arranged.length - 1]
-    arranged[arranged.length - 1] = { ...arranged[arranged.length - 2], reverse: vocal ? false : arranged[arranged.length - 2].reverse, length: tail.length }
+    const previous = arranged[arranged.length - 2]
+    arranged[arranged.length - 1] = { ...previous, reverse: false, length: tail.length }
   }
-  const regions = arranged.map((piece, index) => region(piece, index)).filter((piece) => piece.length > 0)
+  if (!vocal && (amount !== 'subtle' || generation >= 2) && arranged.length) {
+    const at = amount === 'bold' ? arranged.length - 1 : Math.min(arranged.length - 1, Math.max(0, Math.floor(arranged.length / 2)))
+    arranged[at] = { ...arranged[at], reverse: true }
+  }
+  if (vocal) arranged = arranged.map((piece) => ({ ...piece, reverse: false }))
+  const limit = Math.max(1, sourceLength)
+  const regions = arranged.map((piece, index) => region(piece, index, limit)).filter((piece) => piece.length > 0)
   const body = regions.reduce((sum, piece) => sum + piece.length, 0)
-  if (body < total && regions.length) regions[regions.length - 1].length += total - body
+  if (body < total && regions.length) {
+    const last = regions[regions.length - 1]
+    const room = Math.max(0, limit - last.source - last.length)
+    last.length += Math.min(room, total - body)
+  }
   if (body > total && regions.length) regions[regions.length - 1].length = Math.max(1, regions[regions.length - 1].length - (body - total))
   return {
     ...doc,
@@ -279,8 +287,10 @@ function varyPatternClip(project: Project, clipId: string, options: VaryOptions)
   if (reroll) {
     const generation = variationIndex(patternName(project, reroll.patternId)) || 1
     const current = project.beats?.patterns.find((item) => item.id === reroll.patternId)
-    if (current && current.id !== pattern.id) {
-      const varied = varyBeatPattern(pattern, options.amount, options.seed, generation)
+    const originClip = family.find((item) => variationIndex(patternName(project, item.patternId)) === 0) ?? clip
+    const origin = project.beats?.patterns.find((item) => item.id === originClip.patternId) ?? pattern
+    if (current && origin && current.id !== origin.id) {
+      const varied = varyBeatPattern(origin, options.amount, options.seed, generation)
       current.channels = clonePattern(varied, current.name).channels
       current.swing = varied.swing
       return { audioIds: [], midiIds: [], patternIds: [reroll.id] }
@@ -383,31 +393,40 @@ function varyChords(notes: PartNote[], amount: VaryAmount, generation: number, s
 }
 
 function varyDrums(notes: PartNote[], amount: VaryAmount, generation: number, seed: number, length: number) {
-  const ghost = 0.22 + ((seed + generation) % 5) * 0.03
+  const rng = mulberry32(hashSeed(seed, generation, 6))
   const out = notes.map(copyNote)
+  const taken = (pitch: number, at: number) => out.some((note) => note.pitch === pitch && Math.abs(note.startBeat - at) < 0.045)
+  let ghosts = 0
+  const ghostCap = amount === 'subtle' ? 2 : amount === 'medium' ? 4 : 6
   for (const note of notes) {
-    if ((note.pitch === 38 || note.pitch === 40) && note.startBeat >= 0.5) {
-      const at = roundBeat(note.startBeat - 0.25)
-      if (at >= 0) out.push({ pitch: 38, startBeat: at, durationBeats: 0.08, velocity: ghost })
-    }
+    if (ghosts >= ghostCap) break
+    if (note.pitch !== 38 && note.pitch !== 40) continue
+    if (rng() > (amount === 'subtle' ? 0.7 : 0.9)) continue
+    const at = roundBeat(note.startBeat - (rng() > 0.5 ? 0.25 : 0.5))
+    if (at < 0.2 || taken(38, at)) continue
+    out.push({ pitch: 38, startBeat: at, durationBeats: 0.08, velocity: roundBeat(0.22 + rng() * 0.12) })
+    ghosts += 1
   }
   if (amount !== 'subtle') {
-    for (const note of out) {
+    const drop = amount === 'bold' ? 1 : 3
+    for (let index = out.length - 1; index >= 0; index--) {
+      const note = out[index]
       if (note.pitch !== 42 && note.pitch !== 44) continue
-      if (Math.round(note.startBeat * 4) % 2 === 0) continue
-      note.startBeat = roundBeat(Math.min(length - 0.1, note.startBeat + 0.25))
+      if (Math.round(note.startBeat * 4) % 4 !== drop) continue
+      if (rng() < 0.25) continue
+      out.splice(index, 1)
     }
-  }
-  if (amount === 'bold') {
-    const kick = out.find((note) => note.pitch === 36 && note.startBeat > 0.4)
-    if (kick) kick.startBeat = roundBeat(kick.startBeat + 0.5)
-    else out.push({ pitch: 36, startBeat: roundBeat(Math.min(length - 0.5, 1.5)), durationBeats: 0.2, velocity: 0.8 })
+    const kickAt = roundBeat(amount === 'bold' ? 0.5 + Math.floor(rng() * 3) : 2.5)
+    if (kickAt > 0.4 && kickAt < length - 0.2 && !taken(36, kickAt)) out.push({ pitch: 36, startBeat: kickAt, durationBeats: 0.18, velocity: 0.74 })
   }
   if (generation >= 2 || amount === 'bold') {
-    const from = Math.max(0, length - 1)
+    const from = Math.max(0, length - (amount === 'bold' || generation >= 3 ? 1 : 0.5))
     const step = amount === 'bold' ? 0.25 : 0.5
     for (let beat = from; beat < length - 0.05; beat += step) {
-      out.push({ pitch: beat === from ? 42 : 38, startBeat: roundBeat(beat), durationBeats: 0.1, velocity: 0.4 + (beat - from) * 0.35 })
+      const at = roundBeat(beat)
+      const pitch = beat === from ? 42 : 38
+      if (taken(pitch, at)) continue
+      out.push({ pitch, startBeat: at, durationBeats: 0.08, velocity: Math.min(0.9, 0.42 + (beat - from) * 0.35) })
     }
   }
   return out
@@ -530,11 +549,13 @@ function slicePieces(pieces: Piece[], slices: number): Piece[] {
   return out.filter((piece) => piece.length > 0)
 }
 
-function region(piece: Piece, index: number): WaveRegion {
+function region(piece: Piece, index: number, limit: number): WaveRegion {
+  const source = Math.max(0, Math.min(Math.max(0, limit - 1), Math.round(piece.source)))
+  const length = Math.max(1, Math.min(Math.round(piece.length), Math.max(1, limit - source)))
   return {
     id: `var-${index}`,
-    source: Math.max(0, Math.round(piece.source)),
-    length: Math.max(1, Math.round(piece.length)),
+    source,
+    length,
     reverse: piece.reverse,
     gain: 1,
     silence: false,

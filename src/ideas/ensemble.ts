@@ -5,10 +5,11 @@
 
 import { generate } from '../generators/generate'
 import type { GeneratedNote, GeneratorChord, ScaleInterval } from '../generators/types'
-import { hashSeed, mulberry32, roundBeat } from '../generators/rng'
+import { hashSeed, mulberry32, roundBeat, swingTime } from '../generators/rng'
 import { styleById } from '../generators/styles'
 import { getScale } from '../theory/scales'
 import { partGenre } from './genres'
+import { settleNotes } from './phrase'
 import { fitsScale, mod12, nearestInScale } from './scaleFit'
 import type { Ensemble, EnsemblePart, EnsembleRequest, PartNote, PartRole } from './types'
 
@@ -82,6 +83,7 @@ export function generateEnsemble(raw: EnsembleRequest): Ensemble {
       seed: hashSeed(seed, salt, roleSalt(role)),
       total,
       beatsPerBar,
+      styleSwing: style.swing,
     })
     parts.push({ role, name, notes: shaped, salt, locked: false })
   }
@@ -132,6 +134,7 @@ interface Shape {
   seed: number
   total: number
   beatsPerBar: number
+  styleSwing: number
 }
 
 function shape(notes: GeneratedNote[], role: PartRole, shapeArgs: Shape): PartNote[] {
@@ -139,23 +142,26 @@ function shape(notes: GeneratedNote[], role: PartRole, shapeArgs: Shape): PartNo
   let next = notes.map((note) => toPart(note))
   if (role === 'chords') next = colorChords(next, shapeArgs)
   if (role === 'melody') next = colorMelody(next, shapeArgs)
-  if (role === 'drums') next = colorDrums(next, shapeArgs, rng)
+  if (role === 'drums') next = colorDrums(next, shapeArgs)
   else next = next.map((note) => conform(note, role, shapeArgs))
+  if (role === 'melody') next = foldLine(next, 12, 57, 84)
+  if (role === 'bass') next = foldLine(next, 12, 24, 64)
   const gain = 0.55 + shapeArgs.energy * 0.5
-  return next
-    .filter((note) => note.startBeat >= -0.001 && note.startBeat < shapeArgs.total - 0.001)
+  const timed = next
     .map((note) => {
-      const nudge = shapeArgs.swing > 0 ? roundBeat((rng() - 0.5) * shapeArgs.swing * 0.03) : 0
+      const startBeat = roundBeat(Math.max(0, pocketBeat(note.startBeat, shapeArgs.styleSwing, shapeArgs.swing)))
+      const room = shapeArgs.total - startBeat
+      if (startBeat < -0.001 || room < 0.05) return null
       return {
         ...note,
         pitch: clamp(Math.round(note.pitch), 0, 127),
-        startBeat: roundBeat(Math.max(0, note.startBeat)),
-        durationBeats: roundBeat(Math.max(0.05, note.durationBeats)),
+        startBeat,
+        durationBeats: roundBeat(Math.max(0.05, Math.min(note.durationBeats, room))),
         velocity: clamp(note.velocity * gain * (0.94 + rng() * 0.1), 0.05, 1),
-        ...(nudge ? { nudge } : {}),
       }
     })
-    .sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch)
+    .filter((note): note is PartNote => note != null)
+  return settleNotes(timed, role)
 }
 
 function toPart(note: GeneratedNote): PartNote {
@@ -205,7 +211,8 @@ function colorChords(notes: PartNote[], shapeArgs: Shape): PartNote[] {
     if (shapeArgs.complexity >= 0.66 && rich && kept.length < 6) {
       const top = Math.max(...kept.map((note) => note.pitch))
       const added = nearestInScale(top + 3, shapeArgs.scaleId, shapeArgs.key)
-      if (added.pitch > top && added.pitch < 96 && !kept.some((note) => note.pitch === added.pitch)) {
+      const clash = kept.some((note) => Math.abs(note.pitch - added.pitch) < 3 || mod12(note.pitch) === mod12(added.pitch))
+      if (added.pitch > top && added.pitch < 96 && !clash) {
         kept.push({ ...kept[0], pitch: added.pitch, fine: added.fine, velocity: 0.56 })
       }
     }
@@ -220,12 +227,14 @@ function colorMelody(notes: PartNote[], shapeArgs: Shape): PartNote[] {
   return kept.length >= 2 ? kept : notes
 }
 
-function colorDrums(notes: PartNote[], shapeArgs: Shape, rng: () => number): PartNote[] {
-  if (shapeArgs.energy >= 0.5) return notes
+/** Spare energy keeps the backbeat and the eighth-note hat skeleton. Rolls and ghosts drop out. */
+function colorDrums(notes: PartNote[], shapeArgs: Shape): PartNote[] {
+  if (shapeArgs.energy >= 0.55) return notes
   return notes.filter((note) => {
-    const drum = note.pitch === 36 || note.pitch === 35 || note.pitch === 38 || note.pitch === 40
-    if (drum) return true
-    return rng() < 0.4 + shapeArgs.energy
+    if (note.pitch === 36 || note.pitch === 35 || note.pitch === 38 || note.pitch === 40) return true
+    const grid = Math.round(note.startBeat * 2) / 2
+    // Wide enough for a swung off-eighth, narrow enough to drop 32nd hat rolls.
+    return Math.abs(note.startBeat - grid) < 0.11
   })
 }
 
@@ -260,4 +269,46 @@ function copyNote(note: PartNote): PartNote {
 function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min
   return Math.min(max, Math.max(min, value))
+}
+
+/** Pull a leap of more than an octave into the same pitch class, so the line stays singable. */
+function foldLine(notes: PartNote[], maxLeap: number, low: number, high: number): PartNote[] {
+  let previous: number | null = null
+  return notes.map((note) => {
+    let pitch = note.pitch
+    if (previous != null) {
+      while (pitch - previous > maxLeap && pitch - 12 >= low) pitch -= 12
+      while (previous - pitch > maxLeap && pitch + 12 <= high) pitch += 12
+    }
+    previous = pitch
+    return pitch === note.pitch ? note : { ...note, pitch }
+  })
+}
+
+/**
+ * Genres with a pocket already move the off-eighth.
+ * The swing control straightens that pocket at 0 and deepens it toward a triplet at 1.
+ * Straight genres leave the notes on the grid and swing the clip instead.
+ */
+function pocketBeat(beat: number, styleSwing: number, userSwing: number) {
+  if (styleSwing <= 0.2) return beat
+  return swingTime(unswing(beat, styleSwing), aimedSwing(styleSwing, userSwing))
+}
+
+function aimedSwing(styleSwing: number, userSwing: number) {
+  const anchor = 0.15
+  const user = clamp(userSwing, 0, 1)
+  if (user <= anchor) return styleSwing * (user / anchor)
+  const blend = (user - anchor) / (1 - anchor)
+  return styleSwing + (1 - styleSwing) * blend
+}
+
+function unswing(beat: number, amount: number) {
+  if (amount <= 0) return beat
+  const straight = beat - amount * (1 / 6)
+  const eighth = straight * 2
+  const nearest = Math.round(eighth)
+  if (Math.abs(eighth - nearest) > 0.08) return beat
+  if (nearest % 2 === 0) return beat
+  return straight
 }

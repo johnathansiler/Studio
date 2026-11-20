@@ -29,8 +29,7 @@ export function placeEnsemble(project: Project, ensemble: Ensemble, playheadSamp
   for (const part of ensemble.parts) {
     if (!part.notes.length) continue
     const meta = roleById(part.role)
-    const onSelected = part.role === home && selected?.type === 'midi'
-    const name = onSelected ? selected.name : namedTrack(project, part.role)
+    const name = trackName(project, part.role, selected, home)
     const existing = project.tracks.find((track) => track.type === 'midi' && track.name === name)
     const bass808 = part.role === 'bass' && (genre.id === 'trap' || genre.id === 'drill')
     const instrument = part.role === 'drums' ? 'pads' : bass808 ? '808' : 'synth'
@@ -106,6 +105,18 @@ function namedTrack(project: Project, role: PartRole) {
 
 function isDrums(track: Track) {
   return DRUMS.has(track.instrument || '') || /drum/i.test(track.name)
+}
+
+function trackName(project: Project, role: PartRole, selected: Track | undefined, home: PartRole | null) {
+  if (selected?.type === 'midi' && role === home) return selected.name
+  if (selected?.type === 'midi' && (role === 'chords' || role === 'melody') && libraryHost(selected) && home !== 'drums' && home !== 'bass') {
+    return selected.name
+  }
+  return namedTrack(project, role)
+}
+
+function libraryHost(track: Track) {
+  return track.instrument === 'library' || track.instrument === 'sampler'
 }
 
 function roleForTrack(track: Track | undefined, roles: PartRole[]): PartRole | null {

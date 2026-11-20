@@ -4,6 +4,7 @@ import { barsOf, generateEnsemble } from '../ideas/ensemble'
 import { PART_GENRES } from '../ideas/genres'
 import type { PartNote, PartRole } from '../ideas/types'
 import type { GeneratorChord } from '../generators/types'
+import { swingShift } from '../model/drumLanes'
 import { NOTE_NAMES } from '../model/scale'
 import { quartersPerBar } from '../model/time'
 import type { ProjectStore } from '../state/store'
@@ -26,11 +27,20 @@ function genreForTempo(tempo: number) {
   return 'trap'
 }
 
+/** Song key once the musician has set one. Otherwise the project scale, or C major. */
+export function generatorKey(scale: { root?: number; scale?: string; library?: string; keySet?: boolean } | null | undefined) {
+  const root = Number.isFinite(scale?.root) ? ((Math.round(scale?.root ?? 0) % 12) + 12) % 12 : 0
+  const scaleId = scale?.library || scale?.scale || 'ionian'
+  if (scale?.keySet) return { key: root, scaleId, followsSong: true as const }
+  return { key: root, scaleId, followsSong: false as const }
+}
+
 export function PartsGenerator({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const project = store.project
   const scale = project.scale
-  const [key, setKey] = useState(scale?.root ?? 0)
-  const [scaleId, setScaleId] = useState(scale?.library || scale?.scale || 'ionian')
+  const song = generatorKey(scale)
+  const [key, setKey] = useState(song.key)
+  const [scaleId, setScaleId] = useState(song.scaleId)
   const [tempo, setTempo] = useState(() => Math.round(project.tempo || 120))
   const [genre, setGenre] = useState(() => genreForTempo(project.tempo || 120))
   const [bars, setBars] = useState<4 | 8 | 16>(4)
@@ -61,6 +71,15 @@ export function PartsGenerator({ store, engine }: { store: ProjectStore; engine:
   }), [key, scaleId, tempo, genre, bars, roles, complexity, energy, swing, seed, salts, locks, held, project.timeSignature])
 
   useEffect(() => () => engine.stopPreview(), [engine])
+  useEffect(() => {
+    engine.stopPreview()
+  }, [ensemble, engine])
+  useEffect(() => {
+    if (!scale?.keySet) return
+    const next = generatorKey(scale)
+    setKey(next.key)
+    setScaleId(next.scaleId)
+  }, [scale?.keySet, scale?.root, scale?.scale, scale?.library])
 
   function hear(which: PartRole[]) {
     engine.unlock()
@@ -71,9 +90,10 @@ export function PartsGenerator({ store, engine }: { store: ProjectStore; engine:
       const part = ensemble.parts.find((item) => item.role === role)
       if (!part) continue
       for (const note of part.notes) {
+        const atBeat = note.startBeat + swingShift(note.startBeat, ensemble.clipSwing)
         events.push({
           pitch: note.pitch,
-          at: note.startBeat * beat,
+          at: atBeat * beat,
           dur: Math.max(0.05, note.durationBeats * beat),
           velocity: note.velocity,
           drum: role === 'drums',
@@ -85,7 +105,7 @@ export function PartsGenerator({ store, engine }: { store: ProjectStore; engine:
       store.toast('Nothing to hear yet.', 'warn')
       return
     }
-    engine.previewSequence(events.slice(0, 700))
+    engine.previewSequence(events.slice(0, 2000))
   }
 
   function toggleRole(role: PartRole) {
@@ -193,7 +213,7 @@ export function PartsGenerator({ store, engine }: { store: ProjectStore; engine:
         <span>Swing {swing.toFixed(2)}</span>
         <input aria-label="Swing" type="range" min={0} max={1} step={0.01} value={swing} onChange={(event) => setSwing(Number(event.target.value))} />
       </label>
-      <p className="parts-line">{symbols || 'A progression in this key.'} · seed {seed}</p>
+      <p className="parts-line">{symbols || 'A progression in this key.'} · seed {seed}{song.followsSong ? ' · song key' : ''}</p>
       <div className="parts-commit">
         <button type="button" onClick={() => setSeed((current) => (current + 1 + Math.floor(Math.random() * 997)) >>> 0)}>New seed</button>
         <button type="button" onClick={() => hear(roles)}>Hear</button>

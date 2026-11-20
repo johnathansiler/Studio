@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generateEnsemble } from '../ideas/ensemble'
+import { generatorKey } from '../ui/PartsGenerator'
 import { fitsScale } from '../ideas/scaleFit'
 import type { Ensemble, PartRole } from '../ideas/types'
 import { isDrumsPlugin } from '../audio/plugins/ids'
@@ -48,6 +49,14 @@ function bassFollows(ensemble: Ensemble) {
 }
 
 describe('ideas part generator', () => {
+  it('follows a set song key and falls back to the project scale', () => {
+    expect(generatorKey({ root: 9, scale: 'aeolian', keySet: true })).toEqual({ key: 9, scaleId: 'aeolian', followsSong: true })
+    expect(generatorKey({ root: 2, scale: 'dorian', library: 'maqam-hijaz', keySet: true })).toEqual({ key: 2, scaleId: 'maqam-hijaz', followsSong: true })
+    expect(generatorKey({ root: 0, scale: 'ionian' })).toEqual({ key: 0, scaleId: 'ionian', followsSong: false })
+    expect(generatorKey({ root: 5, scale: 'mixolydian' })).toEqual({ key: 5, scaleId: 'mixolydian', followsSong: false })
+    expect(generatorKey(undefined)).toEqual({ key: 0, scaleId: 'ionian', followsSong: false })
+  })
+
   it('keeps every tonal note in the scale, except flagged passing tones', () => {
     for (const genre of ['boom-bap', 'trap', 'lofi', 'rnb', 'house', 'drill', 'pop']) {
       for (const seed of [1, 4, 9]) {
@@ -93,6 +102,35 @@ describe('ideas part generator', () => {
     inKey(locked)
   })
 
+  it('keeps the line singable, the drums unstacked, and the swing control audible', () => {
+    for (const genre of ['boom-bap', 'trap', 'lofi', 'rnb', 'house', 'drill', 'pop']) {
+      const ensemble = make({ genre, bars: 8, seed: 8, key: 4, scaleId: 'dorian', energy: 0.2, swing: 0.4 })
+      const melody = ensemble.parts.find((part) => part.role === 'melody')!
+      const drums = ensemble.parts.find((part) => part.role === 'drums')!
+      const bass = ensemble.parts.find((part) => part.role === 'bass')!
+      for (let index = 1; index < melody.notes.length; index++) {
+        expect(Math.abs(melody.notes[index].pitch - melody.notes[index - 1].pitch), genre).toBeLessThanOrEqual(12)
+      }
+      for (let index = 1; index < bass.notes.length; index++) {
+        expect(Math.abs(bass.notes[index].pitch - bass.notes[index - 1].pitch), `${genre} bass`).toBeLessThanOrEqual(12)
+        expect(bass.notes[index - 1].startBeat + bass.notes[index - 1].durationBeats).toBeLessThanOrEqual(bass.notes[index].startBeat + 0.03)
+      }
+      for (let index = 0; index < drums.notes.length; index++) {
+        for (let next = index + 1; next < drums.notes.length; next++) {
+          if (drums.notes[next].startBeat - drums.notes[index].startBeat > 0.05) break
+          expect(drums.notes[next].pitch === drums.notes[index].pitch && Math.abs(drums.notes[next].startBeat - drums.notes[index].startBeat) < 0.04, genre).toBe(false)
+        }
+      }
+      expect(drums.notes.every((note) => note.velocity >= 0.05 && note.velocity <= 1)).toBe(true)
+    }
+    const straight = make({ genre: 'boom-bap', swing: 0, bars: 2, seed: 2, roles: ['drums'] })
+    const deep = make({ genre: 'boom-bap', swing: 1, bars: 2, seed: 2, roles: ['drums'] })
+    const hats = (ensemble: Ensemble) => ensemble.parts[0].notes.filter((note) => note.pitch === 42).map((note) => note.startBeat)
+    expect(hats(deep).some((beat, index) => Math.abs(beat - hats(straight)[index]) > 0.03)).toBe(true)
+    expect(make({ genre: 'pop', swing: 0 }).clipSwing).toBe(0)
+    expect(make({ genre: 'pop', swing: 1 }).clipSwing).toBeGreaterThan(0.4)
+  })
+
   it('puts editable clips on Beat Machine, 808, and the selected track, and undoes them', () => {
     const store = new ProjectStore(createEmptyProject())
     store.setTempo(100)
@@ -105,6 +143,8 @@ describe('ideas part generator', () => {
     expect(store.project.scale?.root).toBe(9)
     expect(keys.instrument).toBe('library')
     expect(keys.midiClips.some((clip) => clip.notes.length > 0)).toBe(true)
+    expect(keys.midiClips.some((clip) => /melody/i.test(clip.name))).toBe(true)
+    expect(store.project.tracks.find((track) => track.name === 'Melody')).toBeUndefined()
     const drums = store.project.tracks.find((track) => track.name === 'Drums')
     const bass = store.project.tracks.find((track) => track.name === 'Bass')
     expect(drums?.instrument).toBe('pads')

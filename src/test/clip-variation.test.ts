@@ -44,6 +44,9 @@ describe('clip variation', () => {
     for (const notes of [subtle, medium, bold]) {
       expect(notes.every((note) => fitsScale(note.pitch, note.fine, 'ionian', 0))).toBe(true)
       expect(notes.every((note) => note.startBeat >= 0 && note.startBeat + note.durationBeats <= length + 0.02)).toBe(true)
+      for (let index = 1; index < notes.length; index++) {
+        expect(notes[index - 1].startBeat + notes[index - 1].durationBeats).toBeLessThanOrEqual(notes[index].startBeat + 0.03)
+      }
     }
     const subtleDelta = noteDelta(source, subtle)
     const mediumDelta = noteDelta(source, medium)
@@ -142,9 +145,20 @@ describe('clip variation', () => {
     expect(store.project.patternClips).toHaveLength(2)
     const copy = store.project.beats!.patterns[1]
     expect(copy.name).toContain('(var 1)')
+    const variedId = store.project.patternClips![1].id
+    const beforeRoll = copy.channels.map((channel) => channel.cells.map((cell) => cell.on))
+    expect(store.varyArrangeClip({ reroll: true, seed: 11, amount: 'subtle' })).toBe(true)
+    expect(store.project.patternClips).toHaveLength(2)
+    expect(store.project.beats?.patterns).toHaveLength(2)
+    expect(store.project.patternClips![1].id).toBe(variedId)
+    const afterRoll = store.project.beats!.patterns[1].channels.map((channel) => channel.cells.map((cell) => cell.on))
+    expect(afterRoll).not.toEqual(beforeRoll)
+    expect(pattern.channels.map((channel) => channel.cells.map((cell) => cell.on))).toEqual(before.map((channel) => channel.map((cell) => cell.on)))
     expect(copy.id).not.toBe(pattern.id)
     const changed = copy.channels.some((channel, index) => channel.cells.some((cell, step) => cell.on !== before[index][step].on || cell.velocity !== before[index][step].velocity))
     expect(changed).toBe(true)
+    store.undo()
+    expect(store.project.patternClips).toHaveLength(2)
     store.undo()
     expect(store.project.patternClips).toHaveLength(1)
     expect(store.project.beats?.patterns).toHaveLength(1)
