@@ -2,7 +2,8 @@ import type { PreviewSlice, StreamedFile } from '../sounds/playStream'
 import { streamCatalogSound } from '../sounds/playStream'
 import { SoundCache, fetchSoundBytes, type ByteStore } from '../sounds/cache'
 import { LibraryAuthError, readLibraryAccessKey, signLibraryKeys } from './access'
-import { libraryAudioCache } from './audio'
+import { fetchLibraryBytes, libraryAudioCache } from './audio'
+import { isLoopEntry } from './contentType'
 import { libraryObjectKeyFromUrl, libraryObjectUrl } from './objectUrl'
 import type { LibraryEntry } from './types'
 
@@ -147,45 +148,70 @@ export async function previewLibrarySound(options: {
   token: number
   signal?: AbortSignal
   fetchImpl?: FetchImpl
+  /** Same decoder Load uses. The wav streamer only reads 16-bit, 24-bit, and float WAV. */
+  decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>
   engine: PreviewEngine
   onStart?: () => void
 }) {
-  const loop = options.entry.type === 'loop'
+  const loop = isLoopEntry(options.entry)
   const engine = options.engine
   let started = false
   let level = 0.8
-  const file = await streamLibraryAsset({
-    entry: options.entry,
-    toRate: options.toRate,
-    signal: options.signal,
-    fetchImpl: options.fetchImpl,
-    play: Boolean(engine.feedPreview),
-    onSlice: (slice) => {
-      if (!engine.feedPreview || options.signal?.aborted) return
-      const accepted = engine.feedPreview(options.token, slice.channels, slice.sampleRate, slice.gain)
-      if (accepted === false) return
-      level = slice.gain
-      engine.setPreviewGain?.(options.token, slice.gain)
-      if (started) return
-      started = true
-      options.onStart?.()
-    },
-  })
-  if (options.signal?.aborted) return
-  const matched = file.matched?.[0]?.length && file.matchedRate ? file.matched : null
-  const channels = matched ?? file.channels
-  const sampleRate = matched && file.matchedRate ? file.matchedRate : file.sampleRate
-  if (!channels[0]?.length) throw new Error('That sound had no audio.')
-  if (loop) {
-    const looped = started && engine.continuePreviewLoop?.(options.token, channels, sampleRate, level)
-    if (looped) return
+  try {
+    const file = await streamLibraryAsset({
+      entry: options.entry,
+      toRate: options.toRate,
+      signal: options.signal,
+      fetchImpl: options.fetchImpl,
+      play: Boolean(engine.feedPreview),
+      onSlice: (slice) => {
+        if (!engine.feedPreview || options.signal?.aborted) return
+        const accepted = engine.feedPreview(options.token, slice.channels, slice.sampleRate, slice.gain)
+        if (accepted === false) return
+        level = slice.gain
+        engine.setPreviewGain?.(options.token, slice.gain)
+        if (started) return
+        started = true
+        options.onStart?.()
+      },
+    })
+    if (options.signal?.aborted) return
+    const matched = file.matched?.[0]?.length && file.matchedRate ? file.matched : null
+    const channels = matched ?? file.channels
+    const sampleRate = matched && file.matchedRate ? file.matchedRate : file.sampleRate
+    if (!channels[0]?.length) throw new Error('That sound had no audio.')
+    if (loop) {
+      const looped = started && engine.continuePreviewLoop?.(options.token, channels, sampleRate, level)
+      if (looped) return
+      engine.stopPreview()
+      engine.previewPcm(channels, sampleRate, true)
+      if (!started) options.onStart?.()
+      return
+    }
+    if (started) return
     engine.stopPreview()
-    engine.previewPcm(channels, sampleRate, true)
-    if (!started) options.onStart?.()
-    return
+    engine.previewPcm(channels, sampleRate, false)
+    options.onStart?.()
+  } catch (error) {
+    if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
+    if (started) {
+      if (streamDecodeMiss(error)) return
+      throw error
+    }
+    if (!options.decode || !streamDecodeMiss(error)) throw error
+    const impl = options.fetchImpl
+    const bytes = await fetchLibraryBytes(options.entry.key, impl ? ((input, init) => impl(String(input), init)) : fetch)
+    if (options.signal?.aborted) return
+    const decoded = await options.decode(bytes)
+    if (options.signal?.aborted) return
+    if (!decoded.channels[0]?.length) throw new Error('That sound had no audio.')
+    engine.stopPreview()
+    engine.previewPcm(decoded.channels, decoded.sampleRate, loop)
+    options.onStart?.()
   }
-  if (started) return
-  engine.stopPreview()
-  engine.previewPcm(channels, sampleRate, false)
-  options.onStart?.()
+}
+
+function streamDecodeMiss(error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  return message === 'That sound file could not be read.' || message === 'That sound file ended early.'
 }

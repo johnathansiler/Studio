@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react'
 import { isRecordedClip } from '../audio/recordTake'
-import { altReadout, keyReadout, tempoForSong, tempoReadout } from '../model/clipHearing'
-import { keyShiftReadout } from '../model/keyFit'
+import { altReadout, keyReadout } from '../model/clipHearing'
+import { keyShiftReadout, songKeyChip } from '../model/keyFit'
 import {
   CLIP_TEMPO_LABEL,
   CLIP_TEMPO_MODES,
@@ -12,6 +12,7 @@ import {
 } from '../model/clipTempo'
 import type { ClipTempoMode } from '../model/types'
 import type { ProjectStore } from '../state/store'
+import { clipShiftPlan, runKeyShift } from './offerKeyShift'
 import './clipTempo.css'
 
 const HINT: Record<ClipTempoMode, string> = {
@@ -44,6 +45,11 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
     () => store.project.keyShift ?? 'ask',
     () => store.project.keyShift ?? 'ask',
   )
+  const songKey = useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => songKeyChip(store.scaleState()) ?? '',
+    () => songKeyChip(store.scaleState()) ?? '',
+  )
   if (!clip) return null
   const stretch = clip.stretch
   const mode = clipTempoMode(stretch)
@@ -62,10 +68,10 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
   const hearing = clip.hearing
   const recorded = isRecordedClip(clip)
   const keyLine = recorded ? null : keyShiftReadout(clip)
-  const songTempo = hearing && hearing.bpm > 0 ? tempoForSong(hearing.bpm, recorded ? null : source) : 0
+  const shift = recorded ? null : clipShiftPlan(store, trackId, clipId)
   const summary = mode === 'free'
-    ? `Original. ${sourceText}. ${playsText}. Pick Follow, half, double, or Lock. Detect reads the key and the tempo.`
-    : `${modeName}. ${sourceText}. ${playsText}. Detect reads the key and the tempo.`
+    ? `Original. ${sourceText}. ${playsText}. Pick Follow, half, double, or Lock. Detect reads the key and the scale.`
+    : `${modeName}. ${sourceText}. ${playsText}. Detect reads the key and the scale.`
 
   async function detect() {
     if (!clip) return
@@ -121,7 +127,7 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
         data-clip-detect=""
         aria-busy={busy}
         disabled={busy}
-        title={busy ? 'Reading the key and the tempo.' : 'Detect the key and the tempo of this clip, the way it sounds now.'}
+        title={busy ? 'Reading the key and the scale.' : 'Detect the key and the scale of this clip. It does not change the song tempo.'}
         onClick={() => void detect()}
       >
         {busy ? 'Detecting…' : 'Detect'}
@@ -162,30 +168,40 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
         </button>
       ) : null}
       {note ? <p className="clip-tempo-note">{note}</p> : null}
+      {songKey ? <p className="clip-tempo-readout" data-song-key={songKey}>Song key: {songKey}</p> : null}
       {keyLine ? (
         <div className="clip-hearing" data-key-shift-dock="" role="region" aria-label="Shifted key">
           <p data-key-shift-readout="">{keyLine}</p>
           <button type="button" data-key-revert="" title="Put this loop back on its original pitch." onClick={() => store.revertKeyShift(trackId, clipId)}>
-            Revert
+            Revert to original
+          </button>
+        </div>
+      ) : shift ? (
+        <div className="clip-hearing" data-key-shift-dock="" role="region" aria-label="Shift to the song key">
+          <button
+            type="button"
+            data-shift-to-song=""
+            title={`Pitch this loop into the song key, ${shift.to}. The original file stays put.`}
+            onClick={() => { void runKeyShift(store, shift, false) }}
+          >
+            {`Shift to song key (${shift.to})`}
           </button>
         </div>
       ) : null}
-      {hearing ? (
-        <div className="clip-hearing" data-clip-hearing="" role="region" aria-label="Detected key and tempo">
+      {hearing?.clearKey ? (
+        <div className="clip-hearing" data-clip-hearing="" role="region" aria-label="Detected key and scale">
           <p data-hearing-key="">{keyReadout(hearing)}</p>
-          {hearing.clearKey && hearing.alt ? <p data-hearing-alt="">{altReadout(hearing)}</p> : null}
-          <p data-hearing-bpm="">{tempoReadout(hearing.bpm, source, projectBpm)}</p>
-          {hearing.clearKey && Math.abs(hearing.cents) >= 8 ? <p data-hearing-cents="">{`Tuning ${hearing.cents > 0 ? '+' : ''}${hearing.cents} cents`}</p> : null}
-          {hearing.clearKey ? (
-            <button type="button" className="primary" title={`Set the project key to ${hearing.key}. Auto-Tune follows the project key.`} onClick={() => store.useDetectedKey(trackId, clipId)}>
-              Set project key
-            </button>
-          ) : null}
-          {songTempo > 0 ? (
-            <button type="button" title={recorded ? `Set the song to ${formatBpm(songTempo)}. This take stays at the speed you sang.` : `Set the song to ${formatBpm(songTempo)}. Follow stays on.`} onClick={() => store.useDetectedTempo(trackId, clipId)}>
-              Use for song
-            </button>
-          ) : null}
+          <p data-hearing-scale="">{`Scale: ${hearing.scale === 'aeolian' ? 'natural minor' : 'major'}`}</p>
+          {hearing.alt ? <p data-hearing-alt="">{altReadout(hearing)}</p> : null}
+          <button
+            type="button"
+            className="primary"
+            data-set-song-key=""
+            title={`Set the song key to ${hearing.key}. The song tempo stays put. Auto-Tune follows this key.`}
+            onClick={() => store.useDetectedKey(trackId, clipId)}
+          >
+            {`Set song key to ${hearing.key}`}
+          </button>
         </div>
       ) : null}
     </div>

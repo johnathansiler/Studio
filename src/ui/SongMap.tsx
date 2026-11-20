@@ -58,8 +58,8 @@ export function SmartTempoBar({ store }: { store: ProjectStore }) {
           ? `This loop is ${offer.bpm.toFixed(1)} BPM and is already following the song.`
           : `This clip is about ${offer.bpm.toFixed(1)} BPM.`}
       </span>
-      <button type="button" title="Set the song tempo to this clip" onClick={() => store.adaptClipTempo(offer.trackId, offer.clipId)}>
-        Use for song
+      <button type="button" title="Set the song tempo to this clip. The song key stays put." onClick={() => store.adaptClipTempo(offer.trackId, offer.clipId)}>
+        {`Set song tempo to ${Number.isInteger(offer.bpm) ? String(offer.bpm) : offer.bpm.toFixed(1)}`}
       </button>
       {follows ? null : (
         <button type="button" title="Stretch this clip to the song tempo without changing its pitch" onClick={() => store.conformClipTempo(offer.trackId, offer.clipId)}>

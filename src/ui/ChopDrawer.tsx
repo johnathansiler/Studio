@@ -290,7 +290,7 @@ export function ChopDrawer({
             <div className="chop-fit">
               <button type="button" className="hw-key ch-tab" onClick={() => patch({ semitones: fit.semitones, cents: 0, pitchMode: 'vinyl', tempoSource: 'sample' })}>Fit to tempo</button>
               <p>{fit.semitones > 0 ? '+' : ''}{fit.semitones} semitones, {fit.bpm.toFixed(1)} BPM, {fit.difference.toFixed(1)} BPM apart</p>
-              <button type="button" className="hw-key ch-tab" onClick={() => store.setTempo(fit.bpm)}>Set project tempo</button>
+              <button type="button" className="hw-key ch-tab" title="Set the song tempo. The song key stays put." onClick={() => store.setTempo(fit.bpm)}>{`Set song tempo to ${fit.bpm.toFixed(1)}`}</button>
             </div>
           )}
           {chop.mode === 'tempo' && (

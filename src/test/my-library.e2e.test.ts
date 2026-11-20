@@ -255,7 +255,7 @@ describe('my library on a phone', () => {
         const facets = [...document.querySelectorAll('.library-filter-chips > button[data-facet]')]
         const options = [...document.querySelectorAll('.library-filter-list > button')]
         const lock = document.querySelector('.library-lock-btn')
-        const search = document.querySelector('.library-search') as HTMLElement | null
+        const search = document.querySelector('.library-sticky') as HTMLElement | null
         const row = document.querySelector('.my-library .sound-row') as HTMLElement | null
         const clipped = (node: Element) => node.scrollWidth > node.clientWidth + 1
         return {
@@ -282,7 +282,7 @@ describe('my library on a phone', () => {
       expect(grid.sticky).toBe('sticky')
       expect(grid.rowHeight).toBe('64px')
       expect(grid.rowGap).toBe('6px')
-      await page.getByRole('button', { name: 'One-shot', exact: true }).click()
+      await page.getByRole('button', { name: 'One-shots', exact: true }).click()
       await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
       await page.getByRole('button', { name: /^Filter/ }).click()
       await page.getByRole('button', { name: 'Genre', exact: true }).click()
@@ -334,6 +334,38 @@ describe('my library on a phone', () => {
       await expect.poll(async () => page.locator('[data-library-key="Guitar/riff_F#m_100.wav"]').count()).toBe(0)
       await page.screenshot({ path: '/opt/cursor/artifacts/key_results_fold.png' })
       await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+      await page.getByLabel('Search my library').fill('')
+      await page.setViewportSize({ width: 384, height: 844 })
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.getByRole('button', { name: 'Type', exact: true }).click()
+      await page.getByRole('button', { name: 'Loops', exact: true }).click()
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
+      await expect.poll(async () => page.locator('.sound-row[data-content-type="loop"]').count()).toBe(3)
+      await expect.poll(async () => page.locator('.sound-row[data-content-type="one-shot"]').count()).toBe(0)
+      await expect.poll(async () => page.locator('.sound-row[data-content-type="sfx"]').count()).toBe(0)
+      await expect.poll(async () => page.locator('.library-active-chip').innerText()).toContain('Loops')
+      const chipSeen = await page.locator('.library-active-chip').evaluate((node) => {
+        const box = node.getBoundingClientRect()
+        const sheet = document.querySelector('[data-playlist-browser="open"]')?.getBoundingClientRect()
+        return box.height >= 40 && box.top >= (sheet?.top ?? 0) && box.bottom <= window.innerHeight
+      })
+      expect(chipSeen).toBe(true)
+      await expect.poll(async () => page.locator('[data-sound-bpm="100"]').count()).toBeGreaterThan(0)
+      await page.screenshot({ path: '/opt/cursor/artifacts/loops_list_384.png' })
+      await page.getByRole('button', { name: /^Filter/ }).click()
+      await page.getByRole('button', { name: 'Type', exact: true }).click()
+      await page.locator('[data-content-type="loop"][aria-pressed="true"]').waitFor()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+      await page.screenshot({ path: '/opt/cursor/artifacts/loops_filter_384.png' })
+      await page.setViewportSize({ width: 884, height: 1104 })
+      await page.locator('.playlist-browser.bottom-sheet').waitFor()
+      await page.locator('[data-content-type="loop"][aria-pressed="true"]').waitFor()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+      await page.screenshot({ path: '/opt/cursor/artifacts/loops_filter_884.png' })
+      await page.keyboard.press('Escape')
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
+      await page.getByRole('button', { name: 'Clear Loops', exact: true }).click()
+      await page.setViewportSize({ width: 390, height: 844 })
       await page.getByLabel('Search my library').fill('trap 808 C')
       await page.getByRole('button', { name: 'Load 139 Trap Click C' }).click()
       const pads = page.locator('[data-pads="plugin"]')

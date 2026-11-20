@@ -1,3 +1,4 @@
+import { contentTypeSearchWord, entryMatchesContentType } from './contentType'
 import { keyFits, parseMusicalKey, resolveEntryKey, type MusicalKey } from './musicalKey'
 import type { LibraryEntry, LibraryFacets, LibraryQuery } from './types'
 
@@ -108,6 +109,20 @@ function facetsOf(entries: LibraryEntry[]): LibraryFacets {
   }
 }
 
+/** Text hits, plus every row of a content type when the word names one ("loop", "loops"). */
+function idsForToken(index: LibraryIndex, token: string): Uint32Array {
+  const text = postings(index, token)
+  const kind = contentTypeSearchWord(token)
+  if (!kind || kind === 'instrument') return text
+  const extra: number[] = []
+  for (let i = 0; i < index.entries.length; i++) {
+    if (entryMatchesContentType(index.entries[i], kind)) extra.push(i)
+  }
+  if (!extra.length) return text
+  if (!text.length) return Uint32Array.from(extra)
+  return unionMarked([text, Uint32Array.from(extra)], index.entries.length)
+}
+
 function postings(index: LibraryIndex, token: string): Uint32Array {
   if (token.length < 3) return index.exact.get(token) ?? EMPTY
   const words = index.prefixes.get(token.slice(0, 3)) ?? []
@@ -168,7 +183,7 @@ function intersect(a: Uint32Array, b: Uint32Array) {
 }
 
 export function entryMatchesFilters(entry: LibraryEntry, query: LibraryQuery, heard?: ReadonlyMap<string, MusicalKey> | null) {
-  if (query.type && entry.type !== query.type) return false
+  if (query.type && !entryMatchesContentType(entry, query.type)) return false
   if (query.category && entry.category !== query.category) return false
   if (query.instrument && entry.instrument !== query.instrument) return false
   if (query.genre && !entry.genre.includes(query.genre)) return false
@@ -190,9 +205,9 @@ export function searchLibrary(index: LibraryIndex, query: LibraryQuery, heard?: 
   const tokens = queryTokens(query.text || '')
   let ids: Uint32Array | null = null
   if (tokens.length) {
-    ids = postings(index, tokens[0])
+    ids = idsForToken(index, tokens[0])
     for (let n = 1; n < tokens.length; n++) {
-      ids = intersect(ids, postings(index, tokens[n]))
+      ids = intersect(ids, idsForToken(index, tokens[n]))
       if (!ids.length) break
     }
   }

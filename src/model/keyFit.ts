@@ -99,10 +99,16 @@ export function fitToProject(loop: MusicalKey, project: MusicalKey): KeyFit {
   return { semitones, relative: false, modesDiffer, from: loop.label, to: project.label }
 }
 
+/** Short label once the musician has chosen a song key. Null until then. */
+export function songKeyChip(scale: { root?: number; scale?: string; library?: string; keySet?: boolean } | null | undefined): string | null {
+  const key = projectMusicalKey(scale)
+  if (!key) return null
+  const name = NAMES[((key.root % 12) + 12) % 12]
+  return key.minor ? `${name}m` : name
+}
+
 export function keyShiftPrompt(fit: KeyFit) {
-  const sign = fit.semitones > 0 ? `+${fit.semitones}` : String(fit.semitones)
-  const note = fit.modesDiffer ? ', tonic' : ''
-  return `Loop is ${fit.from} — shift to project key ${fit.to}? (${sign} st${note})`
+  return `Change this loop to the song key (${fit.to})?`
 }
 
 export function keyShiftReadout(clip: {

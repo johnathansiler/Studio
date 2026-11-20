@@ -827,6 +827,10 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   width: auto;
   min-width: 0;
 }
+.my-library .sound-meta {
+  width: 100%;
+  max-width: 100%;
+}
 .my-library .sound-key-chip {
   flex: none;
   display: inline-flex;
@@ -846,11 +850,12 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   line-height: 1.2;
   opacity: 0.72;
 }
-/* Search, Filter, and Lock stay put while .bottom-sheet-body scrolls the rows. */
+/* Search, the open filter, and the active chips stay put while the rows scroll.
+   The chip has to travel with the badge, or a count of 1 has nothing to clear. */
 .playlist-browser.bottom-sheet .my-library.sound-panel {
   overflow: visible;
 }
-.playlist-browser.bottom-sheet .my-library .library-search {
+.playlist-browser.bottom-sheet .my-library .library-sticky {
   position: sticky;
   top: 0;
   z-index: 6;
@@ -858,10 +863,15 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   padding: 4px 0 8px;
   box-shadow: 0 12px 0 #141c18;
 }
-.playlist-browser.bottom-sheet .my-library .library-filter-sheet {
-  position: sticky;
-  top: 52px;
-  z-index: 5;
+.playlist-browser.bottom-sheet .my-library .library-search {
+  position: static;
+  background-color: transparent;
+  padding: 0 0 8px;
+  box-shadow: none;
+}
+.playlist-browser.bottom-sheet .my-library .library-filter-sheet,
+.playlist-browser.bottom-sheet .my-library .library-active-bar {
+  position: static;
   background-color: #141c18;
 }
 .playlist-browser.bottom-sheet > .bottom-sheet-body {

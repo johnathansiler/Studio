@@ -1,3 +1,4 @@
+import { isDrumKitInstrument } from './contentType'
 import type { LibraryInstrumentSummary } from './group'
 import type { LibraryHits, LibraryIndex } from './search'
 import type { LibraryEntry, LibraryQuery } from './types'
@@ -16,7 +17,9 @@ function coveredByInstrument(entry: LibraryEntry, instruments: LibraryInstrument
 }
 
 export function instrumentQueryHit(instrument: LibraryInstrumentSummary, query: LibraryQuery) {
-  if (query.type && query.type !== 'instrument') return false
+  if (query.type === 'drum-kit') {
+    if (!isDrumKitInstrument(instrument)) return false
+  } else if (query.type && query.type !== 'instrument') return false
   if (query.genre || query.musicalKey || query.mood || query.bpmMin != null || query.bpmMax != null) return false
   if (query.instrument) return false
   if (query.category && instrument.category.toLowerCase() !== query.category.toLowerCase()) return false
@@ -44,7 +47,7 @@ export function browseLibraryRows(
     sounds.push(entry)
   }
   const shown = instruments.filter((item) => instrumentQueryHit(item, query))
-  const soundOnly = query.type === 'one-shot' || query.type === 'loop' || query.type === 'sfx'
+  const soundOnly = query.type === 'one-shot' || query.type === 'loop' || query.type === 'sfx' || query.type === 'upload'
   const instrumentRows: BrowseRow[] = shown.map((instrument) => ({ kind: 'instrument', instrument }))
   const soundRows: BrowseRow[] = query.type === 'instrument' ? [] : sounds.map((entry) => ({ kind: 'sound', entry }))
   if (soundOnly) return soundRows

@@ -305,8 +305,10 @@ export interface AudioClip {
   spectral?: SpectralRepair
   /** Session color. Missing uses the track color. */
   color?: string
-  /** Last key and tempo read from this clip. Missing until Detect runs. */
+  /** Last key and scale read from this clip. Missing until Detect runs. */
   hearing?: ClipHearing
+  /** Key this loop was tagged or detected as, such as "F# minor". Not a pitch shift. */
+  loopKey?: string
   /** Semitone move into the project key. The samples stay in the source asset. */
   keyShift?: ClipKeyShift
 }

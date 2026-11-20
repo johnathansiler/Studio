@@ -14,7 +14,7 @@ export function KeyShiftPrompt({ store }: { store: ProjectStore }) {
   const [busy, setBusy] = useState(false)
   if (!offer) return null
   return (
-    <div className="key-shift-prompt" role="group" aria-label="Shift loop to the project key" data-key-shift-prompt="">
+    <div className="key-shift-prompt" role="group" aria-label="Change this loop to the song key" data-key-shift-prompt="">
       <p>{busy ? 'Shifting…' : offer.line}</p>
       <label>
         <input
@@ -24,13 +24,13 @@ export function KeyShiftPrompt({ store }: { store: ProjectStore }) {
           disabled={busy}
           onChange={(event) => setAlways(event.target.checked)}
         />
-        Always do this
+        Always for new loops
       </label>
       <button
         type="button"
         data-key-shift="apply"
         disabled={busy}
-        title="Pitch this loop into the project key. The original file stays put."
+        title="Yes. Pitch this loop into the song key. The original file stays put."
         onClick={() => {
           const current = store.keyShiftOffer
           if (!current || busy) return
@@ -40,19 +40,19 @@ export function KeyShiftPrompt({ store }: { store: ProjectStore }) {
             .finally(() => setBusy(false))
         }}
       >
-        Shift
+        Yes
       </button>
       <button
         type="button"
         data-key-shift="keep"
         disabled={busy}
-        title="Leave this loop in its original key."
+        title="No. Leave this loop in its original key."
         onClick={() => {
           if (always) store.setKeyShiftPolicy('keep')
           store.dismissKeyShiftOffer()
         }}
       >
-        Keep original
+        No
       </button>
     </div>
   )
