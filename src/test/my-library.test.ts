@@ -10,6 +10,7 @@ import { clearLibraryAccessKey, LibraryAuthError, readLibraryAccessKey, signLibr
 import { loadLibraryCatalog, memoryAudioCache, setLibraryCaches } from '../library/audio'
 import { libraryBufferId, placeLibraryAsset, readLibraryAsset } from '../library/place'
 import { cleanLibraryFiles, projectKeepsLibraryKeys, restoreLibraryFiles } from '../library/project'
+import { contentTypeChoices } from '../library/contentType'
 import { buildLibraryIndex, entryMatchesText, libraryRowWindow, searchLibrary, tokenMatches } from '../library/search'
 import type { LibraryEntry } from '../library/types'
 
@@ -94,6 +95,27 @@ describe('private library search', () => {
     expect(searchLibrary(index, { ...base, type: '', bpmMin: 90, bpmMax: 120 }).total).toBe(1)
     expect(searchLibrary(index, { ...base, type: 'one-shot', genre: 'trap', bpmMin: 130, bpmMax: 150 }).total).toBe(1)
     expect(searchLibrary(index, { ...base, type: '', bpmMin: 160, bpmMax: 180 }).total).toBe(0)
+  })
+
+  it('keeps Loops to loops, including a folder loop and an upload, and combines with key', () => {
+    const unnamed = row('Loops/rise.wav', 'rise choir pad', { type: '', category: 'pad', bpm: 96, musicalKey: 'D minor' })
+    const uploaded = row('Uploads/my-riff.wav', 'riff guitar', { type: 'loop', category: 'guitar', bpm: 110, musicalKey: 'A minor', pack: 'Uploads' })
+    const kit = row('Drums/acoustic kit.wav', 'acoustic drum kit', { type: 'drum-kit', category: 'kit', instrument: 'drum kit' })
+    const mixed = indexOf([trap, sharp, choir, vinyl, unnamed, uploaded, kit])
+    const base = { text: '', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null }
+    const keys = (query: { type?: string; musicalKey?: string; text?: string }) => {
+      const hits = searchLibrary(mixed, { ...base, text: query.text ?? '', type: query.type ?? '', musicalKey: query.musicalKey ?? '' })
+      return [...(hits.ids ?? [])].map((id) => mixed.entries[id].key)
+    }
+    expect(keys({ type: 'loop' }).sort()).toEqual(['Choir/vocal pad.wav', 'Loops/rise.wav', 'Uploads/my-riff.wav'])
+    expect(keys({ type: 'loop', musicalKey: 'A minor' }).sort()).toEqual(['Choir/vocal pad.wav', 'Uploads/my-riff.wav'])
+    expect(keys({ type: 'loop', musicalKey: 'C' })).toEqual([])
+    expect(keys({ type: 'one-shot' })).not.toContain('Choir/vocal pad.wav')
+    expect(keys({ text: 'loop' }).sort()).toEqual(['Choir/vocal pad.wav', 'Loops/rise.wav', 'Uploads/my-riff.wav'])
+    expect(keys({ text: 'loops', type: 'loop', musicalKey: 'D minor' })).toEqual(['Loops/rise.wav'])
+    const choices = contentTypeChoices(mixed.entries, [])
+    expect(choices.map((choice) => choice.label)).toEqual(['Loops', 'One-shots', 'Drum kits', 'SFX', 'My Library uploads'])
+    expect(choices.some((choice) => choice.id === 'instrument')).toBe(false)
   })
 })
 

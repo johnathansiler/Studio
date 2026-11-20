@@ -372,4 +372,30 @@ describe('my library streamed preview', () => {
     clearLibraryAccessKey()
     setLibraryCaches({ audio: null })
   })
+
+  it('plays a file the wav streamer cannot read through the library decoder', async () => {
+    resetSoundDownloads()
+    resetLibrarySoundMemory()
+    setLibraryCaches({ audio: memoryAudioCache() })
+    writeLibraryAccessKey('owner-pass')
+    const junk = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+    const fetchImpl = libraryFetch(junk, 1_000_000, 'owner-pass', { n: 0 })
+    const played: { channels: Float32Array[]; loop: boolean }[] = []
+    await previewLibrarySound({
+      entry: entryFor('FX/impactGlass heavy 004.wav', junk, 'sfx'),
+      toRate: 48000,
+      token: 9,
+      fetchImpl,
+      decode: async () => ({ sampleRate: 48000, channels: [Float32Array.from([0.25, -0.25])] }),
+      engine: {
+        stopPreview() {},
+        previewPcm(channels, _sampleRate, loop) { played.push({ channels, loop: loop === true }) },
+      },
+    })
+    expect(played).toHaveLength(1)
+    expect(played[0].loop).toBe(false)
+    expect(played[0].channels[0]).toEqual(Float32Array.from([0.25, -0.25]))
+    clearLibraryAccessKey()
+    setLibraryCaches({ audio: null })
+  })
 })
