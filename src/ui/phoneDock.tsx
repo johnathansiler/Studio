@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { VariationBar } from './VariationBar'
 import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
@@ -412,6 +413,7 @@ export function PhoneDock({
       {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
       {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
       {audioTempo ? <ClipTempoControl store={store} trackId={audioTempo.trackId} clipId={audioTempo.clipId} /> : null}
+      {clip && place === 'arrange' ? <VariationBar store={store} /> : null}
       <div className="phone-context btn-tray phone-context-tray" role="toolbar" aria-label="Actions" data-phone-context={kind} data-edit-row={kind === 'arrange' && clip ? 'clips' : kind === 'notes' ? 'notes' : undefined}>
         {kind === 'clip' && clip && (
           <>

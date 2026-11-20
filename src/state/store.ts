@@ -90,6 +90,9 @@ import { normalizeGenerator } from '../generators/settings'
 import { buildSession, normalizePlayer, type PlayerSettings, type SessionDetection, type SessionPart } from '../players'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { applySuggestion, applyUnstuckDraft, type SongDraft, type Suggestion } from '../unstuck'
+import { placeEnsemble } from '../ideas/commit'
+import { applyProjectVariation } from '../ideas/variation'
+import type { Ensemble, VaryAmount } from '../ideas/types'
 import {
   defaultQuantize,
   detectTransients,
@@ -317,6 +320,9 @@ export class ProjectStore {
   /** Selected step-sequencer cells. */
   stepClipboard: StepBoard | null = null
   private nextDrumSeed = 1
+  /** Amount for the Arrange Variation button. Not saved. */
+  varyAmount: VaryAmount = 'medium'
+  private variationClock = 1
   /** Patch history. Transport, selection, zoom, and meters are not recorded. */
   private journal = new HistoryJournal()
   /** A guest may undo a restore they just applied. Other guest edits stay blocked. */
@@ -4904,6 +4910,101 @@ export class ProjectStore {
       }
     })
     this.toast(draft.summary, draft.tracks.length ? 'good' : 'warn')
+  }
+
+  /** Write generated parts as editable MIDI. One undo. Loop-on uses the loop start. */
+  addEnsemble(ensemble: Ensemble, playheadSample = 0) {
+    let summary = ''
+    this.mutate(() => {
+      const placed = placeEnsemble(this.project, ensemble, playheadSample, this.selectedTrackId)
+      summary = placed.summary
+      if (placed.trackId) this.selectedTrackId = placed.trackId
+      if (placed.clipId) {
+        this.selectedMidiClipId = placed.clipId
+        this.selectedMidiClipIds = [placed.clipId]
+        this.selectedClipId = null
+        this.selectedClipIds = []
+        this.selectedPatternClipId = null
+        this.selectedPatternClipIds = []
+        this.selectedNoteId = null
+        this.selectedNoteIds = []
+      }
+    }, 'Add parts')
+    if (summary) this.toast(summary, summary.startsWith('Pick') ? 'warn' : 'good')
+  }
+
+  setVaryAmount(amount: VaryAmount) {
+    if (amount !== 'subtle' && amount !== 'medium' && amount !== 'bold') return
+    if (this.varyAmount === amount) return
+    this.varyAmount = amount
+    this.emit()
+  }
+
+  /**
+   * Duplicate the selected clip just after it, as a musical variation.
+   * Re-roll replaces the latest variation in place. The source clip stays.
+   */
+  varyArrangeClip(options?: { reroll?: boolean; seed?: number; amount?: VaryAmount }) {
+    const blocked = this.variationBlock()
+    if (blocked) {
+      this.toast(blocked, 'warn')
+      return false
+    }
+    const amount = options?.amount ?? this.varyAmount
+    const seed = options?.seed ?? this.variationClock
+    let error = ''
+    this.mutate(() => {
+      const result = applyProjectVariation(this.project, {
+        audioId: this.selectedPatternClipId ? null : this.selectedMidiClipId ? null : this.selectedClipId,
+        midiId: this.selectedPatternClipId ? null : this.selectedMidiClipId,
+        patternId: this.selectedPatternClipId,
+        amount,
+        seed,
+        reroll: options?.reroll === true,
+      })
+      if ('error' in result) {
+        error = result.error
+        return
+      }
+      this.selectedClipIds = result.audioIds
+      this.selectedClipId = result.audioIds.at(-1) ?? null
+      this.selectedMidiClipIds = result.midiIds
+      this.selectedMidiClipId = result.midiIds.at(-1) ?? null
+      this.selectedPatternClipIds = result.patternIds
+      this.selectedPatternClipId = result.patternIds.at(-1) ?? null
+      if (!result.midiIds.length) {
+        this.selectedNoteId = null
+        this.selectedNoteIds = []
+      }
+    }, options?.reroll ? 'Re-roll variation' : 'Variation')
+    if (error) {
+      this.toast(error, 'warn')
+      return false
+    }
+    if (options?.seed == null) this.variationClock += 1
+    return true
+  }
+
+  private variationBlock() {
+    if (this.selectedPatternClipId) {
+      const clip = this.project.patternClips?.find((item) => item.id === this.selectedPatternClipId)
+      const pattern = this.project.beats?.patterns.find((item) => item.id === clip?.patternId)
+      return clip && pattern ? null : 'Select a clip first.'
+    }
+    if (this.selectedMidiClipId) {
+      for (const track of this.project.tracks) {
+        const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
+        if (!clip) continue
+        return clip.notes.length ? null : 'That clip has no notes to vary.'
+      }
+      return 'Select a clip first.'
+    }
+    if (this.selectedClipId) {
+      for (const track of this.project.tracks) {
+        if (track.clips.some((item) => item.id === this.selectedClipId)) return null
+      }
+    }
+    return 'Select a clip first.'
   }
 
   /** Drop an idea onto the chord track plus editable bass and drums in that genre. */

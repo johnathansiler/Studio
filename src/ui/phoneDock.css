@@ -44,6 +44,35 @@
   display: flex;
 }
 
+.variation-dock {
+  order: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 2px 4px;
+  box-sizing: border-box;
+}
+.variation-dock button {
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 2px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #18231d;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+}
+.variation-dock button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
 .shell .phone-context {
   order: 1;
   display: flex;

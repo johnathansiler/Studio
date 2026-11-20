@@ -15,13 +15,27 @@ function sheet(page?: 'write' | 'players' | 'progressions') {
 }
 
 describe('ideas sheet pages', () => {
+  it('keeps the song-key card beside the variation row', () => {
+    const dock = readFileSync(new URL('../ui/phoneDock.tsx', import.meta.url), 'utf8')
+    const card = readFileSync(new URL('../ui/ClipTempoControl.tsx', import.meta.url), 'utf8')
+    expect(dock.indexOf('<ClipTempoControl')).toBeGreaterThan(-1)
+    expect(dock.indexOf('<VariationBar')).toBeGreaterThan(dock.indexOf('<ClipTempoControl'))
+    expect(card).toContain('Song key:')
+    expect(card).toContain('Shift to song key')
+    expect(card).toContain('Revert to original')
+    expect(card).toContain('Set song key to')
+    expect(card).not.toContain('Set song tempo')
+  })
+
   it('maps the old links onto one sheet', () => {
     expect(ideasPageFromSearch('?ideas=1')).toBe('progressions')
     expect(ideasPageFromSearch('?players=1')).toBe('players')
+    expect(ideasPageFromSearch('?generate=1')).toBe('generate')
     expect(ideasPageFromSearch('?unstuck=1')).toBe('write')
     expect(ideasPageFromSearch('')).toBe('write')
     expect(ideasSheetRequested('?ideas=1')).toBe(true)
     expect(ideasSheetRequested('?players=1')).toBe(true)
+    expect(ideasSheetRequested('?generate=1')).toBe(true)
     expect(ideasSheetRequested('?unstuck=1')).toBe(true)
     expect(ideasSheetRequested('')).toBe(false)
   })
@@ -32,6 +46,8 @@ describe('ideas sheet pages', () => {
     expect(html).toContain('>Write<')
     expect(html).toContain('>Progressions<')
     expect(html).toContain('>Players<')
+    expect(html).toContain('>Generate<')
+    expect(html).toContain('id="ideas-tab-generate"')
     expect(html).toContain('data-ideas-page="write"')
     expect(html).toContain('data-unstuck="parts"')
     expect(html).toContain('>Full song<')
