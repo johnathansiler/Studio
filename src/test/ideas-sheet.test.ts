@@ -15,6 +15,18 @@ function sheet(page?: 'write' | 'players' | 'progressions') {
 }
 
 describe('ideas sheet pages', () => {
+  it('keeps the song-key card beside the variation row', () => {
+    const dock = readFileSync(new URL('../ui/phoneDock.tsx', import.meta.url), 'utf8')
+    const card = readFileSync(new URL('../ui/ClipTempoControl.tsx', import.meta.url), 'utf8')
+    expect(dock.indexOf('<ClipTempoControl')).toBeGreaterThan(-1)
+    expect(dock.indexOf('<VariationBar')).toBeGreaterThan(dock.indexOf('<ClipTempoControl'))
+    expect(card).toContain('Song key:')
+    expect(card).toContain('Shift to song key')
+    expect(card).toContain('Revert to original')
+    expect(card).toContain('Set song key to')
+    expect(card).not.toContain('Set song tempo')
+  })
+
   it('maps the old links onto one sheet', () => {
     expect(ideasPageFromSearch('?ideas=1')).toBe('progressions')
     expect(ideasPageFromSearch('?players=1')).toBe('players')
