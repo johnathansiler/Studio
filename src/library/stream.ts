@@ -4,6 +4,7 @@ import { SoundCache, fetchSoundBytes, type ByteStore } from '../sounds/cache'
 import { LibraryAuthError, readLibraryAccessKey, signLibraryKeys } from './access'
 import { fetchLibraryBytes, libraryAudioCache } from './audio'
 import { isLoopEntry } from './contentType'
+import { conformPreviewTempo, loopTempo, previewStretchMode } from './fastBrowse'
 import { libraryObjectKeyFromUrl, libraryObjectUrl } from './objectUrl'
 import type { LibraryEntry } from './types'
 
@@ -207,6 +208,57 @@ export async function previewLibrarySound(options: {
     if (!decoded.channels[0]?.length) throw new Error('That sound had no audio.')
     engine.stopPreview()
     engine.previewPcm(decoded.channels, decoded.sampleRate, loop)
+    options.onStart?.()
+  }
+}
+
+/**
+ * Audition a loop at the song tempo.
+ * The file tempo is stretched with the same beats or tonal mode the clip would use.
+ * A loop with no tempo plays at the file tempo.
+ */
+export async function previewLibraryLoopAtTempo(options: {
+  entry: LibraryEntry
+  toRate: number
+  songBpm: number
+  signal?: AbortSignal
+  fetchImpl?: FetchImpl
+  decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>
+  engine: PreviewEngine
+  onStart?: () => void
+}) {
+  const engine = options.engine
+  try {
+    const file = await streamLibraryAsset({
+      entry: options.entry,
+      toRate: options.toRate,
+      signal: options.signal,
+      fetchImpl: options.fetchImpl,
+      play: false,
+      onSlice: () => undefined,
+    })
+    if (options.signal?.aborted) return
+    const matched = file.matched?.[0]?.length && file.matchedRate ? file.matched : null
+    const channels = matched ?? file.channels
+    const sampleRate = matched && file.matchedRate ? file.matchedRate : file.sampleRate
+    if (!channels[0]?.length) throw new Error('That sound had no audio.')
+    const shaped = conformPreviewTempo(channels, sampleRate, loopTempo(options.entry), options.songBpm, previewStretchMode(options.entry))
+    if (options.signal?.aborted) return
+    engine.stopPreview()
+    engine.previewPcm(shaped, sampleRate, true)
+    options.onStart?.()
+  } catch (error) {
+    if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
+    if (!options.decode || !streamDecodeMiss(error)) throw error
+    const impl = options.fetchImpl
+    const bytes = await fetchLibraryBytes(options.entry.key, impl ? ((input, init) => impl(String(input), init)) : fetch)
+    if (options.signal?.aborted) return
+    const decoded = await options.decode(bytes)
+    if (options.signal?.aborted) return
+    if (!decoded.channels[0]?.length) throw new Error('That sound had no audio.')
+    const shaped = conformPreviewTempo(decoded.channels, decoded.sampleRate, loopTempo(options.entry), options.songBpm, previewStretchMode(options.entry))
+    engine.stopPreview()
+    engine.previewPcm(shaped, decoded.sampleRate, true)
     options.onStart?.()
   }
 }

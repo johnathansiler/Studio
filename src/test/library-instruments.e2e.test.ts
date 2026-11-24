@@ -140,7 +140,7 @@ describe('grouped library instruments on a phone', () => {
       await page.goto(url, { waitUntil: 'domcontentloaded' })
       const browserPane = await openLibrary(page)
       await page.getByRole('button', { name: 'Filter', exact: true }).click()
-      await page.getByRole('button', { name: 'Instruments', exact: true }).click()
+      await page.locator('.library-filter-sheet').getByRole('button', { name: 'Instruments', exact: true }).click()
       await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
       await expect.poll(async () => page.locator('[data-library-instrument]').count()).toBe(2)
       await expect.poll(async () => page.locator('[data-library-key]').count()).toBe(0)
