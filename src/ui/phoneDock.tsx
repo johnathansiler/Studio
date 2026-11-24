@@ -17,6 +17,7 @@ import {
   type PhonePlace,
 } from './phoneContext'
 import { phoneFocus, subscribePhoneFocus } from './phoneFocus'
+import { playAlongOpen, setPlayAlongOpen, subscribePlayAlong, togglePlayAlong } from './playAlongBus'
 import './phoneDock.css'
 import './clipTempo.css'
 
@@ -309,6 +310,7 @@ export function PhoneDock({
   canRedo: boolean
   playheadSample: () => number
 }) {
+  const along = useSyncExternalStore(subscribePlayAlong, playAlongOpen, () => false)
   const utility = useSyncExternalStore(subscribeArrangeSheet, currentArrangeSheet, () => null)
   const focus = useSyncExternalStore(subscribePhoneFocus, phoneFocus, () => 'none' as const)
   const [offstage, setOffstage] = useState<'tools' | 'snap' | null>(null)
@@ -355,6 +357,9 @@ export function PhoneDock({
   useEffect(() => {
     if (place !== 'mix' || menuOpen || browseOpen) setTransportMore(false)
   }, [place, menuOpen, browseOpen])
+  useEffect(() => {
+    if (menuOpen || browseOpen || ideasOpen) setPlayAlongOpen(false)
+  }, [menuOpen, browseOpen, ideasOpen])
   useScreenOverlay(() => setTransportMore(false), transportMore && place === 'mix')
 
   function closeIdeas() {
@@ -468,6 +473,9 @@ export function PhoneDock({
             {clip.kind !== 'pattern' && (
               <Hit action="split" label="Split" title="Split the clip at the playhead." onClick={splitClip} />
             )}
+            <Hit action="play-along" label="Play along" title="See each note as it plays, and play it back." pressed={along} onClick={() => togglePlayAlong()}>
+              Play along
+            </Hit>
             <Hit action="delete" label="Delete" title="Remove the selection." onClick={() => store.deleteSelectedClip()} />
             {track && (
               <>
@@ -534,6 +542,9 @@ export function PhoneDock({
           <>
             <EditActions store={store} mode="clips" playheadSample={playheadSample} />
             <div id="transport-extras" className="transport-extras-slot" />
+            <Hit action="play-along" label="Play along" title="See each note as it plays, and play it back." pressed={along} onClick={() => togglePlayAlong()}>
+              Play along
+            </Hit>
             <Hit action="delete" label="Delete" title="Remove the selection." onClick={() => store.deleteSelectedClip()}>
               <DeleteIcon />
             </Hit>

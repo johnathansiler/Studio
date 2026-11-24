@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { FEATURES, preferArrangeTransport, preferArrangeView } from './features'
 import { installControlGuards } from './ui/gestures'
 import { AudioEngine } from './audio/engine'
@@ -64,6 +64,7 @@ import { PhoneDock } from './ui/phoneDock'
 import { KeyShiftPrompt } from './ui/KeyShiftPrompt'
 import { offerLoopKeyShift } from './ui/offerKeyShift'
 import { BOTTOM_COVER_EVENT, CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
+import { playAlongOpen, setPlayAlongOpen, subscribePlayAlong } from './ui/playAlongBus'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
@@ -102,6 +103,7 @@ import {
 } from './ui/lazyViews'
 const loadUnstuck = moduleView(() => import('./unstuck/UnstuckSheet'), 'UnstuckSheet')
 const loadAnalysis = moduleView(() => import('./ui/AnalysisSheet'), 'AnalysisSheet')
+const loadPlayAlong = moduleView(() => import('./ui/PlayAlongSheet'), 'PlayAlongSheet')
 const loadKnock = moduleView(() => import('./ui/KnockPop'), 'KnockPop')
 const loadSpectral = moduleView(() => import('./ui/SpectralSheet'), 'SpectralSheet')
 import { Toasts } from './ui/Toasts'
@@ -137,6 +139,7 @@ function createBundle(): Bundle {
 
 export function App() {
   const [{ store, engine, session }] = useState(createBundle)
+  const playAlong = useSyncExternalStore(subscribePlayAlong, playAlongOpen, () => false)
 
   useEffect(() => watchLibraryProject(store), [store])
 
@@ -2513,6 +2516,16 @@ async function importDropped(files: FileList) {
           load={loadAnalysis}
         >
           {(View) => <View store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
+        </LazySheet>
+      )}
+      {playAlong && (
+        <LazySheet
+          label="Play along"
+          className="play-along-pending"
+          onClose={() => setPlayAlongOpen(false)}
+          load={loadPlayAlong}
+        >
+          {(View) => <View store={store} engine={engine} onClose={() => setPlayAlongOpen(false)} />}
         </LazySheet>
       )}
       {perform && (

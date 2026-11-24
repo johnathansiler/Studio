@@ -4425,6 +4425,55 @@ export class ProjectStore {
     })
   }
 
+  /**
+   * One undo step. Audio gains a new instrument track; MIDI gains a clip on the same track.
+   * The source audio, including a recorded take, is not rewritten.
+   */
+  convertPlayAlong(trackId: string, clipId: string, notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[]) {
+    if (!notes.length) return
+    this.mutate(() => {
+      const source = this.track(trackId)
+      if (!source) return
+      const audio = source.clips.find((clip) => clip.id === clipId)
+      const midi = source.midiClips.find((clip) => clip.id === clipId)
+      const startBeat = audio ? projectSampleBeat(this.project, audio.startSample) : midi?.startBeat ?? 0
+      const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0.25)
+      let host: Track | null = source.type === 'midi' ? source : null
+      if (!host) {
+        const made = tracksFor({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false }, this.project.tracks)
+        host = made[0] ?? null
+        if (!host) return
+        host.name = `${(audio?.name || 'Play along').slice(0, 48)} MIDI`
+        normalizeTrackRack(host)
+        const at = this.project.tracks.findIndex((track) => track.id === source.id)
+        this.project.tracks.splice(at < 0 ? this.project.tracks.length : at + 1, 0, host)
+      }
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: 'Play along',
+        startBeat,
+        durationBeats: Math.max(0.25, Math.ceil(end * 4) / 4),
+        notes: notes.map((note) => ({
+          id: uid('note'),
+          pitch: Math.max(0, Math.min(127, Math.round(note.pitch))),
+          startBeat: Math.max(0, note.startBeat),
+          durationBeats: Math.max(0.05, note.durationBeats),
+          velocity: Math.max(0.05, Math.min(1, note.velocity)),
+        })),
+      }
+      host.midiClips.push(clip)
+      this.selectedTrackId = host.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedPatternClipId = null
+      this.selectedPatternClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    }, 'Convert to MIDI')
+  }
+
   addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0, coalesce = false) {
     if (!notes.length) return
     const write = () => {
