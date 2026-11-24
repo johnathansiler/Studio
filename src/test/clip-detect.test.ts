@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { renderStretch } from '../audio/stretch/engine'
-import { detectKey, detectTempo, hearingOf } from '../analysis/clipKey'
+import { clipDeniesKey, detectKey, detectTempo, hearingOf } from '../analysis/clipKey'
 import { handleClipDetect } from '../analysis/clipWorker'
 import { altReadout, keyReadout, relateTempo, tempoForSong, tempoReadout } from '../model/clipHearing'
 import { migrateProject } from '../model/schema'
@@ -265,6 +265,40 @@ describe('clip key and tempo', () => {
     }
     const response = handleClipDetect({
       id: 9,
+      type: 'clip-detect',
+      sampleRate: rate,
+      channels: [audio],
+      clip,
+      tempo: 120,
+    })
+    expect(response.hearing?.clearKey).toBe(false)
+    expect(response.hearing?.key).toBe('')
+    expect(response.hearing?.maybeKey ?? '').toBe('')
+    expect(response.hearing?.root).toBeNull()
+  })
+
+  it('does not name a drum loop that is filed as drums', () => {
+    const rate = 22050
+    const audio = progression(MAJOR_CADENCE, 0, rate, 0)
+    expect(detectKey(audio, rate).clear).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'drums' })).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'piano' })).toBe(false)
+    const clip: AudioClip = {
+      id: 'beat',
+      name: 'Downbeat Drums',
+      bufferId: 'buf',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: audio.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+      soundType: 'loop',
+      soundCategory: 'drums',
+    }
+    const response = handleClipDetect({
+      id: 10,
       type: 'clip-detect',
       sampleRate: rate,
       channels: [audio],

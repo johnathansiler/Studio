@@ -1,12 +1,10 @@
 /**
  * Key and tempo of one audio clip.
  *
- * Key reads the whole buffer (a short loop wraps around the seam): harmonic
- * and percussive spectra are split, peaks land on a log-frequency chroma, and
- * A harmonic pitch-class profile is correlated with the EDMA profiles.
- * A confident key is major or minor. A weaker tonal reading is "Unsure"
- * and keeps its best guess. "No clear key" is for drums, one-shots, and noise,
- * and those are not given a name.
+ * Key reads the buffer as a harmonic pitch-class profile at A440 and
+ * correlates it with the EDMA profiles. A confident key is major or minor.
+ * A weaker tonal reading is "Unsure" and keeps its best guess. "No clear key"
+ * is for drums, one-shots, and noise, and those are not given a name.
  *
  * Tempo listens to the source, before the stretch: an onset-strength envelope,
  * its autocorrelation, and a comb tempogram.
@@ -24,7 +22,7 @@ export interface KeyCandidate {
   root: number
   minor: boolean
   name: string
-  /** Mean Pearson correlation of the three profiles. */
+  /** Pearson correlation with the profile used for this reading. */
   corr: number
   score: number
 }
@@ -284,6 +282,6 @@ export function clipDeniesKey(clip: { soundType?: string; soundRole?: string; so
   const role = (clip.soundRole ?? '').toLowerCase()
   if (role.includes('drum')) return true
   const category = (clip.soundCategory ?? '').toLowerCase()
-  if (category === 'kick' || category === 'snare' || category === 'hat' || category === 'hi-hat' || category === 'hihat' || category === 'clap' || category === 'percussion' || category === 'perc' || category === 'cymbal' || category === 'tom' || category === 'rim') return true
+  if (category === 'drum' || category === 'drums' || category === 'kick' || category === 'snare' || category === 'hat' || category === 'hi-hat' || category === 'hihat' || category === 'clap' || category === 'percussion' || category === 'perc' || category === 'cymbal' || category === 'tom' || category === 'rim') return true
   return false
 }
