@@ -156,6 +156,8 @@ describe('loop shelves', () => {
     expect(model.chips.some((chip) => chip.id === 'drums')).toBe(true)
     const bassShelf = buildFastRows({ ...blank(), entries: loops, mode: 'loop' })
     expect(bassShelf.chips.find((chip) => chip.id === 'bass')?.label).toBe('Bass')
+    expect(bassShelf.rows.some((row) => row.entry?.key === 'Loops/bass.wav')).toBe(true)
+    expect(classifyLoop(loops[1])).toBe('bass')
     expect(model.genres.some((chip) => chip.id === 'trap' && chip.count === 1)).toBe(true)
     const byBpm = buildFastRows({
       ...blank(),
@@ -248,6 +250,8 @@ describe('fast browse chrome', () => {
       onToggleStuck: () => undefined,
     }))
     expect(loopsHtml).toContain('Drums 1')
+    expect(loopsHtml).toContain('Bass 1')
+    expect(loopsHtml).toContain('data-loop-chip="bass"')
     expect(loopsHtml).toContain('Keys 1')
     expect(loopsHtml).toContain('Vocal 1')
     expect(loopsHtml).toContain('Near tempo')

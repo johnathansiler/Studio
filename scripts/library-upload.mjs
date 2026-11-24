@@ -25,6 +25,8 @@ function urlKeepsSecret(url, accessKey) {
   try {
     const parsed = new URL(url)
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false
+    const host = parsed.hostname.toLowerCase()
+    if (host === 'huggingface.co' || host.endsWith('.huggingface.co') || host === 'hf.co' || host.endsWith('.hf.co')) return false
     if (parsed.username === accessKey || parsed.password === accessKey) return false
     for (const value of parsed.searchParams.values()) {
       if (value === accessKey) return false
@@ -100,7 +102,8 @@ async function putWithRetry(url, bytes, fetchImpl, attempts) {
     try {
       const response = await fetchImpl(url, {
         method: 'PUT',
-        headers: { 'content-type': 'audio/wav' },
+        redirect: 'error',
+        headers: { 'content-type': 'audio/wav', 'if-none-match': '*' },
         body: bytes,
       })
       if (response.ok) return true
@@ -121,6 +124,7 @@ export async function uploadFolder(options) {
   if (!accessKey) throw new Error('LIBRARY_ACCESS_KEY is missing.')
   const base = String(options.baseUrl || '').replace(/\/+$/, '')
   if (!base) throw new Error('The library base URL is missing.')
+  if (!urlKeepsSecret(`${base}/`, accessKey)) throw new Error('Refusing to upload to a public host.')
   const folder = options.folder
   const parsed = JSON.parse(await readFile(join(folder, 'catalog-entries.json'), 'utf8'))
   const listed = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.entries) ? parsed.entries : null
@@ -170,7 +174,7 @@ export async function uploadFolder(options) {
     const byKey = new Map(urls.filter((item) => item && typeof item.key === 'string').map((item) => [item.key, item]))
     for (const item of batch) {
       const link = byKey.get(item.key)
-      if (!link || typeof link.url !== 'string' || !urlKeepsSecret(link.url, accessKey)) {
+      if (!link) {
         counts.failed += 1
         continue
       }
@@ -178,6 +182,10 @@ export async function uploadFolder(options) {
         counts.skipped += 1
         appended.push(item.entry)
         done.add(item.key)
+        continue
+      }
+      if (typeof link.url !== 'string' || !urlKeepsSecret(link.url, accessKey)) {
+        counts.failed += 1
         continue
       }
       const bytes = await readFile(item.file.path)

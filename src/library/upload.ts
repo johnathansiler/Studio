@@ -355,10 +355,23 @@ async function signUploadBatch(items: { key: string; size: number }[], accessKey
   })
 }
 
+/** Presigned upload targets stay off the public Hugging Face hosts. */
+export function privateUploadUrl(url: string, accessKey: string) {
+  if (!signedUrlKeepsSecret(url, accessKey)) return false
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    if (host === 'huggingface.co' || host.endsWith('.huggingface.co') || host === 'hf.co' || host.endsWith('.hf.co')) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function putWav(url: string, bytes: ArrayBuffer, fetchImpl: typeof fetch) {
   const response = await fetchImpl(url, {
     method: 'PUT',
-    headers: { 'content-type': 'audio/wav' },
+    redirect: 'error',
+    headers: { 'content-type': 'audio/wav', 'if-none-match': '*' },
     body: bytes,
   })
   return response.ok
@@ -432,13 +445,17 @@ export async function uploadLibraryWavs(input: {
     const byKey = new Map(signed.map((item) => [item.key, item]))
     for (const item of batch) {
       const link = byKey.get(item.key)
-      if (!link || !signedUrlKeepsSecret(link.url, input.accessKey)) {
+      if (!link) {
         counts.failed += 1
         continue
       }
       if (link.exists) {
         counts.skipped += 1
         appended.push(item.entry)
+        continue
+      }
+      if (!privateUploadUrl(link.url, input.accessKey)) {
+        counts.failed += 1
         continue
       }
       const stored = await putWav(link.url, item.bytes, fetchImpl)

@@ -6,7 +6,7 @@ import { createElement, createRef } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { encodeWav } from '../model/wav'
-import { createLibraryApi, LIBRARY_NOT_READY, presignR2Put, type LibraryEnv, type LibraryObjects } from '../../server/library.ts'
+import { createLibraryApi, LIBRARY_NOT_READY, libraryCatalogWriteKey, presignR2Put, type LibraryEnv, type LibraryObjects } from '../../server/library.ts'
 import { LibraryAddSounds } from '../ui/MyLibrary'
 import {
   LIBRARY_AUDIO_PREFIX,
@@ -209,16 +209,77 @@ describe('library upload signing', () => {
     expect(removed.status).toBe(405)
   })
 
+  it('does not sign a PUT when the object exists or the head check fails', async () => {
+    const store = memoryObjects()
+    store.objects.set('audio/bass/a.wav', new Uint8Array([1, 2, 3]))
+    let signed = 0
+    const api = createLibraryApi({
+      env: () => env,
+      signPut: async () => { signed += 1; return 'https://signed.example/new.wav' },
+      objects: store.api,
+    })
+    const result = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/upload-sign',
+      ip: '1.1.1.1',
+      accessKey: 'owner-pass',
+      body: { keys: [{ key: 'audio/bass/a.wav', size: 3 }, { key: 'audio/bass/b.wav', size: 3 }] },
+      now: 8_000,
+    })
+    expect(result.status).toBe(200)
+    const urls = result.body.urls as { key: string; url: string; exists: boolean }[]
+    expect(urls[0]).toEqual({ key: 'audio/bass/a.wav', url: '', exists: true })
+    expect(urls[1]).toMatchObject({ key: 'audio/bass/b.wav', exists: false })
+    expect(urls[1].url).toBe('https://signed.example/new.wav')
+    expect(signed).toBe(1)
+    expect(JSON.stringify(result.body)).not.toContain(env.R2_SECRET_ACCESS_KEY)
+    let failed = 0
+    const blind = createLibraryApi({
+      env: () => env,
+      signPut: async () => { failed += 1; return 'https://signed.example/nope.wav' },
+      objects: { ...store.api, head: async () => { throw new Error('head failed') } },
+    })
+    const blocked = await blind.handle({
+      method: 'POST',
+      pathname: '/api/library/upload-sign',
+      ip: '1.1.1.1',
+      accessKey: 'owner-pass',
+      body: { keys: [{ key: 'audio/bass/b.wav', size: 3 }] },
+      now: 8_001,
+    })
+    expect(blocked.status).toBe(503)
+    expect(failed).toBe(0)
+    const open = createLibraryApi({
+      env: () => env,
+      signPut: async () => { failed += 1; return 'https://signed.example/nope.wav' },
+      objects: { get: store.api.get, put: store.api.put, copy: store.api.copy },
+    })
+    const unsigned = await open.handle({
+      method: 'POST',
+      pathname: '/api/library/upload-sign',
+      ip: '1.1.1.1',
+      accessKey: 'owner-pass',
+      body: { keys: [{ key: 'audio/bass/b.wav', size: 3 }] },
+      now: 8_002,
+    })
+    expect(unsigned.status).toBe(503)
+    expect(failed).toBe(0)
+  })
+
   it('presigns a PUT without putting the secret in the URL', async () => {
     const put = new URL(await presignR2Put(env, `${LIBRARY_AUDIO_PREFIX}bass/C#.wav`))
     expect(put.host).toBe('2001009ff8860d62eac085ee8cce34e2.r2.cloudflarestorage.com')
     expect(decodeURIComponent(put.pathname)).toContain('audio/bass/C#.wav')
     expect(put.searchParams.get('X-Amz-Algorithm')).toBe('AWS4-HMAC-SHA256')
     expect(put.searchParams.get('X-Amz-Expires')).toBe('900')
+    expect(put.searchParams.get('X-Amz-SignedHeaders')).toContain('if-none-match')
     expect(put.toString()).not.toContain(env.R2_SECRET_ACCESS_KEY)
     expect(put.toString()).not.toContain('owner-pass')
     await expect(presignR2Put(env, 'Drums/kick.wav')).rejects.toThrow(LIBRARY_NOT_READY)
     expect(libraryAudioKey('audio/../x.wav')).toBeNull()
+    expect(libraryCatalogWriteKey('catalog/catalog.json.gz')).toBe('catalog/catalog.json.gz')
+    expect(libraryCatalogWriteKey('audio/bass/a.wav')).toBeNull()
+    expect(libraryCatalogWriteKey('catalog/../audio/a.wav')).toBeNull()
   })
 
   it('hides upload when the server is not configured', async () => {
@@ -347,6 +408,7 @@ describe('phone wav upload', () => {
         return new Response(JSON.stringify({ urls: body.keys.map((item) => ({ key: item.key, url: `https://signed.example/${encodeURIComponent(item.key)}`, exists: false })) }), { status: 200 })
       }
       if (url.startsWith('https://signed.example/')) {
+        expect(new Headers(init?.headers).get('if-none-match')).toBe('*')
         puts.push({ url, bytes: init?.body as ArrayBuffer })
         return new Response(null, { status: 200 })
       }
@@ -380,6 +442,41 @@ describe('phone wav upload', () => {
     })
     expect(mp3.failed).toBe(1)
     expect(mp3.uploaded).toBe(0)
+    const skippedPuts: string[] = []
+    let appendedKeys: string[] = []
+    const skipFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/library/upload-sign')) {
+        return new Response(JSON.stringify({ urls: [
+          { key: 'audio/bass/Finger Bass.wav', url: '', exists: true },
+          { key: 'audio/bass/Other.wav', url: 'https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/x.wav', exists: false },
+        ] }), { status: 200 })
+      }
+      if (url.endsWith('/api/library/catalog-append')) {
+        appendedKeys = (JSON.parse(String(init?.body)) as { entries: { key: string }[] }).entries.map((entry) => entry.key)
+        return new Response(JSON.stringify({ added: appendedKeys.length, skipped: 0 }), { status: 200 })
+      }
+      skippedPuts.push(`${init?.method ?? 'GET'} ${url}`)
+      return new Response('no', { status: 500 })
+    }) as typeof fetch
+    const skipped = await uploadLibraryWavs({
+      files: [
+        { name: 'Finger Bass.wav', size: wav.byteLength, bytes: wav },
+        { name: 'Other.wav', size: wav.byteLength, bytes: wav },
+      ],
+      category: 'bass',
+      bpm: 90,
+      musicalKey: '',
+      accessKey: 'owner-pass',
+      fetchImpl: skipFetch,
+    })
+    expect(skipped.uploaded).toBe(0)
+    expect(skipped.skipped).toBe(1)
+    expect(skipped.failed).toBe(1)
+    expect(skipped.added).toBe(1)
+    expect(appendedKeys).toEqual(['audio/bass/Finger Bass.wav'])
+    expect(skippedPuts.some((line) => line.startsWith('PUT'))).toBe(false)
+    expect(appendedKeys.join(' ')).not.toContain('huggingface')
   })
 
   it('shows a small Add sounds control with category, BPM, and key', () => {
