@@ -7,6 +7,7 @@ export type DeviceKind =
   | 'fm'
   | 'wave'
   | 'knock'
+  | 'bass808'
   | 'sampler'
   | 'drum'
   | 'eq'
@@ -241,6 +242,20 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('duckRel', 'Duck rel', 10, 500, 90, 'ms'),
     spec('level', 'Level', 0, 1, 0.8),
   ],
+  bass808: [
+    spec('glide', 'Glide', 0, 1000, 80, 'ms'),
+    spec('gmode', 'Glide mode', 0, 1, 1),
+    spec('drop', 'Drop', 0, 24, 10, 'st'),
+    spec('decay', 'Decay', 20, 4000, 520, 'ms'),
+    spec('sustain', 'Sustain', 0, 1, 0.4),
+    spec('tone', 'Tone', 80, 8000, 2000, 'Hz'),
+    spec('drive', 'Drive', 0, 1, 0.18),
+    spec('sub', 'Sub', 0, 1, 0.42),
+    spec('click', 'Click', 0, 1, 0.5),
+    spec('level', 'Level', 0, 1, 0.8),
+    spec('source', 'Sample', 0, 1, 0),
+    spec('root', 'Root', 0, 127, 36),
+  ],
   sampler: [
     spec('attack', 'Attack', 1, 2000, 4, 'ms'),
     spec('decay', 'Decay', 5, 3000, 180, 'ms'),
@@ -348,6 +363,7 @@ export const DEVICE_NAMES: Record<DeviceKind, string> = {
   fm: 'FM',
   wave: 'Wavetable',
   knock: 'Knock',
+  bass808: '808 Bass',
   sampler: 'Sampler',
   drum: 'Drums',
   eq: 'EQ',
@@ -380,6 +396,14 @@ export const FACTORY_PRESETS: Record<DeviceKind, { name: string; params: Record<
   ],
   wave: WAVE_PRESETS,
   knock: KNOCK_PRESETS,
+  bass808: [
+    { name: 'Trap 808', category: 'Bass', params: { glide: 90, gmode: 1, drop: 14, decay: 980, sustain: 0.62, tone: 1400, drive: 0.24, sub: 0.55, click: 0.62, level: 0.82 } },
+    { name: 'Drill Slide (140)', category: 'Bass', params: { glide: 140, gmode: 0, drop: 7, decay: 380, sustain: 0.18, tone: 2600, drive: 0.38, sub: 0.36, click: 0.74, level: 0.78 } },
+    { name: 'Boom Bap Sub', category: 'Bass', params: { glide: 0, gmode: 1, drop: 3, decay: 240, sustain: 0.08, tone: 640, drive: 0.06, sub: 0.78, click: 0.28, level: 0.7 } },
+    { name: 'Distorted 808', category: 'Bass', params: { glide: 50, gmode: 1, drop: 16, decay: 720, sustain: 0.48, tone: 3200, drive: 0.86, sub: 0.3, click: 0.4, level: 0.74 } },
+    { name: 'Long Glide', category: 'Bass', params: { glide: 640, gmode: 0, drop: 5, decay: 1800, sustain: 0.8, tone: 1100, drive: 0.08, sub: 0.6, click: 0.15, level: 0.76 } },
+    { name: 'Short Punch', category: 'Bass', params: { glide: 0, gmode: 1, drop: 20, decay: 70, sustain: 0, tone: 3600, drive: 0.32, sub: 0.22, click: 0.92, level: 0.84 } },
+  ],
   sampler: [
     { name: 'One shot', params: { loop: 0, attack: 2, sustain: 1, release: 80 } },
     { name: 'Loop', params: { loop: 1, attack: 8, sustain: 0.85 } },
@@ -471,7 +495,7 @@ export function defaultRack(): RackState {
 }
 
 export function isInstrument(kind: DeviceKind) {
-  return kind === 'sub' || kind === 'fm' || kind === 'wave' || kind === 'knock' || kind === 'sampler' || kind === 'drum'
+  return kind === 'sub' || kind === 'fm' || kind === 'wave' || kind === 'knock' || kind === 'bass808' || kind === 'sampler' || kind === 'drum'
 }
 
 export function isEffect(kind: DeviceKind) {

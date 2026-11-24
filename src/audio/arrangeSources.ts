@@ -199,6 +199,7 @@ export function graphPlugins(track: Track): PluginInstance[] {
     // Those hits are already printed into the source buffer. Leaving the
     // generator enabled lets the Rust voice replace that buffer with silence.
     const generator = plugin.pluginId === 'steps'
+      || plugin.pluginId === 'bass808'
       || isDrumsPlugin(plugin)
       || (plugin.pluginId === 'sampler' && track.instrument === 'sampler')
       || ((plugin.pluginId === 'pads' || plugin.pluginId === 'drum-machine' || plugin.pluginId === '808')

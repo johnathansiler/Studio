@@ -83,6 +83,7 @@ import {
   MainMenu,
   MidiDock,
   MixerView,
+  Bass808Panel,
   PadsPanel,
   PatchSheet,
   PendingMenu,
@@ -745,6 +746,17 @@ export function App() {
       if (params.get('scaler') === '1' || params.get('library') === '1' || params.get('generate') === '1') {
         store.insertScaler(null, params.get('generate') === '1' ? 'write' : 'play')
         setVersion((value) => value + 1)
+      }
+      if (params.get('bass') === '1') {
+        const existing = store.project.tracks.find((item) => item.instrument === 'bass808')
+        const id = existing?.id ?? store.addQuickTrack('bass808')
+        if (id) {
+          store.showBass(id)
+          store.setView('arrange')
+          setSurface('studio')
+          setPhonePane('edit')
+          setVersion((value) => value + 1)
+        }
       }
       saveReady.current = true
     })()
@@ -1753,10 +1765,11 @@ async function importDropped(files: FileList) {
     await importAudio(transfer.files)
   }
 
-  const panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads' | 'steps' =
+  const panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads' | 'steps' | 'bass' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
     : store.stepTrackId ? 'steps'
     : store.padsTrackId ? 'pads'
+    : store.bassTrackId ? 'bass'
     : store.scalerTrackId ? 'scaler'
     : pianoOpen ? 'piano'
     : store.rackTrackId ? 'rack'
@@ -1990,6 +2003,10 @@ async function importDropped(files: FileList) {
     store.setView('arrange')
     if (choice !== 'steps') store.closeSteps()
     if (choice !== 'pads') store.closePads()
+    if (choice === 'bass808') {
+      store.showBass(id)
+      return
+    }
     if (choice === 'instrument') openKeyboard(id)
     else if (choice === 'pads') openBeatMachine(id)
     else if (choice === 'steps') openStepSequencer(id)
@@ -2053,6 +2070,7 @@ async function importDropped(files: FileList) {
     if (releaseKeyboardForPiano(store)) notifyKeyboard(false)
     store.closeScaler()
     store.closePads()
+    store.closeBass()
     const project = store.project
     let sample = engine.positionSamples
     if (project.loopEnabled && (sample < project.loopStartSample || sample >= project.loopEndSample)) sample = project.loopStartSample
@@ -2089,6 +2107,7 @@ async function importDropped(files: FileList) {
   }, store.keyboardMidi)
   useScreenOverlay(() => store.closeSteps(), store.stepTrackId != null)
   useScreenOverlay(() => store.closePads(), store.padsTrackId != null)
+  useScreenOverlay(() => store.closeBass(), store.bassTrackId != null)
   useScreenOverlay(() => store.closeScaler(), store.scalerTrackId != null)
   useScreenOverlay(() => store.focusPlugin(null), store.pluginFocus != null)
   useScreenOverlay(() => store.closeQuantize(), store.quantizeOpen)
@@ -2097,9 +2116,9 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeSpectral(), store.spectralTrackId != null)
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
-  const phoneArrange = phone && surface === 'studio' && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
+  const phoneArrange = phone && surface === 'studio' && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && panel !== 'bass'
   const transportShown = surface === 'studio' || surface === 'artist' || session.state.status === 'live'
-  const phonePlace: PhonePlace = panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack'
+  const phonePlace: PhonePlace = panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack' || panel === 'bass'
     ? 'plugin'
     : editorView === 'mix'
       ? 'mix'
@@ -2145,7 +2164,7 @@ async function importDropped(files: FileList) {
       data-collab="closed"
       data-dock={dockShown ? 'open' : 'closed'}
       data-editor={dockShown ? panel : 'none'}
-      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps') ? panel : 'none'}
+      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps' || panel === 'bass') ? panel : 'none'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
       }}
@@ -2442,6 +2461,19 @@ async function importDropped(files: FileList) {
           {surface === 'studio' && panel === 'steps' && store.stepTrackId && (
             <Suspense fallback={<PendingPane className="step-sequencer" label="Step sequencer" />}>
               <StepSequencerPanel store={store} engine={engine} onClose={closeStepSequencer} />
+            </Suspense>
+          )}
+          {surface === 'studio' && panel === 'bass' && store.bassTrackId && (
+            <Suspense fallback={<PendingPane className="bass808" label="808 Bass" />}>
+              <Bass808Panel
+                store={store}
+                engine={engine}
+                trackId={store.bassTrackId}
+                onClose={() => store.closeBass()}
+                onRecord={() => { engine.unlock(); void record() }}
+                onStop={() => { void stop() }}
+                onPlay={() => { engine.unlock(); void play() }}
+              />
             </Suspense>
           )}
           {surface === 'studio' && panel === 'pads' && store.padsTrackId && (

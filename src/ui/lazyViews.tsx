@@ -116,6 +116,7 @@ function retryable<C extends ComponentType<any>>(
 
 export const MixerView = retryable(moduleView(() => import('./MixerView'), 'MixerView'), 'Mix', 'mixer-view')
 export const PadsPanel = retryable(moduleView(() => import('./PadsPanel'), 'PadsPanel'), 'Beat Machine', 'mpc')
+export const Bass808Panel = retryable(moduleView(() => import('./Bass808Panel'), 'Bass808Panel'), '808 Bass', 'bass808')
 export const PluginSheet = retryable(moduleView(() => import('./PluginSheet'), 'PluginSheet'), 'Plugin', 'sheet-pending')
 export const WaveEditor = retryable(moduleView(() => import('./WaveEditor'), 'WaveEditor'), 'Sample editor', 'wave-editor')
 export const MainMenu = retryable(moduleView(() => import('./MainMenu'), 'MainMenu'), 'Menu', 'menu-pending')

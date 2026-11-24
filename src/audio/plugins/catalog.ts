@@ -160,6 +160,9 @@ export function defaultParams(id: string) {
 
 export function createPlugin(pluginId: string, preset?: string): PluginInstance {
   if (pluginId === 'steps') return createStepsPlugin()
+  if (pluginId === 'bass808') {
+    return { id: uid('fx'), pluginId: 'bass808', version: VERSION, enabled: true, wet: 1, params: {}, sidechain: '' }
+  }
   const move = MOVES[pluginId] ?? { to: 'eq' as const, kind: 0 }
   const core = move.remove ? 'limiter' : move.to
   const params = defaultParams(core)

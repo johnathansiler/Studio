@@ -6,6 +6,9 @@ import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
 import { queueClipStretch } from '../audio/stretch/commit'
 import { clampLockBpm, clipTempoPatch, tempoDrivesLength } from '../model/clipTempo'
 import { TUNE_INSERT_PRESET } from '../audio/plugins/autoTune'
+import { applyBass808, bassDevice } from '../audio/bass808/track'
+import { drillTrapPattern } from '../audio/bass808/pattern'
+import { shotById, shotRoot } from '../audio/bass808/shots'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
   detectRoot,
@@ -287,6 +290,8 @@ export class ProjectStore {
   scalerTrackId: string | null = null
   /** Open Pads panel. The kit itself is on the track. */
   padsTrackId: string | null = null
+  /** Open 808 Bass panel. The device itself is on the track rack. */
+  bassTrackId: string | null = null
   /** Track whose Step Sequencer panel is open. */
   stepTrackId: string | null = null
   /** Clip the pad recorder is printing into. A zero loop span grows with the take. Not saved. */
@@ -423,6 +428,7 @@ export class ProjectStore {
     this.patchTrackId = null
     this.scalerTrackId = null
     this.stepTrackId = null
+    this.bassTrackId = null
     if (this.padsTrackId === trackId) return
     this.padsTrackId = trackId
     this.emit()
@@ -1044,22 +1050,28 @@ export class ProjectStore {
         if (sound) current.instrument = sound
       }
       if (instrument === 'pads') current.padKit = normalizePadKit(current.padKit ?? this.project.padKit)
+      if (instrument === 'bass808') applyBass808(current)
     })
     if (instrument === 'scaler') {
       this.rackTrackId = null
       this.patchTrackId = null
       this.padsTrackId = null
+      this.bassTrackId = null
       this.scalerTrackId = trackId
       this.emit()
     } else if (instrument === 'pads') {
       this.rackTrackId = null
       this.patchTrackId = null
       this.scalerTrackId = null
+      this.bassTrackId = null
       this.padsTrackId = trackId
       this.emit()
+    } else if (instrument === 'bass808') {
+      this.showBass(trackId)
     } else {
       if (this.scalerTrackId === trackId) this.scalerTrackId = null
       if (this.padsTrackId === trackId) this.padsTrackId = null
+      if (this.bassTrackId === trackId) this.bassTrackId = null
       this.emit()
     }
   }
@@ -1102,6 +1114,84 @@ export class ProjectStore {
     if (!this.padsTrackId) return
     this.padsTrackId = null
     this.emit()
+  }
+
+  /** Open the 808 Bass panel. Installing the instrument opens it again. */
+  showBass(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (track.instrument !== 'bass808' || !bassDevice(track)) {
+      this.setTrackInstrument(trackId, 'bass808')
+      return
+    }
+    this.rackTrackId = null
+    this.patchTrackId = null
+    this.scalerTrackId = null
+    this.stepTrackId = null
+    this.padsTrackId = null
+    this.bassTrackId = trackId
+    this.emit()
+  }
+
+  closeBass() {
+    if (!this.bassTrackId) return
+    this.bassTrackId = null
+    this.emit()
+  }
+
+  /** One tap drops an editable slide pattern in the song key. */
+  insertBassPattern(trackId: string, startBeat = 0) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      applyBass808(track)
+      const scale = this.project.scale
+      const notes = drillTrapPattern(scale?.root ?? 0, scale?.scale).map((note) => ({
+        id: uid('note'),
+        pitch: note.pitch,
+        startBeat: note.startBeat,
+        durationBeats: note.durationBeats,
+        velocity: note.velocity,
+        ...(note.slide ? { slide: true } : {}),
+      }))
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: 'Drill / Trap',
+        startBeat: Math.max(0, startBeat),
+        durationBeats: 8,
+        notes,
+      }
+      track.midiClips.push(clip)
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+    })
+  }
+
+  /** Load one catalog 808 one-shot and tune it so its root note is that MIDI pitch. */
+  async loadBassShot(trackId: string, shotId: string) {
+    const shot = shotById(shotId)
+    if (!shot || !bassDevice(this.track(trackId))) return
+    const [{ fetchSoundBytes }, { soundFileUrl }, { decodeSoundBytes }] = await Promise.all([
+      import('../sounds/cache'),
+      import('../sounds/source'),
+      import('../sounds/place'),
+    ])
+    const decoded = await decodeSoundBytes(await fetchSoundBytes(soundFileUrl(shot.path)))
+    const root = shotRoot(shot)
+    this.mutate(() => {
+      const device = bassDevice(this.track(trackId))
+      if (!device) return
+      const id = uid('smp')
+      this.buffers.set(id, {
+        id,
+        name: shot.name,
+        sampleRate: decoded.sampleRate,
+        channels: decoded.channels.map((channel) => Float32Array.from(channel)),
+      })
+      device.zones = [{ id: uid('zone'), bufferId: id, root, lo: 0, hi: 127, loopStart: 0, loopEnd: 0, tune: 0 }]
+      device.params = { ...device.params, source: 1, root }
+    })
   }
 
   trackKit(trackId: string): PadProgram {
@@ -2399,6 +2489,14 @@ export class ProjectStore {
       this.padsTrackId = null
       this.keyboardMidi = false
     }
+    if (made[0]?.instrument === 'bass808') {
+      applyBass808(made[0])
+      this.bassTrackId = made[0].id
+      this.padsTrackId = null
+      this.scalerTrackId = null
+      this.rackTrackId = null
+      this.stepTrackId = null
+    }
     if (made[0]?.instrument === 'pads') {
         made[0].padKit = normalizePadKit(made[0].padKit)
         if (!made[0].plugins.some((plugin) => isDrumsPlugin(plugin))) made[0].plugins.push(createPlugin('pads'))
@@ -2675,6 +2773,11 @@ export class ProjectStore {
         else this.emit()
         return
       }
+      if (plugin?.pluginId === 'bass808' && trackId !== 'master') {
+        this.pluginFocus = null
+        this.showBass(trackId)
+        return
+      }
     }
     this.pluginFocus = trackId && pluginId ? { trackId, pluginId } : null
     this.emit()
@@ -2720,6 +2823,10 @@ export class ProjectStore {
     }
     if (pluginId === 'synth') {
       this.insertSynthPlugin(trackId)
+      return
+    }
+    if (pluginId === 'bass808') {
+      this.insertBass808(trackId)
       return
     }
     this.mutate(() => {
@@ -2785,6 +2892,18 @@ export class ProjectStore {
     this.setTrackInstrument(hostId, 'synth')
     this.patchTrackId = null
     this.openPatch(hostId)
+  }
+
+  /** 808 Bass is an insert. Adding it opens the bass panel. */
+  private insertBass808(trackId: string | 'master') {
+    let host = trackId !== 'master' ? this.track(trackId) : null
+    if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null
+    if (!host) {
+      const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'bass808', input: 'mic', channels: 1, armed: false, choice: 'bass808' })
+      if (ids[0]) this.showBass(ids[0])
+      return
+    }
+    this.setTrackInstrument(host.id, 'bass808')
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
@@ -5993,6 +6112,7 @@ export class ProjectStore {
     this.savedGeneration = 0
     if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
     if (this.padsTrackId && !project.tracks.some((track) => track.id === this.padsTrackId && track.type === 'midi')) this.padsTrackId = null
+    if (this.bassTrackId && !project.tracks.some((track) => track.id === this.bassTrackId && track.type === 'midi')) this.bassTrackId = null
     if (this.stepTrackId && !project.tracks.some((track) => track.id === this.stepTrackId)) this.stepTrackId = null
     this.padRecord = null
     this.sync.rebase(this.project)
@@ -6096,7 +6216,10 @@ export class ProjectStore {
     this.padsTrackId = null
     const opening = this.rackTrackId !== trackId
     this.rackTrackId = opening ? trackId : null
-    if (opening) this.patchTrackId = null
+    if (opening) {
+      this.patchTrackId = null
+      this.bassTrackId = null
+    }
     this.rackFlip = false
     this.rackDetail = false
     this.emit()
@@ -6130,6 +6253,7 @@ export class ProjectStore {
     }
     this.scalerTrackId = null
     this.padsTrackId = null
+    this.bassTrackId = null
     if (this.patchTrackId === trackId) {
       this.patchTrackId = null
       this.emit()
@@ -6375,6 +6499,7 @@ export class ProjectStore {
     if (!track || track.type !== 'midi' || !plugin?.steps) return
     this.project.beats = plugin.steps
     this.padsTrackId = null
+    this.bassTrackId = null
     this.scalerTrackId = null
     this.rackTrackId = null
     this.patchTrackId = null
@@ -6408,6 +6533,10 @@ export class ProjectStore {
     }
     if (choice === 'steps') {
       const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false, choice })
+      return ids[0] ?? null
+    }
+    if (choice === 'bass808') {
+      const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'bass808', input: 'mic', channels: 1, armed: false, choice: 'bass808' })
       return ids[0] ?? null
     }
     const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false, choice: 'instrument' })

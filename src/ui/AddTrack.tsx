@@ -57,6 +57,30 @@ export function AddTrackButton({
       <AnchoredMenu fill className="add-track-menu" open={open} onClose={() => setOpen(false)} label="Add Track" triggerRef={buttonRef} prefer="down">
         <div role="group" aria-label="Add Track">
           {TRACK_CHOICES.map((choice) => (
+            choice.id === 'instrument' ? (
+              <div key={choice.id} className="add-instrument">
+                <button
+                  type="button"
+                  className="add-choice"
+                  aria-label={`${choice.name}. ${choice.detail}.`}
+                  onClick={() => add(choice.id)}
+                >
+                  <ChoiceIcon id={choice.id} />
+                  <span>
+                    <strong>{choice.name}</strong>
+                    <small>{choice.detail}</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="add-sub"
+                  aria-label="808 Bass. Trap and drill slides."
+                  onClick={() => add('bass808')}
+                >
+                  808 Bass
+                </button>
+              </div>
+            ) : (
             <button
               key={choice.id}
               type="button"
@@ -70,6 +94,7 @@ export function AddTrackButton({
                 <small>{choice.detail}</small>
               </span>
             </button>
+            )
           ))}
         </div>
       </AnchoredMenu>

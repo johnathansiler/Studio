@@ -801,7 +801,7 @@ export class LiveRack {
  * therefore sees 11 slots, not 12: sampler `kind` is the knob that flips it.
  */
 function audibleInsert(plugin: PluginInstance) {
-  if (plugin.pluginId === 'steps') return false
+  if (plugin.pluginId === 'steps' || plugin.pluginId === 'bass808') return false
   if (isDrumsPlugin(plugin)) return false
   return true
 }

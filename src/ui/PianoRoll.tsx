@@ -18,6 +18,7 @@ import {
   type RhythmPattern,
   type ScaleId,
 } from '../model/scale'
+import { slideLinks } from '../audio/bass808/pattern'
 import { uid, type MidiNote } from '../model/types'
 import { lockedTone, pitchRole, suggestKey } from '../theory'
 import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolCursor } from '../state/tools'
@@ -1037,9 +1038,33 @@ export function PianoRoll({
                       }
                       onNoteDown(event, note)
                     }}
-                  />
+                  >
+                    <button
+                      type="button"
+                      className="note-slide"
+                      aria-label={note.slide ? 'Slide on' : 'Slide off'}
+                      aria-pressed={!!note.slide}
+                      title={note.slide ? 'Slide into this note' : 'Slide off'}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        store.updateNote(track.id, clip.id, note.id, { slide: !note.slide })
+                      }}
+                    >
+                      {note.slide ? 'S' : ''}
+                    </button>
+                  </div>
                 )
               })}
+              <svg className="slide-line" aria-hidden="true">
+                {slideLinks(notes).map((link) => {
+                  const x1 = (link.from.startBeat + link.from.durationBeats) * pxBeat
+                  const y1 = (HIGH - link.from.pitch) * row + row / 2
+                  const x2 = link.to.startBeat * pxBeat
+                  const y2 = (HIGH - link.to.pitch) * row + row / 2
+                  return <line key={`${link.from.id}-${link.to.id}`} x1={x1} y1={y1} x2={x2} y2={y2} />
+                })}
+              </svg>
               <div ref={headRef} className="roll-playhead" data-playhead="piano" style={{ left: Math.max(0, (playBeat ?? 0) * pxBeat), visibility: playBeat == null ? 'hidden' : undefined }} />
               <RemoteRollCursors peers={remotes} clipId={clip.id} pxBeat={pxBeat} />
               {box && (
