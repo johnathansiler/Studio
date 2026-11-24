@@ -516,8 +516,8 @@ export class RackRuntime {
   }
 }
 
-export function renderNotes(rack: RackState, events: NoteEvent[], sampleRate: number, tempo: number, length: number, buffers = new Map<string, SampleBuffer>(), lanes?: RackAutomation[]) {
-  return renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, null) as Float32Array[]
+export function renderNotes(rack: RackState, events: NoteEvent[], sampleRate: number, tempo: number, length: number, buffers = new Map<string, SampleBuffer>(), lanes?: RackAutomation[], originBeat = 0) {
+  return renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, null, originBeat) as Float32Array[]
 }
 
 /**
@@ -533,8 +533,9 @@ export async function renderNotesPaced(
   buffers = new Map<string, SampleBuffer>(),
   lanes?: RackAutomation[],
   tick?: (ratio: number) => Promise<void> | void,
+  originBeat = 0,
 ): Promise<Float32Array[]> {
-  return await renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, tick ?? null)
+  return await renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, tick ?? null, originBeat)
 }
 
 function renderNoteBlocks(
@@ -546,9 +547,12 @@ function renderNoteBlocks(
   buffers: Map<string, SampleBuffer>,
   lanes: RackAutomation[] | undefined,
   tick: ((ratio: number) => Promise<void> | void) | null,
+  originBeat: number,
 ): Float32Array[] | Promise<Float32Array[]> {
   const runtime = new RackRuntime(sampleRate)
-  const ordered = events.slice().sort((a, b) => a.sample - b.sample || b.vel - a.vel)
+  // Same order the worklet keeps: earlier notes were queued first, so a note-off
+  // lands before the next note-on on the same sample. Velocity order releases the new note.
+  const ordered = events.map((event, index) => ({ event, index })).sort((a, b) => a.event.sample - b.event.sample || a.index - b.index).map((item) => item.event)
   const left = new Float32Array(length)
   const right = new Float32Array(length)
   let cursor = 0
@@ -564,7 +568,8 @@ function renderNoteBlocks(
       }
       const next = ordered[cursor]?.sample ?? length
       const count = Math.min(block, length - offset, Math.max(1, next - offset))
-      const rendered = runtime.render(rack, count, tempo, 'full', buffers, lanes, (offset / sampleRate) * (tempo / 60))
+      const beat = originBeat + (offset / sampleRate) * (tempo / 60)
+      const rendered = runtime.render(rack, count, tempo, 'full', buffers, lanes, beat)
       left.set(rendered[0], offset)
       right.set(rendered[1], offset)
       offset += count

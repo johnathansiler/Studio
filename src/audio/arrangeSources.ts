@@ -427,9 +427,10 @@ async function mixVoice(
     const lanes = rackLanesFor(project, track.id)
     const sampleBuffers = new Map<string, SampleBuffer>()
     for (const [id, asset] of assets) sampleBuffers.set(id, { sampleRate: asset.sampleRate, channels: asset.channels })
+    const originBeat = projectSampleBeat(project, origin)
     const rendered = tick
-      ? await renderNotesPaced(track.rack, events, rate, project.tempo, length, sampleBuffers, lanes, tick)
-      : renderNotes(track.rack, events, rate, project.tempo, length, sampleBuffers, lanes)
+      ? await renderNotesPaced(track.rack, events, rate, project.tempo, length, sampleBuffers, lanes, tick, originBeat)
+      : renderNotes(track.rack, events, rate, project.tempo, length, sampleBuffers, lanes, originBeat)
     addStereo(out, rendered, origin, origin, length, 0)
     return
   }
