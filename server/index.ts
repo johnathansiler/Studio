@@ -14,12 +14,13 @@ import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { withIsolation } from './headers.ts'
 import { createInstrumentSource } from './instruments.ts'
-import { createLibraryApi, libraryClientIp, presignR2Get } from './library.ts'
+import { createLibraryApi, libraryClientIp, presignR2Get, presignR2Put } from './library.ts'
 
 const usage = createUsageLedger()
 const libraryApi = createLibraryApi({
   env: () => process.env,
   sign: (key, env) => presignR2Get(env, key),
+  signPut: (key, env) => presignR2Put(env, key),
   instruments: createInstrumentSource({ env: () => process.env }),
 })
 
@@ -280,7 +281,7 @@ function leave(client: Client, announce = false) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
   if (url.pathname === '/api/health') return json(res, { ok: true, service: 'cueharbor', sessions: sessions.size })
-  if (url.pathname === '/api/library' || url.pathname === '/api/library/sign' || url.pathname.startsWith('/api/library/instruments')) return handleLibrary(req, res, url)
+  if (url.pathname === '/api/library' || url.pathname === '/api/library/sign' || url.pathname === '/api/library/upload-sign' || url.pathname === '/api/library/catalog-append' || url.pathname.startsWith('/api/library/instruments')) return handleLibrary(req, res, url)
   if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, await usage.view())
   if (url.pathname === '/api/usage' && req.method === 'POST') return reportUsage(req, res)
   if (url.pathname === '/api/sfu/session' && req.method === 'POST') return openSfuSession(req, res)
@@ -430,8 +431,9 @@ async function handleLibrary(req: IncomingMessage, res: ServerResponse, url: URL
   const accessKey = (Array.isArray(header) ? header[0] : header) || ''
   let body: unknown = null
   if (req.method === 'POST') {
+    const limit = url.pathname === '/api/library/catalog-append' ? 2_000_000 : url.pathname === '/api/library/upload-sign' ? 64_000 : 32_000
     try {
-      const text = await readBody(req, 32_000)
+      const text = await readBody(req, limit)
       body = text ? JSON.parse(text) as unknown : null
     } catch {
       return json(res, { error: 'Those library paths cannot be signed.' }, 400)
