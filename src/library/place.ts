@@ -192,6 +192,44 @@ export async function loadLibraryEntry(store: ProjectStore, entry: LibraryEntry,
   return placeLibraryAsset(store, entry, asset, startSample)
 }
 
+/** Put this file on the arrangement, including a one-shot that would otherwise land on a pad. */
+export async function addLibraryToTrack(store: ProjectStore, entry: LibraryEntry, startSample: number, decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>) {
+  const asset = await readLibraryAsset(entry, decode)
+  store.addAsset(asset)
+  const placed = placeSound({
+    entry: asSound(entry, asset.sampleRate),
+    channels: asset.channels,
+    fileRate: asset.sampleRate,
+    project: store.project,
+    startSample: 0,
+    bufferId: asset.id,
+  })
+  if (!placed) throw new Error('That sound had no audio.')
+  store.addAsset(placed.asset)
+  const selected = store.selectedTrackId ? store.track(store.selectedTrackId) : null
+  const host = selected?.type === 'audio' ? selected.id : null
+  const landed = store.placeClipAtPlayhead(host, placed.clip, startSample)
+  if (!landed) throw new Error('Could not add that sound onto the track.')
+  rememberLibrarySound(entry)
+  return `${entry.name} is on the track.`
+}
+
+/** Load this one-shot onto a Beat Machine pad. Without a pad, the next empty pad is used. */
+export async function useLibraryOnPad(
+  store: ProjectStore,
+  entry: LibraryEntry,
+  pad: { trackId: string; bank: number; index: number } | null,
+  decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>,
+) {
+  const asset = await readLibraryAsset(entry, decode)
+  if (!pad) return placeLibraryAsset(store, entry, asset, 0)
+  store.addAsset(asset)
+  store.rememberLibrarySound(asset.id, entry.key)
+  store.assignTrackPad(pad.trackId, pad.bank, pad.index, { name: entry.name, bufferId: asset.id })
+  rememberLibrarySound(entry)
+  return `${entry.name} is on the pad.`
+}
+
 export async function loadLibraryDrag(store: ProjectStore, dragId: string, startSample: number, pad?: { trackId: string; bank: number; index: number }) {
   const entry = libraryEntryForDrag(dragId)
   if (!entry) return false

@@ -3,6 +3,7 @@
 
 .mpc {
   container-type: size;
+  position: relative;
   width: 100%;
   max-width: 100%;
   height: 100%;
@@ -81,6 +82,7 @@
 }
 
 .mpc-keyboard,
+.mpc-browser,
 .mpc-close {
   display: inline-flex;
   align-items: center;
@@ -110,6 +112,54 @@
   position: absolute;
   top: 0;
   right: 0;
+}
+
+.mpc-browser.on {
+  color: #102018;
+  background-color: #8ee0ae;
+  background-image: none;
+}
+
+.pad-sample-browser {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(78%, 720px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 16px 16px 0 0;
+  background: #141c18;
+  box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.45);
+  animation: pad-browser-rise 200ms ease;
+}
+
+@keyframes pad-browser-rise {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.pad-browser-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 8px;
+}
+
+.pad-browser-bar button {
+  min-width: 44px;
+  min-height: 40px;
+}
+
+.pad-sample-browser .my-library {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .mpc-pad-tools {
@@ -1245,6 +1295,9 @@ body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-menu-size='tray']
 }
 
 @media (max-width: 430px) {
+  .mpc-title span { display: none; }
+  .mpc-browser,
+  .mpc-keyboard { padding: 0 8px; font-size: 12px; }
   .pad-screen { flex-basis: 90px; height: 90px; }
   .hw-body { gap: 2px; padding: 4px; }
   .mpc [data-plugin-page='pads'] > * + * { margin-top: 2px; }
