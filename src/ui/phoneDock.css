@@ -705,6 +705,21 @@ body:has(.shell.phone) #shell-menu .menu-session {
   border-radius: 8px;
 }
 
+.harmonize-launch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 4px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #1c2b24;
+  color: var(--text);
+  font: 700 14px/1 var(--font, inherit);
+}
+
 .shell.phone .playhead-strip {
   position: sticky;
   top: var(--ruler-h, 22px);

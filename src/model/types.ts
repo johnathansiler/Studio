@@ -311,6 +311,16 @@ export interface AudioClip {
   loopKey?: string
   /** Semitone move into the project key. The samples stay in the source asset. */
   keyShift?: ClipKeyShift
+  /** Library type copied when the clip was dropped, such as loop or one-shot. */
+  soundType?: string
+  /** Library category copied when the clip was dropped, such as kick or chord. */
+  soundCategory?: string
+  /** Library role copied when the clip was dropped, such as drum_one_shot. */
+  soundRole?: string
+  /** Library tags copied when the clip was dropped. */
+  soundTags?: string[]
+  /** Catalog key copied when the clip was dropped. Not a pitch shift. */
+  soundKey?: string
 }
 
 /**
@@ -328,6 +338,8 @@ export interface ClipKeyShift {
   tonicOnly?: boolean
   /** Formant flag before the shift, so Revert can put it back. */
   formantBefore?: boolean
+  /** A recorded take was pitched only because Harmonize included vocals. Revert plays the take dry again. */
+  playbackBefore?: 'recorded'
 }
 
 export interface ClipHearing {
@@ -441,6 +453,8 @@ export interface MidiClip {
   color?: string
   /** 0–0.9. Odd sixteenths sound later by this fraction of a sixteenth. */
   swing?: number
+  /** Semitone move applied to the notes. Revert puts the pitches back. */
+  keyShift?: ClipKeyShift
 }
 
 export type MidiEditorMode = 'roll' | 'step' | 'drums' | 'score'

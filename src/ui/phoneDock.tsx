@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { VariationBar } from './VariationBar'
 import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
@@ -11,12 +11,16 @@ import { SnapChoices } from './UtilitySheets'
 import { DeleteTrackConfirm, applyTrackDelete } from './equalGrid'
 import { useScreenOverlay } from './screenOverlay'
 import { ClipTempoControl } from './ClipTempoControl'
+import { keyShiftReadout } from '../model/keyFit'
 import {
   phoneContextKind,
   type PhonePlace,
 } from './phoneContext'
 import { phoneFocus, subscribePhoneFocus } from './phoneFocus'
 import './phoneDock.css'
+import './clipTempo.css'
+
+const HarmonizeSheet = lazy(() => import('./HarmonizeSheet').then((mod) => ({ default: mod.HarmonizeSheet })))
 
 function GearIcon() {
   return (
@@ -233,6 +237,25 @@ function TransportMoreSheet({ store, onClose }: { store: ProjectStore; onClose: 
   )
 }
 
+function midiKeyShift(store: ProjectStore) {
+  if (!store.selectedMidiClipId) return null
+  for (const track of store.project.tracks) {
+    const clip = track.midiClips.find((item) => item.id === store.selectedMidiClipId)
+    if (!clip?.keyShift?.semitones) continue
+    const line = keyShiftReadout({ stretch: { semitones: clip.keyShift.semitones }, keyShift: clip.keyShift })
+    if (!line) continue
+    return (
+      <div className="clip-hearing" data-key-shift-dock="" role="region" aria-label="Shifted key">
+        <p data-key-shift-readout="">{line}</p>
+        <button type="button" data-key-revert="" title="Put this clip back on its original pitch." onClick={() => store.revertKeyShift(track.id, clip.id)}>
+          Revert to original
+        </button>
+      </div>
+    )
+  }
+  return null
+}
+
 function selectedClip(store: ProjectStore) {
   if (store.selectedClipId) {
     for (const track of store.project.tracks) {
@@ -294,6 +317,11 @@ export function PhoneDock({
   const [host, setHost] = useState<HTMLElement | null>(null)
   const arrangeLive = place === 'arrange'
   const toolsOpen = (arrangeLive && utility === 'tools') || offstage === 'tools'
+  const harmonizeOpen = useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => store.harmonizeOpen,
+    () => false,
+  )
   const snapOn = store.project.snap !== false
   const division = normalizeSnapDivision(store.project.snapDivision)
   const gridLabel = SNAP_DIVISIONS.find((item) => item.id === division)?.label ?? division
@@ -411,8 +439,27 @@ export function PhoneDock({
         document.body,
       ) : null}
       {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
-      {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
+      {toolsOpen ? (
+        <>
+          <button
+            type="button"
+            className="harmonize-launch"
+            data-harmonize-song=""
+            title="Shift every harmonic clip into one key. Drums, percussion, and effects stay put."
+            onClick={() => { closeTools(); store.requestHarmonize() }}
+          >
+            Harmonize song
+          </button>
+          <PhoneToolRow store={store} onClose={closeTools} />
+        </>
+      ) : null}
+      {harmonizeOpen ? (
+        <Suspense fallback={null}>
+          <HarmonizeSheet store={store} />
+        </Suspense>
+      ) : null}
       {audioTempo ? <ClipTempoControl store={store} trackId={audioTempo.trackId} clipId={audioTempo.clipId} /> : null}
+      {midiKeyShift(store)}
       {clip && place === 'arrange' ? <VariationBar store={store} /> : null}
       <div className="phone-context btn-tray phone-context-tray" role="toolbar" aria-label="Actions" data-phone-context={kind} data-edit-row={kind === 'arrange' && clip ? 'clips' : kind === 'notes' ? 'notes' : undefined}>
         {kind === 'clip' && clip && (

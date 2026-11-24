@@ -141,6 +141,7 @@ import type { AudioAsset, AudioClip, AutomationWriteMode, ClipHearing, ClipStret
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { relateTempo, tempoForSong } from '../model/clipHearing'
 import { canArmAudio, clipWantsLoopTrack } from '../model/audioKind'
+import { applyHarmonizeToProject, transposeMidiClip, type HarmonizeMove } from '../model/harmonize'
 import { clampInputDb, isRecordedClip } from '../audio/recordTake'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { applyFreeze } from '../audio/bounce'
@@ -363,6 +364,8 @@ export class ProjectStore {
     tonicOnly: boolean
     line: string
   } | null = null
+  /** Harmonize song sheet. Not saved. */
+  harmonizeOpen = false
   /** Spectral repair sheet. Not saved. */
   spectralTrackId: string | null = null
   /** Open wave editor. Not saved. The edits themselves live on the clip. */
@@ -2173,13 +2176,50 @@ export class ProjectStore {
   /** Put the clip back on its original pitch. One undo. */
   revertKeyShift(trackId: string, clipId: string) {
     this.mutate(() => {
-      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip?.stretch || isRecordedClip(clip)) return
-      const formant = clip.keyShift?.formantBefore === true
-      clip.stretch = { ...clip.stretch, semitones: 0, formant, markers: clip.stretch.markers }
-      delete clip.keyShift
-      this.commitClip(clip)
+      const track = this.track(trackId)
+      const clip = track?.clips.find((item) => item.id === clipId)
+      if (clip?.stretch && !isRecordedClip(clip)) {
+        const formant = clip.keyShift?.formantBefore === true
+        const recorded = clip.keyShift?.playbackBefore === 'recorded'
+        clip.stretch = { ...clip.stretch, semitones: 0, formant, markers: clip.stretch.markers }
+        delete clip.keyShift
+        if (recorded) clip.playback = 'recorded'
+        this.commitClip(clip)
+        return
+      }
+      const midi = track?.midiClips.find((item) => item.id === clipId)
+      if (!midi?.keyShift) return
+      transposeMidiClip(midi, -midi.keyShift.semitones)
+      delete midi.keyShift
     })
+  }
+
+  /** Open the Harmonize song sheet. The sheet decides whether anything can move. */
+  requestHarmonize() {
+    this.harmonizeOpen = true
+    this.emit()
+  }
+
+  closeHarmonize() {
+    if (!this.harmonizeOpen) return
+    this.harmonizeOpen = false
+    this.emit()
+  }
+
+  /**
+   * Shift the chosen clips and set the song key.
+   * Pitch is rendered before this, so the project change is one undo step.
+   */
+  applyHarmonize(input: { root: number; minor: boolean; moves: readonly HarmonizeMove[] }) {
+    this.harmonizeOpen = false
+    this.mutate(() => {
+      applyHarmonizeToProject(this.project, input)
+      for (const move of input.moves) {
+        if (move.kind !== 'audio' || !move.semitones) continue
+        const clip = this.track(move.trackId)?.clips.find((item) => item.id === move.clipId)
+        if (clip) this.commitClip(clip)
+      }
+    }, 'Harmonize song')
   }
 
   useDetectedKey(trackId: string, clipId: string) {

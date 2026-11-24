@@ -168,7 +168,20 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
         </button>
       ) : null}
       {note ? <p className="clip-tempo-note">{note}</p> : null}
-      {songKey ? <p className="clip-tempo-readout" data-song-key={songKey}>Song key: {songKey}</p> : null}
+      {songKey ? (
+        <div className="song-key-row">
+          <p className="clip-tempo-readout" data-song-key={songKey}>Song key: {songKey}</p>
+          <button
+            type="button"
+            className="harmonize-song"
+            data-harmonize-song=""
+            title="Shift every harmonic clip into this key. Drums, percussion, and effects stay put."
+            onClick={() => store.requestHarmonize()}
+          >
+            Harmonize
+          </button>
+        </div>
+      ) : null}
       {keyLine ? (
         <div className="clip-hearing" data-key-shift-dock="" role="region" aria-label="Shifted key">
           <p data-key-shift-readout="">{keyLine}</p>

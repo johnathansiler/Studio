@@ -101,6 +101,11 @@ export function placeSound(options: {
     source: 'import',
     stretch,
   }
+  if (options.entry.type) clip.soundType = options.entry.type
+  if (options.entry.category) clip.soundCategory = options.entry.category
+  if (options.entry.role) clip.soundRole = options.entry.role
+  if (options.entry.tags.length) clip.soundTags = [...options.entry.tags]
+  if (options.entry.key) clip.soundKey = options.entry.key
   if (stretch.followTempo && stretch.sourceBpm) {
     const fit = fitLoopBeats({
       samples: lead.length,
