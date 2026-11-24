@@ -2,7 +2,7 @@ import { renderClipChannels, sourceSamplesOf } from '../audio/stretch/engine'
 import { formantPitchChannels } from '../audio/stretch/formantPitch'
 import { channelPrint, formantPitchKey, readFormantPitch, writeFormantPitch } from '../audio/stretch/pitchCache'
 import { monoMix } from './mix'
-import { detectKey, detectTempo, hearingOf } from './clipKey'
+import { clipDeniesKey, detectKey, detectTempo, hearingOf, unnamedKey } from './clipKey'
 import type { AudioClip, ClipHearing, Project, TempoPoint } from '../model/types'
 
 export interface ClipDetectRequest {
@@ -59,7 +59,8 @@ export function handleClipDetect(message: ClipDetectRequest): ClipDetectResponse
     const source = monoMix(sourceChannels)
     warmFormantPitch(opened.channels, opened.clip, sampleRate)
     const sounded = monoMix(renderClipChannels(opened.channels, opened.clip, project, 'hq'))
-    const hearing = hearingOf(detectKey(sounded, sampleRate), detectTempo(source, sampleRate))
+    const key = clipDeniesKey(opened.clip) ? unnamedKey() : detectKey(sounded, sampleRate)
+    const hearing = hearingOf(key, detectTempo(source, sampleRate))
     return { id: message.id, type: 'result', hearing }
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Detection failed'

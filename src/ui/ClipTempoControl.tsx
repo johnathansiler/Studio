@@ -216,6 +216,15 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
             {`Set song key to ${hearing.key}`}
           </button>
         </div>
+      ) : hearing?.maybeKey ? (
+        <div className="clip-hearing" data-clip-hearing="" data-hearing-unsure="" role="region" aria-label="Unsure key">
+          <p data-hearing-key="">Unsure</p>
+          <p className="clip-hearing-maybe" data-hearing-maybe="">{`maybe ${hearing.maybeKey}`}</p>
+        </div>
+      ) : hearing ? (
+        <div className="clip-hearing" data-clip-hearing="" data-hearing-none="" role="region" aria-label="No clear key">
+          <p data-hearing-key="">No clear key</p>
+        </div>
       ) : null}
     </div>
   )

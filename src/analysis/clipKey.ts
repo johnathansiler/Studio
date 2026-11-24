@@ -3,8 +3,10 @@
  *
  * Key reads the whole buffer (a short loop wraps around the seam): harmonic
  * and percussive spectra are split, peaks land on a log-frequency chroma, and
- * EDMA, Temperley, and Krumhansl profiles vote. The top key and the runner-up
- * are always returned. "No clear key" is for drums and noise.
+ * A harmonic pitch-class profile is correlated with the EDMA profiles.
+ * A confident key is major or minor. A weaker tonal reading is "Unsure"
+ * and keeps its best guess. "No clear key" is for drums, one-shots, and noise,
+ * and those are not given a name.
  *
  * Tempo listens to the source, before the stretch: an onset-strength envelope,
  * its autocorrelation, and a comb tempogram.
@@ -38,6 +40,8 @@ export interface KeyReading {
   cents: number
   tonal: number
   best: KeyCandidate | null
+  /** Tonal, but under the confidence gate. `best` is the grey "maybe" guess. */
+  unsure?: boolean
 }
 
 export interface TempoReading {
@@ -54,6 +58,21 @@ function clamp01(value: number) {
 /** Key of one mono buffer, already at the pitch the listener hears. */
 export function detectKey(samples: Float32Array, sampleRate: number, options?: KeyDetectOptions): KeyReading {
   return estimateKey(samples, sampleRate, options)
+}
+
+/** Drums, one-shots, and noise. No pitch-class name is attached. */
+export function unnamedKey(): KeyReading {
+  return {
+    clear: false,
+    label: 'No clear key',
+    root: null,
+    scale: '',
+    confidence: 0,
+    alt: null,
+    cents: 0,
+    tonal: 0,
+    best: null,
+  }
 }
 
 function smooth(env: Float32Array) {
@@ -234,23 +253,37 @@ export function detectTempo(samples: Float32Array, sampleRate: number): TempoRea
 }
 
 export function hearingOf(key: KeyReading, tempo: TempoReading): ClipHearing {
-  const alt = key.clear && key.alt ? key.alt : null
+  const named = key.clear && key.root != null && (key.scale === 'ionian' || key.scale === 'aeolian')
+  const unsure = !named && key.unsure === true && Boolean(key.best?.name)
+  const alt = named && key.alt ? key.alt : null
   const winnerScore = key.best && key.best.score > 0 ? key.best.score : 0
   const altConfidence = alt && winnerScore > 0
     ? Math.min(key.confidence, clamp01(key.confidence * (alt.score / winnerScore)))
     : 0
   return {
-    key: key.clear ? key.label : '',
-    root: key.clear ? key.root : null,
-    scale: key.clear ? key.scale : '',
-    confidence: key.clear ? key.confidence : 0,
+    key: named ? key.label : '',
+    root: named ? key.root : null,
+    scale: named ? key.scale : '',
+    confidence: named ? key.confidence : 0,
     alt: alt?.name ?? '',
     altRoot: alt ? alt.root : null,
     altScale: alt ? (alt.minor ? 'aeolian' : 'ionian') : '',
     altConfidence,
-    clearKey: key.clear,
+    clearKey: named,
+    maybeKey: unsure ? key.best?.name ?? '' : '',
     bpm: tempo.bpm > 0 ? tempo.bpm : 0,
     bpmConfidence: tempo.bpm > 0 ? tempo.confidence : 0,
     cents: Math.round(key.cents),
   }
+}
+
+/** Drum loops, one-shots, and noise are not given a key name. */
+export function clipDeniesKey(clip: { soundType?: string; soundRole?: string; soundCategory?: string }) {
+  const type = (clip.soundType ?? '').toLowerCase().replace(/[\s_]+/g, '-')
+  if (type === 'one-shot' || type === 'oneshot') return true
+  const role = (clip.soundRole ?? '').toLowerCase()
+  if (role.includes('drum')) return true
+  const category = (clip.soundCategory ?? '').toLowerCase()
+  if (category === 'kick' || category === 'snare' || category === 'hat' || category === 'hi-hat' || category === 'hihat' || category === 'clap' || category === 'percussion' || category === 'perc' || category === 'cymbal' || category === 'tom' || category === 'rim') return true
+  return false
 }
