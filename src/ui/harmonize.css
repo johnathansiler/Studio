@@ -1,15 +1,7 @@
-.shell.phone #harmonize-song.bottom-sheet,
-.shell.fold #harmonize-song.bottom-sheet {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 450;
-  flex: none;
-  width: auto;
-  height: auto;
-  max-height: calc(100dvh - 148px);
-  border-radius: 16px 16px 0 0;
+/* Same column as Setup and Snap: above the bottom bar, never over it.
+   Dragging the grab writes --sheet-h. Cap at the phone sheet height. */
+#harmonize-song.bottom-sheet {
+  max-height: min(var(--sheet-h, var(--phone-sheet-h, 72dvh)), var(--phone-sheet-h, 72dvh), calc(100% - 8px));
 }
 
 .harmonize-sheet {

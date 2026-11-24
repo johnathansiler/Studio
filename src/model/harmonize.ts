@@ -368,7 +368,22 @@ function scopeAudio(input: HarmonizeInput, base: Omit<ScopedClip, 'disposition' 
   if (key) {
     return { ...base, disposition: vocal ? 'vocal' : 'harmonic', reason: vocal ? 'Vocal' : reason, key, needsDetect: false }
   }
-  if (input.hearingClear === false) {
+  // Hearing is the pitch that is playing. Before any shift that is the file.
+  // After a shift it is already moved, so adding the semitones again would
+  // double the interval. Re-read the source file instead.
+  if (!base.existingSemitones && input.hearingClear && input.hearingKey) {
+    const heard = parseMusicalKey(input.hearingKey)
+    if (heard) {
+      return {
+        ...base,
+        disposition: vocal ? 'vocal' : 'harmonic',
+        reason: vocal ? 'Vocal' : reason,
+        key: majorMinorKey(heard.root, heard.minor),
+        needsDetect: false,
+      }
+    }
+  }
+  if (input.hearingClear === false && !base.existingSemitones) {
     return { ...base, disposition: 'skip', reason: 'No clear key', key: null, needsDetect: false }
   }
   return { ...base, disposition: vocal ? 'vocal' : 'harmonic', reason: vocal ? 'Vocal' : reason, key: null, needsDetect: true }
@@ -382,7 +397,7 @@ function audioReason(type: string, category: string) {
 }
 
 function knownKey(input: HarmonizeInput): MusicalKey | null {
-  const tagged = [input.soundKey, input.loopKey, input.hearingClear ? input.hearingKey : '']
+  const tagged = [input.soundKey, input.loopKey]
   for (const value of tagged) {
     const parsed = value ? parseMusicalKey(value) : null
     if (parsed) return majorMinorKey(parsed.root, parsed.minor)

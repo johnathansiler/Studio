@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { detectKey } from '../analysis/clipKey'
 import { renderClipChannels } from '../audio/stretch/engine'
 import {
   applyHarmonizeToProject,
@@ -115,6 +116,37 @@ describe('harmonize scope', () => {
     const moved = planRows([vocal], target, true)
     expect(held[0]).toMatchObject({ action: 'skip', reason: 'Vocal track. Sung as recorded.' })
     expect(moved[0]).toMatchObject({ action: 'shift', semitones: 0, from: 'A minor', to: 'C major' })
+  })
+
+  it('treats a file key as the source and does not add a shift that Detect already heard', () => {
+    const file = scopeClip(input({
+      name: 'Keys loop',
+      kind: 'audio',
+      soundType: 'loop',
+      soundKey: 'C major',
+      hearingKey: 'D major',
+      hearingClear: true,
+      existingSemitones: 2,
+    }))
+    const sounded = scopeClip(input({
+      name: 'Heard loop',
+      kind: 'audio',
+      soundType: 'loop',
+      hearingKey: 'D major',
+      hearingClear: true,
+      existingSemitones: 2,
+    }))
+    const fresh = scopeClip(input({
+      name: 'Fresh loop',
+      kind: 'audio',
+      soundType: 'loop',
+      hearingKey: 'A minor',
+      hearingClear: true,
+    }))
+    expect(planRows([file], majorMinorKey(2, false), false)[0].semitones).toBe(0)
+    expect(sounded.needsDetect).toBe(true)
+    expect(sounded.key).toBeNull()
+    expect(fresh).toMatchObject({ needsDetect: false, key: { root: 9, minor: true } })
   })
 })
 
@@ -269,6 +301,76 @@ describe('harmonize apply', () => {
     expect(take.keyShift).toBeUndefined()
     expect(take.durationSamples).toBe(rate)
   })
+
+  it('renders the shifted audio in the target key, at the same length, without a loop click', () => {
+    const rate = 48000
+    const project = createEmptyProject(rate)
+    const music = project.tracks.find((track) => track.kind === 'loop')!
+    const vocal = project.tracks.find((track) => track.kind === 'vocal')!
+    const far = progression([[0, 4, 7], [5, 9, 0], [7, 11, 2], [0, 4, 7]], 6, rate)
+    const near = progression([[0, 3, 7], [5, 8, 0], [7, 10, 2], [0, 3, 7]], 9, rate)
+    const drums = hatLoop(rate)
+    const loop = periodicChord(rate, [220, 277.18, 329.63])
+    const brass = loopClip('brass', 'Brass loop', far, { soundType: 'loop', soundCategory: 'brass', soundKey: 'F# major' })
+    const guitar = loopClip('guitar', 'Guitar loop', near, { soundType: 'loop', soundCategory: 'guitar', soundKey: 'A minor' })
+    const beat = loopClip('drums', 'Drum loop', drums, { soundType: 'loop', soundCategory: 'drums', soundRole: 'drum_one_shot' })
+    beat.stretch!.mode = 'beats'
+    const tone = loopClip('tone', 'A chord', loop, { soundType: 'loop', soundCategory: 'keys', soundKey: 'A major' })
+    music.clips.push(brass, guitar, beat, tone)
+    const scoped = [brass, guitar, beat, tone].map((clip) => scopeClip(input({
+      ...loopFacts(clip),
+      trackId: music.id,
+      trackKind: 'loop',
+    })))
+    const vocalTake = loopClip('vocal', 'Lead vocal', periodicChord(rate, [293.66]), { soundType: 'loop', loopKey: 'D major' })
+    vocalTake.playback = 'recorded'
+    vocalTake.source = 'local'
+    vocalTake.stretch!.followTempo = false
+    vocal.clips.push(vocalTake)
+    scoped.push(scopeClip(input({ ...loopFacts(vocalTake), trackId: vocal.id, trackKind: 'vocal' })))
+    const rows = planRows(scoped, majorMinorKey(0, false), false)
+    expect(rows.find((row) => row.name === 'Drum loop')?.action).toBe('skip')
+    expect(rows.find((row) => row.name === 'Lead vocal')?.action).toBe('skip')
+    expect(rows.find((row) => row.name === 'Guitar loop')?.semitones).toBe(0)
+    expect(rows.find((row) => row.name === 'Brass loop')?.semitones).toBe(-6)
+    applyHarmonizeToProject(project, { root: 0, minor: false, moves: harmonizeMoves(rows) })
+    expect(project.scale?.keySet).toBe(true)
+    expect(brass.durationSamples).toBe(far.length)
+    expect(guitar.stretch?.followTempo).toBe(true)
+    expect(beat.stretch?.semitones).toBe(0)
+    expect(vocalTake.stretch?.semitones).toBe(0)
+    expect(vocalTake.playback).toBe('recorded')
+
+    const brassOut = renderClipChannels([far], brass, project, 'hq')[0]
+    const guitarOut = renderClipChannels([near], guitar, project, 'hq')[0]
+    const drumOut = renderClipChannels([drums], beat, project, 'hq')[0]
+    const toneOut = renderClipChannels([loop], tone, project, 'hq')[0]
+    expect(brassOut.length).toBe(far.length)
+    expect(guitarOut.length).toBe(near.length)
+    expect(drumOut.length).toBe(drums.length)
+    expect(toneOut.length).toBe(loop.length)
+    expect(same(drumOut, drums)).toBe(true)
+    const brassKey = detectKey(brassOut, rate)
+    const guitarKey = detectKey(guitarOut, rate)
+    expect(brassKey.clear).toBe(true)
+    expect(brassKey.root).toBe(0)
+    expect(brassKey.scale).toBe('ionian')
+    expect(guitarKey.clear).toBe(true)
+    expect(guitarKey.root).toBe(9)
+    expect(guitarKey.scale).toBe('aeolian')
+    const join = Math.abs(toneOut[0] - toneOut[toneOut.length - 1])
+    let bodyStep = 0
+    for (let i = Math.floor(loop.length / 2); i < Math.floor(loop.length / 2) + 2000; i++) {
+      bodyStep = Math.max(bodyStep, Math.abs(toneOut[i] - toneOut[i - 1]))
+    }
+    expect(join).toBeLessThan(bodyStep * 3 + 0.02)
+    let silent = 0
+    for (let i = Math.floor(toneOut.length * 0.1); i < toneOut.length * 0.9; i++) {
+      if (Math.abs(toneOut[i]) < 1e-4) silent += 1
+      else silent = 0
+      expect(silent).toBeLessThan(rate * 0.01)
+    }
+  }, 60000)
 })
 
 function loopFacts(clip: AudioClip): HarmonizeInput {
@@ -291,6 +393,81 @@ function sine(hz: number, length: number) {
   const out = new Float32Array(length)
   for (let i = 0; i < length; i++) out[i] = Math.sin((2 * Math.PI * hz * i) / 48000) * 0.4
   return out
+}
+
+function midiHz(note: number) {
+  return 440 * 2 ** ((note - 69) / 12)
+}
+
+function addTone(data: Float32Array, note: number, rate: number, amp: number) {
+  const freq = midiHz(note)
+  for (let h = 1; h <= 5; h++) {
+    const f = freq * h
+    if (f >= rate * 0.45) break
+    const partial = amp / (h * h)
+    for (let i = 0; i < data.length; i++) {
+      const t = i / rate
+      const env = Math.min(1, t / 0.012) * Math.exp(-t * (0.7 + h * 0.15))
+      data[i] += Math.sin(2 * Math.PI * f * t) * partial * env
+    }
+  }
+}
+
+function progression(degrees: number[][], root: number, rate: number) {
+  const seconds = 0.7
+  const parts = degrees.map((shape) => {
+    const data = new Float32Array(Math.round(seconds * rate))
+    const notes = shape.map((interval) => 60 + root + interval)
+    addTone(data, notes[0] - 12, rate, 0.34)
+    for (const note of notes) addTone(data, note, rate, 0.16)
+    return data
+  })
+  const out = new Float32Array(parts.reduce((sum, part) => sum + part.length, 0))
+  let at = 0
+  for (const part of parts) {
+    out.set(part, at)
+    at += part.length
+  }
+  return out
+}
+
+function periodicChord(rate: number, frequencies: number[]) {
+  const data = new Float32Array(rate * 2)
+  for (const f0 of frequencies) {
+    const cycles = Math.round((f0 * data.length) / rate)
+    const freq = (cycles * rate) / data.length
+    for (let h = 1; h <= 4; h++) {
+      for (let i = 0; i < data.length; i++) data[i] += Math.sin((2 * Math.PI * freq * h * i) / rate) / (h * h) * 0.1
+    }
+  }
+  return data
+}
+
+function hatLoop(rate: number) {
+  const data = new Float32Array(rate)
+  for (let hit = 0; hit < 8; hit++) {
+    const at = Math.round(hit * rate / 8)
+    for (let i = 0; i < 180 && at + i < data.length; i++) {
+      data[at + i] += (Math.random() * 2 - 1) * Math.exp(-i / 28) * 0.7
+    }
+  }
+  return data
+}
+
+function loopClip(id: string, name: string, buffer: Float32Array, fields: Partial<AudioClip>): AudioClip {
+  return audio({
+    id,
+    name,
+    durationSamples: buffer.length,
+    stretch: { sourceSamples: buffer.length, semitones: 0, cents: 0, mode: 'pro', followTempo: true, sourceBpm: 120, markers: [] },
+    ...fields,
+  })
+}
+
+function same(left: Float32Array, right: Float32Array) {
+  if (left.length !== right.length) return false
+  for (let i = 0; i < left.length; i += 11) if (Math.abs(left[i] - right[i]) > 1e-5) return false
+  return true
 }
 
 function different(left: Float32Array, right: Float32Array) {
