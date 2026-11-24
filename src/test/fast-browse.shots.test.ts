@@ -72,7 +72,7 @@ const loops: LibraryEntry[] = [
 
 const noop = () => undefined
 
-function library(mode: 'drum' | 'loop') {
+function library(mode: 'drum' | 'loop', withLanes = true) {
   const model = buildFastRows({
     entries: mode === 'drum' ? drums : loops,
     mode,
@@ -118,7 +118,12 @@ function library(mode: 'drum' | 'loop') {
     return `<div class="sound-row"><button type="button" class="sound-copy"><strong>${item.label}</strong><span class="sound-meta">${meta}</span></button>${actions}</div>`
   }).join('')
   const jump = model.jump.map((item) => `<button type="button" aria-label="Jump to ${item.label}">${item.short}</button>`).join('')
-  return `<div class="sound-panel my-library" data-fast-browse="${mode}"><div class="library-sticky"><div class="sound-filters"><input aria-label="Search" placeholder="Search" /></div>${shelf}</div><div class="sound-list"><div class="fast-list"><div style="margin-right:34px">${list}</div><div class="fast-jump">${jump}</div></div></div></div>`
+  const lanes = !withLanes ? '' : ['Loops', 'Drums', 'Instruments', 'One-shots', 'SFX', 'Favorites'].map((label) => {
+    const id = label === 'One-shots' ? 'oneshots' : label === 'Favorites' ? 'favorites' : label.toLowerCase()
+    const on = (mode === 'drum' && id === 'drums') || (mode === 'loop' && id === 'loops') ? ' on' : ''
+    return `<button type="button" data-lane="${id}" class="${on.trim()}" aria-pressed="${on ? 'true' : 'false'}">${label}</button>`
+  }).join('')
+  return `<div class="sound-panel my-library" data-fast-browse="${mode}"><div class="library-sticky"><div class="sound-filters"><input aria-label="Search" placeholder="Search" /></div><div class="library-lanes" role="group" aria-label="Library">${lanes}</div>${shelf}</div><div class="sound-list"><div class="fast-list"><div style="margin-right:34px">${list}</div><div class="fast-jump">${jump}</div></div></div></div>`
 }
 
 describe('fast browse screenshots', () => {
@@ -139,7 +144,7 @@ describe('fast browse screenshots', () => {
       setRepeatWatch() {},
     } as unknown as AudioEngine
     const pads = renderToStaticMarkup(createElement(PadsPanel, { store, engine, trackId: id, onRecord: () => {}, onEdit: () => {} }))
-    const padBrowser = pads.replace(/<\/div>\s*$/, `<div class="pad-sample-browser" data-pad-browser="open" style="animation:none"><div class="pad-browser-bar"><strong>Browser</strong><button type="button">Close</button></div>${library('drum')}</div></div>`)
+    const padBrowser = pads.replace(/<\/div>\s*$/, `<div class="pad-sample-browser" data-pad-browser="open" style="animation:none"><div class="pad-browser-bar"><strong>Browser</strong><button type="button">Close</button></div>${library('drum', false)}</div></div>`)
     const app = await chromium.launch()
     try {
       for (const width of [384, 884]) {
@@ -159,6 +164,8 @@ describe('fast browse screenshots', () => {
         await paint(`<aside class="playlist-browser bottom-sheet"><div class="bottom-sheet-body">${library('drum')}</div></aside>`, 'library-drums')
         expect(await page.locator('[data-drum-chip="snare"]').count()).toBe(1)
         expect(await page.locator('[data-drum-chip="kick"]').count()).toBe(1)
+        expect(await page.locator('[data-lane="drums"].on').count()).toBe(1)
+        expect(await page.locator('[data-lane="loops"]').count()).toBe(1)
         await paint(`<aside class="playlist-browser bottom-sheet"><div class="bottom-sheet-body">${library('loop')}</div></aside>`, 'library-loops')
         expect(await page.locator('[data-loop-chip="bass"]').count()).toBe(1)
         expect(await page.getByRole('button', { name: 'Near tempo' }).count()).toBe(1)

@@ -6,6 +6,7 @@ import { browseLibraryRows, type BrowseRow } from '../library/browse'
 import { contentTypeChoices, contentTypeLabel, isLoopEntry } from '../library/contentType'
 import {
   buildFastRows,
+  classifyDrum,
   fastOffsetForId,
   fastSounds,
   fastVisibleRange,
@@ -16,7 +17,7 @@ import {
   type FastMode,
   type FastSort,
 } from '../library/fastBrowse'
-import { browseIndexForId, browseRowId, readBrowsePlace, scrollTopForIndex, writeBrowsePlace } from './browsePlace'
+import { browseIndexForId, browseRowId, laneForType, readBrowsePlace, scrollTopForIndex, typeForLane, writeBrowsePlace, type LibraryLane } from './browsePlace'
 import { clearRecent, recentSounds, subscribeRecent } from '../library/recent'
 import { absorbLegacyFavoriteIds, favoriteSounds, isFavorite, subscribeFavorites, toggleFavorite } from '../library/favorites'
 import { FavoriteStar } from './FavoriteStar'
@@ -108,6 +109,7 @@ export function MyLibrary({
   pad?: { trackId: string; bank: number; index: number } | null
 }) {
   const saved = useRef(readBrowsePlace())
+  const savedLane: LibraryLane = variant === 'pads' ? '' : saved.current.libraryLane
   const [phase, setPhase] = useState<'check' | 'off' | 'lock' | 'load' | 'ready'>('check')
   const [message, setMessage] = useState('Checking the library…')
   const [passphrase, setPassphrase] = useState('')
@@ -118,11 +120,23 @@ export function MyLibrary({
   const [text, setText] = useState(variant === 'pads' ? saved.current.padText : saved.current.libraryText)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [group, setGroup] = useState<Group>(saved.current.libraryGroup as Group)
-  const [query, setQuery] = useState<LibraryQuery>(variant === 'pads' ? { ...EMPTY_LIBRARY_QUERY } : saved.current.libraryQuery)
+  const [query, setQuery] = useState<LibraryQuery>(
+    variant === 'pads'
+      ? { ...EMPTY_LIBRARY_QUERY }
+      : savedLane === 'favorites'
+        ? { ...saved.current.libraryQuery, type: '' }
+        : savedLane === 'drums'
+          ? { ...saved.current.libraryQuery, type: 'one-shot' }
+          : saved.current.libraryQuery,
+  )
   const [busy, setBusy] = useState('')
   const [playing, setPlaying] = useState('')
   const [focusId, setFocusId] = useState(saved.current.libraryFocus)
-  const [quick, setQuick] = useState<'' | 'recent' | 'favorites'>(variant === 'pads' ? '' : saved.current.libraryQuick)
+  const [quick, setQuick] = useState<'' | 'recent' | 'favorites'>(
+    variant === 'pads' ? '' : savedLane === 'favorites' ? 'favorites' : saved.current.libraryQuick === 'favorites' ? '' : saved.current.libraryQuick,
+  )
+  const [lane, setLane] = useState<LibraryLane>(savedLane)
+  const [listScrolled, setListScrolled] = useState(false)
   const [drumCategory, setDrumCategory] = useState(variant === 'pads' ? saved.current.padCategory : saved.current.drumCategory)
   const [drumSub, setDrumSub] = useState<DrumSub | ''>(variant === 'pads' ? saved.current.padSub : saved.current.drumSub)
   const [loopCategory, setLoopCategory] = useState(saved.current.loopCategory)
@@ -137,7 +151,7 @@ export function MyLibrary({
   const recent = useSyncExternalStore(subscribeRecent, recentSounds, recentSounds)
   const favorites = useSyncExternalStore(subscribeFavorites, favoriteSounds, favoriteSounds)
   const listRef = useRef<HTMLDivElement>(null)
-  const swipe = useRef({ x: 0, y: 0 })
+  const swipe = useRef({ x: 0, y: 0, moved: false })
   const previewGen = useRef(0)
   const previewAbort = useRef<AbortController | null>(null)
 
@@ -288,7 +302,15 @@ export function MyLibrary({
     return listed
   }, [favorites, heard, index, instruments, quick, recent, searchQuery])
 
-  const fastMode: FastMode | '' = variant === 'pads' || query.type === 'one-shot' ? 'drum' : query.type === 'loop' ? 'loop' : ''
+  const fastMode: FastMode | '' = variant === 'pads'
+    ? 'drum'
+    : quick
+      ? ''
+      : lane === 'drums' || lane === 'oneshots' || query.type === 'one-shot'
+        ? 'drum'
+        : lane === 'loops' || query.type === 'loop'
+          ? 'loop'
+          : ''
   const fastCategory = fastMode === 'drum' ? drumCategory : loopCategory
   const collapsedSet = useMemo(() => new Set(collapsed), [collapsed])
   const favoriteKeys = useMemo(() => memoryKeys(favorites), [favorites])
@@ -303,6 +325,7 @@ export function MyLibrary({
         .flatMap((row) => row.kind === 'sound' ? [row.entry] : [])
       pool = mergeBrowseHits(sounds, extra, text, fastMode)
     }
+    if (lane === 'drums') pool = pool.filter((entry) => classifyDrum(entry))
     return buildFastRows({
       entries: pool,
       mode: fastMode,
@@ -315,8 +338,8 @@ export function MyLibrary({
       recentKeys,
       keyLabel: (entry) => resolveEntryKey(entry, heard.get(entry.key) ?? null)?.label ?? entry.musicalKey,
     })
-  }, [collapsedSet, drumSub, fastCategory, fastMode, favoriteKeys, heard, index, instruments, loopGenre, loopSort, quick, recentKeys, rows, searchQuery, text])
-  const filterKey = `${text}\0${JSON.stringify(query)}\0${projectKey.label}\0${fastCategory}\0${drumSub}\0${loopGenre}\0${loopSort}`
+  }, [collapsedSet, drumSub, fastCategory, fastMode, favoriteKeys, heard, index, instruments, lane, loopGenre, loopSort, quick, recentKeys, rows, searchQuery, text])
+  const filterKey = `${text}\0${JSON.stringify(query)}\0${projectKey.label}\0${fastCategory}\0${drumSub}\0${loopGenre}\0${loopSort}\0${lane}`
   const filterKeyRef = useRef(filterKey)
   const didRestore = useRef(false)
   useEffect(() => {
@@ -329,6 +352,7 @@ export function MyLibrary({
       libraryQuery: query,
       libraryGroup: group,
       libraryQuick: quick,
+      libraryLane: lane,
       drumCategory,
       drumSub,
       loopCategory,
@@ -336,10 +360,16 @@ export function MyLibrary({
       loopSort,
       collapsedSections: collapsed,
     })
-  }, [collapsed, drumCategory, drumSub, group, loopCategory, loopGenre, loopSort, query, quick, text, variant])
+  }, [collapsed, drumCategory, drumSub, group, lane, loopCategory, loopGenre, loopSort, query, quick, text, variant])
   useEffect(() => {
     absorbLegacyFavoriteIds(store.project.soundFavorites ?? [])
   }, [store])
+
+  useEffect(() => {
+    if (variant === 'pads' || phase !== 'ready' || !lane) return
+    const node = document.querySelector(`.library-lanes [data-lane="${lane}"]`)
+    if (node instanceof HTMLElement) node.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  }, [lane, phase, variant])
 
   const prefetchKey = phase === 'ready'
     ? rows.filter((row) => row.kind === 'sound').slice(0, 2).map((row) => row.entry.key).join('\n')
@@ -363,10 +393,15 @@ export function MyLibrary({
     if (!node) return
     const scroller = scrollParent(node)
     const update = () => {
+      const library = node.closest('.my-library') as HTMLElement | null
+      const sticky = library?.querySelector('.library-sticky')
+      if (library && sticky) library.style.setProperty('--library-sticky-h', `${Math.ceil(sticky.getBoundingClientRect().height)}px`)
       const listIsScroller = scroller === node
       const scrolled = listIsScroller
         ? scroller.scrollTop
         : Math.max(0, scroller.getBoundingClientRect().top - node.getBoundingClientRect().top)
+      const nextScrolled = scrolled > 12
+      setListScrolled((prev) => prev === nextScrolled ? prev : nextScrolled)
       const viewHeight = Math.min(scroller.clientHeight || window.innerHeight, window.innerHeight || scroller.clientHeight)
       if (fastModel) {
         const next = fastVisibleRange(fastModel.offsets, fastModel.rows.map((row) => row.height), scrolled, viewHeight)
@@ -669,11 +704,39 @@ export function MyLibrary({
 
   function applyFilter(patch: Partial<LibraryQuery>) {
     setQuery((current) => ({ ...current, ...patch }))
+    if ('type' in patch) setLane(laneForType(patch.type ?? ''))
+    if (patch.type) setQuick('')
     setFiltersOpen(false)
   }
 
+  function pickLane(next: LibraryLane) {
+    if (lane === next) {
+      setLane('')
+      setQuick('')
+      setQuery((current) => ({ ...current, type: '' }))
+      return
+    }
+    setLane(next)
+    if (next === 'favorites') {
+      setQuick('favorites')
+      setQuery((current) => ({ ...current, type: '' }))
+      return
+    }
+    setQuick('')
+    if (next === 'drums' && drumCategory === 'other') setDrumCategory('')
+    setQuery((current) => ({ ...current, type: typeForLane(next) }))
+  }
+
   function pickQuick(id: 'recent' | 'favorites') {
-    setQuick((current) => current === id ? '' : id)
+    const turningOff = quick === id
+    setQuick(turningOff ? '' : id)
+    if (id === 'favorites') {
+      if (turningOff) setLane(laneForType(query.type))
+      else {
+        setLane('favorites')
+        setQuery((current) => ({ ...current, type: '' }))
+      }
+    }
     setFiltersOpen(false)
   }
 
@@ -686,6 +749,7 @@ export function MyLibrary({
   function clearAllFilters() {
     setQuery({ ...EMPTY_LIBRARY_QUERY })
     setQuick('')
+    setLane('')
   }
 
   const facets = index?.facets
@@ -698,6 +762,8 @@ export function MyLibrary({
   const categoryValues = facetValues('category', facets, false)
   const instrumentValues = facetValues('instrument', facets, false)
   const active = activeFilters(query, projectKey)
+    .filter((item) => !(item.id === 'type' && lane))
+    .map((item) => item.id === 'type' && lane === 'drums' ? { ...item, label: 'Drums' } : item)
   const activeCount = active.length + (quick ? 1 : 0)
   const shown = fastModel ? [] : rows.slice(range.start, range.end)
   const fastShown = fastModel ? fastModel.rows.slice(range.start, range.end) : []
@@ -750,6 +816,7 @@ export function MyLibrary({
             </button>
             <button type="button" className="sound-filter library-lock-btn" onClick={lock}>Lock</button>
           </div>
+          {variant === 'library' && <LibraryLanes lane={lane} onPick={pickLane} />}
           {filtersOpen && <div className="sound-filter-menu library-filter-sheet" role="dialog" aria-label="Filter">
               <div className="library-filter-chips" role="group" aria-label="Filter groups">
                 {GROUPS.map((item) => (
@@ -832,13 +899,19 @@ export function MyLibrary({
           {(active.length > 0 || quick) && (
             <div className="library-active-bar" role="group" aria-label="Active filters">
               {quick && (
-                <button type="button" className="library-active-chip" aria-label={`Clear ${quick === 'recent' ? 'Recent' : 'Favorites'}`} onClick={() => setQuick('')}>
+                <button type="button" className="library-active-chip" aria-label={`Clear ${quick === 'recent' ? 'Recent' : 'Favorites'}`} onClick={() => {
+                  setQuick('')
+                  if (quick === 'favorites') setLane('')
+                }}>
                   <span>{quick === 'recent' ? 'Recent' : 'Favorites'}</span>
                   <span aria-hidden="true">×</span>
                 </button>
               )}
               {active.map((item) => (
-                <button key={item.id} type="button" className="library-active-chip" aria-label={`Clear ${item.label}`} onClick={() => setQuery((current) => ({ ...current, ...item.clear }))}>
+                <button key={item.id} type="button" className="library-active-chip" aria-label={`Clear ${item.label}`} onClick={() => {
+                  setQuery((current) => ({ ...current, ...item.clear }))
+                  if (item.id === 'type') setLane('')
+                }}>
                   <span>{item.label}</span>
                   <span aria-hidden="true">×</span>
                 </button>
@@ -858,7 +931,7 @@ export function MyLibrary({
               inKey={query.musicalKey === 'project' && !query.keyCompatible}
               compatible={query.musicalKey === 'project' && query.keyCompatible === true}
               songKey={projectKey.short}
-              stuck={fastModel.rows.find((row) => row.id === stuckId)?.label ?? ''}
+              stuck={listScrolled ? (fastModel.rows.find((row) => row.id === stuckId)?.label ?? '') : ''}
               onCategory={(id) => {
                 if (fastMode === 'loop') setLoopCategory(id)
                 else {
@@ -900,16 +973,21 @@ export function MyLibrary({
             data-fast-browse={fastMode || undefined}
             onPointerDown={(event) => {
               if (!fastModel) return
-              swipe.current = { x: event.clientX, y: event.clientY }
+              swipe.current = { x: event.clientX, y: event.clientY, moved: false }
             }}
             onPointerUp={(event) => {
               if (!fastModel) return
               const dx = event.clientX - swipe.current.x
               const dy = event.clientY - swipe.current.y
               if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.4) return
-              const target = event.target instanceof Element ? event.target : null
-              if (target?.closest('button, input, a')) return
+              swipe.current.moved = true
               stepSound(dx < 0 ? 1 : -1)
+            }}
+            onClickCapture={(event) => {
+              if (!swipe.current.moved) return
+              swipe.current.moved = false
+              event.preventDefault()
+              event.stopPropagation()
             }}
           >
             {counted === 0 && <p className="sound-status">Nothing matches.</p>}
@@ -920,7 +998,7 @@ export function MyLibrary({
                     <button
                       key={row.id}
                       type="button"
-                      className="fast-section"
+                      className={`fast-section${row.id.includes(':letter:') ? ' fast-letter' : ''}`}
                       data-section={row.id}
                       aria-expanded={!collapsed.includes(row.id)}
                       onClick={() => toggleSection(row.id)}
@@ -1099,6 +1177,35 @@ function memoryKeys(items: { id: string; legacyId?: string; library?: { key?: st
     keys.push(key)
   }
   return keys
+}
+
+const LIBRARY_LANES: { id: LibraryLane; label: string }[] = [
+  { id: 'loops', label: 'Loops' },
+  { id: 'drums', label: 'Drums' },
+  { id: 'instruments', label: 'Instruments' },
+  { id: 'oneshots', label: 'One-shots' },
+  { id: 'sfx', label: 'SFX' },
+  { id: 'favorites', label: 'Favorites' },
+]
+
+/** Chips directly under Search. Drums opens the drum shelves. Loops opens the loop shelves. */
+export function LibraryLanes({ lane, onPick }: { lane: LibraryLane; onPick: (id: LibraryLane) => void }) {
+  return (
+    <div className="library-chip-scroll library-lanes" role="group" aria-label="Library">
+      {LIBRARY_LANES.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          data-lane={item.id}
+          className={lane === item.id ? 'on' : ''}
+          aria-pressed={lane === item.id}
+          onClick={() => onPick(item.id)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 export function FastShelf({

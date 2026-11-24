@@ -2,6 +2,32 @@ import type { DrumSub, FastSort } from '../library/fastBrowse'
 import { EMPTY_LIBRARY_QUERY, type LibraryQuery } from '../library/types'
 import type { BrowseRow } from '../library/browse'
 
+/** Top row under Search. Drums is the one-shot drum shelves. One-shots keeps the rest. */
+export type LibraryLane = '' | 'loops' | 'drums' | 'instruments' | 'oneshots' | 'sfx' | 'favorites'
+
+const LANES = new Set<LibraryLane>(['', 'loops', 'drums', 'instruments', 'oneshots', 'sfx', 'favorites'])
+
+export function typeForLane(lane: LibraryLane): string {
+  if (lane === 'loops') return 'loop'
+  if (lane === 'drums' || lane === 'oneshots') return 'one-shot'
+  if (lane === 'instruments') return 'instrument'
+  if (lane === 'sfx') return 'sfx'
+  return ''
+}
+
+/** One-shots stay one-shots. Drums is chosen on its own chip and stored as libraryLane. */
+export function laneForType(type: string): LibraryLane {
+  if (type === 'loop') return 'loops'
+  if (type === 'one-shot') return 'oneshots'
+  if (type === 'instrument') return 'instruments'
+  if (type === 'sfx') return 'sfx'
+  return ''
+}
+
+export function isLibraryLane(value: unknown): value is LibraryLane {
+  return typeof value === 'string' && LANES.has(value as LibraryLane)
+}
+
 export const BROWSE_PLACE_KEY = 'cueharbor-browse-place'
 
 export type BrowsePlaceTab = 'library' | 'patterns' | 'clips'
@@ -17,6 +43,8 @@ export interface BrowsePlace {
   libraryAnchor: string
   /** Recent or Favorites quick filter. Empty shows the whole library. */
   libraryQuick: '' | 'recent' | 'favorites'
+  /** Chip under Search. Empty is the whole library. */
+  libraryLane: LibraryLane
   patternText: string
   patternFocus: string
   clipText: string
@@ -50,6 +78,7 @@ export function emptyBrowsePlace(): BrowsePlace {
     libraryFocus: '',
     libraryAnchor: '',
     libraryQuick: '',
+    libraryLane: '',
     patternText: '',
     patternFocus: '',
     clipText: '',
@@ -101,6 +130,9 @@ export function readBrowsePlace(storage: Store | null = defaultStorage()): Brows
       libraryFocus: typeof parsed.libraryFocus === 'string' ? parsed.libraryFocus : '',
       libraryAnchor: typeof parsed.libraryAnchor === 'string' ? parsed.libraryAnchor : '',
       libraryQuick: parsed.libraryQuick === 'recent' || parsed.libraryQuick === 'favorites' ? parsed.libraryQuick : '',
+      libraryLane: parsed.libraryLane === undefined
+        ? (parsed.libraryQuick === 'favorites' ? 'favorites' : laneForType(parsed.libraryQuery?.type ?? ''))
+        : (isLibraryLane(parsed.libraryLane) ? parsed.libraryLane : ''),
       patternText: typeof parsed.patternText === 'string' ? parsed.patternText : '',
       patternFocus: typeof parsed.patternFocus === 'string' ? parsed.patternFocus : '',
       clipText: typeof parsed.clipText === 'string' ? parsed.clipText : '',

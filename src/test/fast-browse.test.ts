@@ -1,8 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { readBrowsePlace, writeBrowsePlace } from '../ui/browsePlace'
-import { FastShelf } from '../ui/MyLibrary'
+import { BROWSE_PLACE_KEY, laneForType, readBrowsePlace, typeForLane, writeBrowsePlace } from '../ui/browsePlace'
+import { FastShelf, LibraryLanes } from '../ui/MyLibrary'
 import {
   buildFastRows,
   classifyDrum,
@@ -80,6 +80,13 @@ describe('drum shelves', () => {
     expect(classifyDrum(entry({ key: 'h.wav', name: 'HH', tags: ['hh'] }))?.id).toBe('hat')
     expect(classifyDrum(drums[13])).toBeNull()
     expect(classifyDrum(entry({ key: 'kit/hat.wav', name: '808 Hat', category: 'hat', instrument: '808' }))?.id).toBe('hat')
+    expect(classifyDrum(entry({ key: 'kit/hat.wav', name: 'Rock Kit Closed Hat', category: 'perc', tags: ['closed_hat'] }))).toEqual({ id: 'hat', sub: 'closed' })
+    expect(classifyDrum(entry({ key: 'kit/snare.wav', name: 'Classic 808 Snare', category: 'snare', tags: ['classic-808'] }))?.id).toBe('snare')
+    expect(classifyDrum(entry({ key: 'kit/cow.wav', name: 'Classic 808 Cowbell', category: 'cowbell', tags: ['cowbell'] }))?.id).toBe('perc')
+    expect(classifyDrum(entry({ key: 'kit/rim.wav', name: 'Classic 808 Rim', category: 'perc', tags: ['rim'] }))?.id).toBe('rim')
+    expect(classifyDrum(entry({ key: 'kicks/01 808 - C1.wav', name: '01 808 - C1', category: 'kick', tags: ['kick', '808'] }))?.id).toBe('808')
+    expect(classifyDrum(entry({ key: 'kit/03-rimshot.wav', name: 'Room Kit Rimshot', category: 'snare', tags: ['snare', 'rimshot'] }))?.id).toBe('rim')
+    expect(classifyDrum(entry({ key: 'kicks/grime.wav', name: '01 909 Grime - C1', category: 'kick', tags: ['kick', 'rim'] }))?.id).toBe('kick')
   })
 
   it('understands hh, snr, bd, and 808', () => {
@@ -137,6 +144,9 @@ describe('loop shelves', () => {
     expect(classifyLoop(loops[0])).toBe('drums')
     expect(classifyLoop(loops[2])).toBe('keys')
     expect(classifyLoop(loops[4])).toBe('vocal')
+    expect(classifyLoop(entry({ key: 'Loops/ukulele.wav', name: 'Granular Ukulele', type: 'loop', category: 'ukulele' }))).toBe('guitar')
+    expect(classifyLoop(entry({ key: 'Loops/shaker.wav', name: 'SHAKER1', type: 'loop', category: 'nature' }))).toBe('drums')
+    expect(classifyLoop(entry({ key: 'Loops/room.wav', name: 'AMBIENCE', type: 'loop', category: 'nature' }))).toBe('fx')
     expect(entryGenres(loops[0])).toEqual(['trap'])
     expect(entryGenres(entry({ key: 'Loops/house_beat.wav', name: 'House Beat', genre: [] }))).toContain('house')
     const model = buildFastRows({ ...blank(), entries: loops, mode: 'loop', genre: 'trap' })
@@ -267,6 +277,25 @@ describe('fast browse chrome', () => {
     expect(place.padText).toBe('hh')
     expect(place.libraryQuery.type).toBe('loop')
     expect(place.libraryQuery.bpmMin).toBe(110)
+    storage.setItem(BROWSE_PLACE_KEY, JSON.stringify({ libraryQuery: { type: 'loop' }, libraryQuick: 'favorites' }))
+    expect(readBrowsePlace(storage).libraryLane).toBe('favorites')
+    storage.setItem(BROWSE_PLACE_KEY, JSON.stringify({ libraryQuery: { type: 'one-shot' } }))
+    expect(readBrowsePlace(storage).libraryLane).toBe('oneshots')
+    writeBrowsePlace({ libraryLane: 'drums', libraryQuery: { text: '', type: 'one-shot', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null } }, storage)
+    expect(readBrowsePlace(storage).libraryLane).toBe('drums')
+    expect(typeForLane('drums')).toBe('one-shot')
+    expect(laneForType('one-shot')).toBe('oneshots')
+    expect(typeForLane('loops')).toBe('loop')
+  })
+
+  it('puts Loops, Drums, and the other lanes under Search', () => {
+    const html = renderToStaticMarkup(createElement(LibraryLanes, { lane: 'drums', onPick: () => undefined }))
+    for (const label of ['Loops', 'Drums', 'Instruments', 'One-shots', 'SFX', 'Favorites']) {
+      expect(html).toContain(label)
+    }
+    expect(html).toContain('data-lane="drums"')
+    expect(html).toContain('data-lane="loops"')
+    expect(html).toContain('aria-pressed="true"')
   })
 })
 

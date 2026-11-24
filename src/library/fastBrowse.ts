@@ -103,9 +103,14 @@ const DRUM_CATEGORY: Record<string, DrumClass> = {
   rim: { id: 'rim', sub: '' },
   rimshot: { id: 'rim', sub: '' },
   shaker: { id: 'shaker', sub: '' },
+  tambourine: { id: 'shaker', sub: '' },
+  cowbell: { id: 'perc', sub: '' },
   fx: { id: 'fx', sub: '' },
   sfx: { id: 'fx', sub: '' },
 }
+
+/** A percussion bucket. A hat or snare named inside it still belongs on its own shelf. */
+const GENERIC_DRUM = new Set(['perc', 'fx'])
 
 const LOOP_CATEGORY: Record<string, LoopId> = {
   drum: 'drums',
@@ -121,6 +126,7 @@ const LOOP_CATEGORY: Record<string, LoopId> = {
   piano: 'keys',
   keyboard: 'keys',
   guitar: 'guitar',
+  ukulele: 'guitar',
   synth: 'synth',
   synthesizer: 'synth',
   pad: 'pad',
@@ -191,10 +197,11 @@ function classifyDrumText(blob: string): DrumClass | null {
   if (word(blob, 'clap') || word(blob, 'claps') || word(blob, 'handclap')) return { id: 'clap', sub: '' }
   if (word(blob, 'rim') || word(blob, 'rimshot') || /side\s*stick|cross\s*stick/.test(blob)) return { id: 'rim', sub: '' }
   if (word(blob, 'shaker') || word(blob, 'tambourine') || word(blob, 'cabasa') || word(blob, 'maraca')) return { id: 'shaker', sub: '' }
+  if (word(blob, 'cowbell') || word(blob, 'conga') || word(blob, 'bongo') || word(blob, 'clave') || word(blob, 'agogo') || word(blob, 'woodblock')) return { id: 'perc', sub: '' }
+  if (word(blob, 'snare') || word(blob, 'snr') || word(blob, 'sd')) return { id: 'snare', sub: '' }
   if (word(blob, '808') || /eight\s*oh\s*eight/.test(blob)) return { id: '808', sub: '' }
   if (word(blob, 'kick') || word(blob, 'bd') || /bass\s*drum/.test(blob)) return { id: 'kick', sub: '' }
-  if (word(blob, 'snare') || word(blob, 'snr') || word(blob, 'sd')) return { id: 'snare', sub: '' }
-  if (word(blob, 'perc') || word(blob, 'percussion') || word(blob, 'cowbell') || word(blob, 'conga') || word(blob, 'bongo') || word(blob, 'clave') || word(blob, 'snap') || word(blob, 'agogo') || word(blob, 'woodblock')) return { id: 'perc', sub: '' }
+  if (word(blob, 'perc') || word(blob, 'percussion') || word(blob, 'snap')) return { id: 'perc', sub: '' }
   if (word(blob, 'fx') || word(blob, 'sfx') || word(blob, 'riser') || word(blob, 'impact') || word(blob, 'downlifter') || word(blob, 'uplifter')) return { id: 'fx', sub: '' }
   return null
 }
@@ -203,6 +210,8 @@ function classifyDrumText(blob: string): DrumClass | null {
 export function classifyDrum(entry: Pick<LibraryEntry, 'name' | 'key' | 'category' | 'instrument' | 'tags' | 'genre' | 'pack'>): DrumClass | null {
   const named = classifyDrumText(browseBlob({ ...entry, pack: '' }))
   const mapped = DRUM_CATEGORY[entry.category.trim().toLowerCase()]
+  if (mapped && named && mapped.id !== named.id && GENERIC_DRUM.has(mapped.id) && named.id !== 'perc' && named.id !== 'fx') return named
+  if (mapped?.id === 'snare' && named?.id === 'rim' && /\brim(?:shot)?\b/.test(entry.name.toLowerCase())) return named
   if (mapped) {
     if (mapped.id === 'hat' && named?.id === 'hat' && named.sub) return named
     if (mapped.id === 'cymbal' && named?.id === 'cymbal' && named.sub) return named
@@ -215,7 +224,7 @@ export function classifyDrum(entry: Pick<LibraryEntry, 'name' | 'key' | 'categor
 
 function classifyLoopText(blob: string): LoopId | null {
   if (/vocal\s*chop|vox\s*chop|acapella|ad\s*lib/.test(blob) || word(blob, 'vocal') || word(blob, 'vocals') || word(blob, 'vox') || word(blob, 'choir')) return 'vocal'
-  if (word(blob, 'guitar')) return 'guitar'
+  if (word(blob, 'guitar') || word(blob, 'ukulele')) return 'guitar'
   if (word(blob, 'piano') || word(blob, 'rhodes') || word(blob, 'organ') || word(blob, 'keys') || word(blob, 'keyboard')) return 'keys'
   if (word(blob, 'violin') || word(blob, 'cello') || word(blob, 'strings') || word(blob, 'orchestra')) return 'strings'
   if (word(blob, 'brass') || word(blob, 'trumpet') || word(blob, 'horn') || word(blob, 'sax')) return 'brass'
@@ -225,6 +234,8 @@ function classifyLoopText(blob: string): LoopId | null {
   if (word(blob, 'pad') || word(blob, 'pads')) return 'pad'
   if (word(blob, 'synth') || word(blob, 'synthesizer')) return 'synth'
   if (word(blob, 'fx') || word(blob, 'sfx') || word(blob, 'riser') || word(blob, 'impact') || word(blob, 'texture')) return 'fx'
+  if (/\b(?:shaker|clave|cowbell|tambourine|conga|bongo|groove)s?\d*\b/.test(blob) || /\brough\s*mix\b/.test(blob)) return 'drums'
+  if (/\b(?:ambience|ambiance|texture|drone)s?\d*\b/.test(blob)) return 'fx'
   return null
 }
 
@@ -362,8 +373,8 @@ function sortEntries(entries: LibraryEntry[], sort: FastSort, keyLabel: (entry: 
   return next
 }
 
-function head(id: string, label: string, short: string, count: number): FastRow {
-  return { kind: 'head', id, label, short, count, entry: null, height: FAST_HEAD }
+function head(id: string, label: string, short: string, count: number, height = FAST_HEAD): FastRow {
+  return { kind: 'head', id, label, short, count, entry: null, height }
 }
 
 function soundRow(entry: LibraryEntry): FastRow {
@@ -449,10 +460,12 @@ export function buildFastRows(options: {
   const rest = sortEntries(narrowed.filter((entry) => !restKeys.has(entry.key)), sort, keyLabel)
 
   const rows: FastRow[] = []
-  const pushGroup = (id: string, label: string, short: string, entries: LibraryEntry[], letters: boolean) => {
+  const pushGroup = (id: string, label: string, short: string, entries: LibraryEntry[], letters: boolean, bare = false) => {
     if (!entries.length) return
-    rows.push(head(id, label, short, entries.length))
-    if (options.collapsed.has(id)) return
+    if (!bare) {
+      rows.push(head(id, label, short, entries.length))
+      if (options.collapsed.has(id)) return
+    }
     if (!letters) {
       for (const entry of entries) rows.push(soundRow(entry))
       return
@@ -465,7 +478,7 @@ export function buildFastRows(options: {
         letter = bucket
         const count = entries.filter((item) => ((item.name.trim()[0] || '#').toUpperCase() === bucket) || (bucket === '#' && !/[A-Z]/.test((item.name.trim()[0] || '#').toUpperCase()))).length
         const letterId = `${id}:letter:${bucket}`
-        rows.push(head(letterId, bucket, bucket, count))
+        rows.push(head(letterId, bucket, bucket, count, 28))
         if (options.collapsed.has(letterId)) continue
       }
       if (options.collapsed.has(`${id}:letter:${letter}`)) continue
@@ -487,7 +500,7 @@ export function buildFastRows(options: {
     const meta = order.find((item) => item.id === wanted)
     const label = meta?.label ?? 'Other'
     const short = meta?.short ?? '+'
-    pushGroup(wanted, label, short, rest, letters)
+    pushGroup(wanted, label, short, rest, letters, true)
   }
 
   const { offsets, total } = layout(rows)
