@@ -196,6 +196,25 @@ interface RawNote {
   end: number
 }
 
+/** Fundamental the frame believes, in Hz. Probability already prefers it over a subharmonic. */
+function frameF0(frame: FramePitch) {
+  let bestHz = 0
+  let bestProb = 0
+  for (const candidate of frame.candidates) {
+    if (candidate.prob > bestProb && candidate.hz > 0) {
+      bestProb = candidate.prob
+      bestHz = candidate.hz
+    }
+  }
+  return bestProb > 0.02 ? bestHz : 0
+}
+
+function median(values: number[]) {
+  if (!values.length) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.floor(sorted.length / 2)]
+}
+
 function segment(frames: FramePitch[], path: Int16Array, hopSeconds: number): RawNote[] {
   const notes: RawNote[] = []
   let run: number[] = []
@@ -217,52 +236,30 @@ function segment(frames: FramePitch[], path: Int16Array, hopSeconds: number): Ra
       run = []
       return
     }
-    const counts = new Map<number, number>()
-    let hz = 0
     let conf = 0
     let rms = 0
-    let weight = 0
-    let wobble = 0
+    const contour: { time: number; cents: number }[] = []
     for (const index of run) {
       const midi = midiOfState(path[index])
-      counts.set(midi, (counts.get(midi) ?? 0) + 1)
-      const frameConf = confidenceAt(frames[index], midi)
-      const frameHz = 440 * 2 ** ((midi - 69) / 12)
-      hz += frameHz * Math.max(0.05, frameConf)
-      conf += frameConf
+      conf += confidenceAt(frames[index], midi)
       rms += frames[index].rms
-      weight += Math.max(0.05, frameConf)
-      let low = 1e9
-      let high = 0
-      for (const candidate of frames[index].candidates) {
-        if (candidate.cmnd > 0.35) continue
-        const midiGuess = 69 + 12 * Math.log2(candidate.hz / 440)
-        if (Math.abs(midiGuess - midi) > 1.2) continue
-        low = Math.min(low, midiGuess)
-        high = Math.max(high, midiGuess)
-      }
-      if (high > low) wobble = Math.max(wobble, high - low)
-      const near = frames[index].candidates
-        .map((candidate) => ({ candidate, midi: 69 + 12 * Math.log2(candidate.hz / 440) }))
-        .filter((item) => Math.abs(item.midi - midi) < 1.4)
-        .sort((a, b) => a.candidate.cmnd - b.candidate.cmnd)
-      if (near.length > 1 && near[1].candidate.cmnd < near[0].candidate.cmnd + 0.12 && Math.abs(near[0].midi - near[1].midi) > 0.55) {
-        wobble = Math.max(wobble, 1)
-      }
+      const hz = frameF0(frames[index])
+      if (hz > 0) contour.push({ time: frames[index].time, cents: 1200 * Math.log2(hz / 440) })
     }
-    let pitch = midiOfState(path[run[0]])
-    let best = 0
-    for (const [midi, count] of counts) {
-      if (count > best) {
-        best = count
-        pitch = midi
-      }
-    }
+    // The stable body, after the attack. A vibrato peak is not the pitch.
+    const body = contour.filter((point) => point.time - start >= 0.04)
+    const used = body.length >= 3 ? body : contour
+    const cents = used.map((point) => point.cents)
+    const center = median(cents)
+    let pitch = Math.round(69 + center / 100)
+    if (pitch < LOW || pitch > HIGH) pitch = midiOfState(path[run[Math.floor(run.length / 2)]])
+    const spread = cents.length ? Math.max(...cents) - Math.min(...cents) : 0
     let meanConf = conf / run.length
-    // Wide vibrato that crosses a semitone is a less sure pitch.
-    if (wobble > 0.8 || counts.size > 1) meanConf *= 0.62
+    // ±100 cents of vibrato still centers, but the name is less sure.
+    if (spread > 80) meanConf = Math.max(0.34, meanConf * Math.max(0.42, 1 - (spread - 80) / 220))
     if (meanConf >= 0.28) {
-      notes.push({ pitch, hz: hz / weight, confidence: meanConf, rms: rms / run.length, start, end })
+      const hz = 440 * 2 ** (center / 1200)
+      notes.push({ pitch, hz, confidence: meanConf, rms: rms / run.length, start, end })
     }
     run = []
   }
@@ -275,7 +272,9 @@ function segment(frames: FramePitch[], path: Int16Array, hopSeconds: number): Ra
     if (run.length) {
       const prev = midiOfState(path[run[run.length - 1]])
       const elapsed = frames[i].time - frames[run[0]].time
-      if (Math.abs(midi - prev) >= 1 || (frames[i].onset && elapsed > 0.09)) flush()
+      const jump = Math.abs(midi - prev)
+      // Vibrato of a semitone stays one note. A new attack, or a real leap, starts another.
+      if ((frames[i].onset && elapsed > 0.08) || jump >= 2) flush()
     }
     run.push(i)
   }

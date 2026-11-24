@@ -262,6 +262,48 @@ describe('play-along transcription', () => {
     expect(dyad.approximate).toBe(true)
   })
 
+  it('names the center of a wide vibrato, not the sharp peak, and says it is less sure', () => {
+    const rate = 48000
+    const want = [60, 64, 67, 72, 67, 64]
+    const hold = 0.42
+    const gap = 0.06
+    const out = new Float32Array(Math.round((0.05 + want.length * (hold + gap)) * rate))
+    want.forEach((midi, index) => {
+      const from = Math.round((0.05 + index * (hold + gap)) * rate)
+      const to = from + Math.round(hold * rate)
+      const freq = 440 * 2 ** ((midi - 69) / 12)
+      const partials = [1, 0.45, 0.22, 0.12]
+      const phases = partials.map(() => 0)
+      for (let i = from; i < to; i++) {
+        const t = (i - from) / rate
+        const env = Math.min(1, t / 0.012) * Math.exp(-t * 1.2)
+        const bend = Math.sin(2 * Math.PI * 5.4 * t) * 90
+        const f0 = freq * 2 ** (bend / 1200)
+        let sample = 0
+        for (let h = 0; h < partials.length; h++) {
+          const f = f0 * (h + 1)
+          if (f >= rate * 0.45) break
+          phases[h] += (2 * Math.PI * f) / rate
+          sample += Math.sin(phases[h]) * partials[h]
+        }
+        out[i] += sample * 0.2 * env
+      }
+    })
+    const score = transcribeScore({
+      channels: [out],
+      sampleRate: rate,
+      tempo: 100,
+      name: 'Wide vibrato lead',
+      soundCategory: 'lead',
+      part: 'mono',
+    })
+    expect(score.notes.map((note) => note.pitch)).toEqual(want)
+    expect(score.confidence).toBeLessThan(0.75)
+    expect(score.confidence).toBeGreaterThan(0.3)
+    const onsetMs = Math.abs(score.notes[0].startBeat * 60 / 100 - 0.05) * 1000
+    expect(onsetMs).toBeLessThan(50)
+  })
+
   it('names synthetic chords and felt-piano library loops', async () => {
     const rate = 16000
     const tempo = 120
