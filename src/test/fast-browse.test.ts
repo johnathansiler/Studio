@@ -67,7 +67,7 @@ const loops = [
 ]
 
 describe('drum shelves', () => {
-  it('reads kick, snare, hats, cymbals, 808, and leaves a bass note alone', () => {
+  it('reads kick, snare, hats, cymbals, 808, and gives a bass category its own shelf', () => {
     expect(classifyDrum(drums[0])).toEqual({ id: 'kick', sub: '' })
     expect(classifyDrum(drums[1])).toEqual({ id: '808', sub: '' })
     expect(classifyDrum(drums[2])).toEqual({ id: 'snare', sub: '' })
@@ -78,7 +78,8 @@ describe('drum shelves', () => {
     expect(classifyDrum(entry({ key: 'k.wav', name: 'BD', tags: ['bd'] }))).toEqual({ id: 'kick', sub: '' })
     expect(classifyDrum(entry({ key: 's.wav', name: 'SNR', tags: ['snr'] }))).toEqual({ id: 'snare', sub: '' })
     expect(classifyDrum(entry({ key: 'h.wav', name: 'HH', tags: ['hh'] }))?.id).toBe('hat')
-    expect(classifyDrum(drums[13])).toBeNull()
+    expect(classifyDrum(drums[13])).toEqual({ id: 'bass', sub: '' })
+    expect(classifyDrum(entry({ key: 'bd.wav', name: 'Bass drum', category: 'kick' }))?.id).toBe('kick')
     expect(classifyDrum(entry({ key: 'kit/hat.wav', name: '808 Hat', category: 'hat', instrument: '808' }))?.id).toBe('hat')
     expect(classifyDrum(entry({ key: 'kit/hat.wav', name: 'Rock Kit Closed Hat', category: 'perc', tags: ['closed_hat'] }))).toEqual({ id: 'hat', sub: 'closed' })
     expect(classifyDrum(entry({ key: 'kit/snare.wav', name: 'Classic 808 Snare', category: 'snare', tags: ['classic-808'] }))?.id).toBe('snare')
@@ -119,7 +120,8 @@ describe('drum shelves', () => {
     expect(labels).toContain('Hi-hat:2')
     expect(labels).toContain('Cymbal:2')
     expect(labels).toContain('808:1')
-    expect(labels).toContain('Other:1')
+    expect(labels).toContain('Bass:1')
+    expect(labels.some((label) => label.startsWith('Other:'))).toBe(false)
     expect(model.chips.every((chip) => chip.count > 0)).toBe(true)
     expect(model.rows[0]?.label).toBe('Favorites')
     expect(model.rows[1]?.entry?.name).toBe('Tight Snare')
@@ -152,6 +154,8 @@ describe('loop shelves', () => {
     const model = buildFastRows({ ...blank(), entries: loops, mode: 'loop', genre: 'trap' })
     expect(fastSounds(model.rows).map((item) => item.key)).toEqual(['Loops/drums.wav'])
     expect(model.chips.some((chip) => chip.id === 'drums')).toBe(true)
+    const bassShelf = buildFastRows({ ...blank(), entries: loops, mode: 'loop' })
+    expect(bassShelf.chips.find((chip) => chip.id === 'bass')?.label).toBe('Bass')
     expect(model.genres.some((chip) => chip.id === 'trap' && chip.count === 1)).toBe(true)
     const byBpm = buildFastRows({
       ...blank(),
@@ -216,6 +220,8 @@ describe('fast browse chrome', () => {
     expect(html).toContain('Previous')
     expect(html).toContain('Next')
     expect(html).toContain('data-drum-chip="snare"')
+    expect(html).toContain('data-drum-chip="bass"')
+    expect(html).toContain('Bass 1')
     const loopsHtml = renderToStaticMarkup(createElement(FastShelf, {
       mode: 'loop',
       model: buildFastRows({ ...blank(), entries: loops, mode: 'loop' }),
