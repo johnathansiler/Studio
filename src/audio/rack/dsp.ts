@@ -185,16 +185,24 @@ export class RackRuntime {
     const audioCables = cyclic ? [] : rack.cables.filter((cable) => cable.toPort === 'audio' || cable.toPort === 'audio2')
     const modCables = rack.cables.filter((cable) => cable.toPort !== 'audio' && cable.toPort !== 'audio2')
     const beatSamples = Math.max(1, (60 / Math.max(1, tempo)) * this.sampleRate)
+    const wiring = rack.devices.map((device) => audioCables.filter((cable) => cable.to === device.id))
+    const widened = rack.devices.some((device) => device.kind === 'knock')
+    const moving = modCables.length > 0 || (lanes?.some((lane) => lane.points.length) ?? false)
+    const held = moving
+      ? null
+      : new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat)]))
+    const produced = new Map<string, number>()
     for (let i = 0; i < frames; i++) {
       const time = this.sampleTime + i
       this.frame = time
       this.fillControl(rack, time, beatSamples, tempo)
-      const params = new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat + i / beatSamples)]))
-      const produced = new Map<string, number>()
+      const params = held ?? new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat + i / beatSamples)]))
+      produced.clear()
       let bus = 0
       this.knockDelta = 0
-      for (const device of rack.devices) {
-        const wired = audioCables.filter((cable) => cable.to === device.id)
+      for (let d = 0; d < rack.devices.length; d++) {
+        const device = rack.devices[d]
+        const wired = wiring[d]
         const input = wired.length
           ? wired.reduce((sum, cable) => sum + (produced.get(cable.from) || 0) * cable.amount, 0)
           : bus
@@ -206,7 +214,6 @@ export class RackRuntime {
         else if (isEffect(device.kind)) bus = sample
       }
       const out = san(bus)
-      const widened = rack.devices.some((device) => device.kind === 'knock')
       left[i] = out
       right[i] = widened ? san(bus + this.knockDelta) : out * 0.98
     }
@@ -509,25 +516,78 @@ export class RackRuntime {
   }
 }
 
-export function renderNotes(rack: RackState, events: NoteEvent[], sampleRate: number, tempo: number, length: number, buffers = new Map<string, SampleBuffer>(), lanes?: RackAutomation[]) {
+export function renderNotes(rack: RackState, events: NoteEvent[], sampleRate: number, tempo: number, length: number, buffers = new Map<string, SampleBuffer>(), lanes?: RackAutomation[], originBeat = 0) {
+  return renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, null, originBeat) as Float32Array[]
+}
+
+/**
+ * Same block loop as `renderNotes`, yielding so a long bounce can paint progress.
+ * The worklet and this loop both call `RackRuntime.render` on 128-sample blocks.
+ */
+export async function renderNotesPaced(
+  rack: RackState,
+  events: NoteEvent[],
+  sampleRate: number,
+  tempo: number,
+  length: number,
+  buffers = new Map<string, SampleBuffer>(),
+  lanes?: RackAutomation[],
+  tick?: (ratio: number) => Promise<void> | void,
+  originBeat = 0,
+): Promise<Float32Array[]> {
+  return await renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, tick ?? null, originBeat)
+}
+
+function renderNoteBlocks(
+  rack: RackState,
+  events: NoteEvent[],
+  sampleRate: number,
+  tempo: number,
+  length: number,
+  buffers: Map<string, SampleBuffer>,
+  lanes: RackAutomation[] | undefined,
+  tick: ((ratio: number) => Promise<void> | void) | null,
+  originBeat: number,
+): Float32Array[] | Promise<Float32Array[]> {
   const runtime = new RackRuntime(sampleRate)
-  const ordered = events.slice().sort((a, b) => a.sample - b.sample || b.vel - a.vel)
+  // Same order the worklet keeps: earlier notes were queued first, so a note-off
+  // lands before the next note-on on the same sample. Velocity order releases the new note.
+  const ordered = events.map((event, index) => ({ event, index })).sort((a, b) => a.event.sample - b.event.sample || a.index - b.index).map((item) => item.event)
   const left = new Float32Array(length)
   const right = new Float32Array(length)
   let cursor = 0
   let offset = 0
   const block = 128
-  while (offset < length) {
-    while (cursor < ordered.length && ordered[cursor].sample <= offset) {
-      runtime.note(ordered[cursor].pitch, ordered[cursor].vel, rack.polyphony, !!ordered[cursor].slide)
-      cursor += 1
+  const pace = Math.max(block, Math.round(sampleRate * 0.5))
+  let since = 0
+  const step = () => {
+    while (offset < length) {
+      while (cursor < ordered.length && ordered[cursor].sample <= offset) {
+        runtime.note(ordered[cursor].pitch, ordered[cursor].vel, rack.polyphony, !!ordered[cursor].slide)
+        cursor += 1
+      }
+      const next = ordered[cursor]?.sample ?? length
+      const count = Math.min(block, length - offset, Math.max(1, next - offset))
+      const beat = originBeat + (offset / sampleRate) * (tempo / 60)
+      const rendered = runtime.render(rack, count, tempo, 'full', buffers, lanes, beat)
+      left.set(rendered[0], offset)
+      right.set(rendered[1], offset)
+      offset += count
+      since += count
+      if (tick && since >= pace) return true
     }
-    const next = ordered[cursor]?.sample ?? length
-    const count = Math.min(block, length - offset, Math.max(1, next - offset))
-    const rendered = runtime.render(rack, count, tempo, 'full', buffers, lanes, (offset / sampleRate) * (tempo / 60))
-    left.set(rendered[0], offset)
-    right.set(rendered[1], offset)
-    offset += count
+    return false
   }
-  return [left, right]
+  if (!tick) {
+    step()
+    return [left, right]
+  }
+  const run = async () => {
+    while (step()) {
+      since = 0
+      await tick(length > 0 ? offset / length : 1)
+    }
+    return [left, right]
+  }
+  return run()
 }

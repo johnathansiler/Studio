@@ -1,5 +1,5 @@
 import type { AudioAsset, Project } from '../model/types'
-import { decodeWavPCM, encodeWav } from '../model/wav'
+import { decodeWavPCM, encodeWav, parseWavHeader, type WavBits } from '../model/wav'
 import { migrateProject } from '../model/schema'
 import { digestProject, musicalClone } from '../state/ops'
 import type { SyncJournal } from '../state/sync'
@@ -114,10 +114,11 @@ export function assetWavStamp(asset: AudioAsset): string {
 
 /** Encoded wav plus its content hash. Repeated saves of an unchanged asset return the same bytes. */
 export async function encodedAssetWav(asset: AudioAsset): Promise<{ wav: Uint8Array; hash: string }> {
-  const stamp = assetWavStamp(asset)
+  const bits: WavBits = asset.pcmBits === 16 || asset.pcmBits === 24 ? asset.pcmBits : 32
+  const stamp = bits === 32 ? assetWavStamp(asset) : `${assetWavStamp(asset)}:pcm${bits}`
   const hit = wavCache.get(stamp)
   if (hit) return hit
-  const wav = new Uint8Array(encodeWav(asset.channels, asset.sampleRate, { bits: 32 }))
+  const wav = new Uint8Array(encodeWav(asset.channels, asset.sampleRate, { bits, dither: bits === 32 ? 'none' : 'tpdf' }))
   const hash = await contentHash(wav)
   if (wavCache.size >= WAV_CACHE_LIMIT) {
     const oldest = wavCache.keys().next().value
@@ -351,19 +352,36 @@ async function readDoc(key: string, store: string) {
   for (const asset of row.assets ?? []) {
     if (!asset) continue
     if ('wav' in asset && asset.wav instanceof Blob) {
-      const decoded = decodeWavPCM(await asset.wav.arrayBuffer())
-      buffers.set(asset.id, { id: asset.id, name: asset.name, sampleRate: decoded.sampleRate || asset.sampleRate, channels: decoded.channels })
+      const bytes = await asset.wav.arrayBuffer()
+      const decoded = decodeWavPCM(bytes)
+      buffers.set(asset.id, assetFromDecoded(asset.id, asset.name, decoded, bytes))
     } else if ('channels' in asset && asset.channels) {
       buffers.set(asset.id, asset as AudioAsset)
     } else if ('hash' in asset && asset.hash) {
       const blob = await idbGet<{ wav: Blob }>(db, BLOBS, asset.hash)
       if (!blob?.wav) continue
-      const decoded = decodeWavPCM(await blob.wav.arrayBuffer())
-      buffers.set(asset.id, { id: asset.id, name: asset.name, sampleRate: decoded.sampleRate || asset.sampleRate, channels: decoded.channels })
+      const bytes = await blob.wav.arrayBuffer()
+      const decoded = decodeWavPCM(bytes)
+      buffers.set(asset.id, assetFromDecoded(asset.id, asset.name, decoded, bytes))
     }
   }
   const project = migrateProject(row.project)
   return { project, buffers, workspace: { ...emptyWorkspace, ...row.workspace } }
+}
+
+function assetFromDecoded(id: string, name: string, decoded: { sampleRate: number; channels: Float32Array[] }, bytes: ArrayBuffer): AudioAsset {
+  let pcmBits: 16 | 24 | undefined
+  try {
+    const info = parseWavHeader(bytes)
+    if (info.bits === 16 || info.bits === 24) pcmBits = info.bits
+  } catch { /* a raw channel row has no header */ }
+  return {
+    id,
+    name,
+    sampleRate: decoded.sampleRate,
+    channels: decoded.channels,
+    ...(pcmBits ? { pcmBits } : {}),
+  }
 }
 
 function idbGet<T>(db: IDBDatabase, store: string, key: IDBValidKey): Promise<T | undefined> {

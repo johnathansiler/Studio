@@ -65,6 +65,8 @@ export interface PatternClip {
   offsetBeats?: number
   /** A piano-roll copy is the one that plays. */
   suppressed?: boolean
+  /** Silenced in place. The pattern stays; playback and bounce skip the clip. */
+  muted?: boolean
 }
 
 export interface RenderedHit {
