@@ -879,7 +879,7 @@ export class AudioEngine {
         parts.push(`a:${clip.id}:${clip.startSample}:${clip.durationSamples}:${clip.offsetSamples}:${clip.bufferId}:${clip.gain}:${clip.fadeInSamples}:${clip.fadeOutSamples}`)
       }
       for (const clip of track.midiClips) {
-        if (clip.slotOnly || clip.scene != null) continue
+        if (clip.slotOnly || clip.scene != null || clip.muted) continue
         for (const note of clip.notes) {
           if (note.muted || !(note.velocity > 0)) continue
           parts.push(`n:${track.id}:${clip.id}:${note.id}:${note.pitch}:${note.startBeat}:${note.durationBeats}:${note.velocity}:${note.fine || 0}`)
@@ -903,7 +903,7 @@ export class AudioEngine {
         map.set(`clip:${clip.id}`, `${clip.startSample}:${clip.durationSamples}:${clip.offsetSamples}:${clip.bufferId}:${clip.gain}:${clip.fadeInSamples}:${clip.fadeOutSamples}`)
       }
       for (const clip of track.midiClips) {
-        if (clip.slotOnly || clip.scene != null) continue
+        if (clip.slotOnly || clip.scene != null || clip.muted) continue
         for (const note of clip.notes) {
           if (note.muted || !(note.velocity > 0)) continue
           map.set(`note:${track.id}:${clip.id}:${note.id}`, `${note.pitch}:${note.startBeat}:${note.durationBeats}:${note.velocity}:${note.fine || 0}`)
@@ -3282,7 +3282,7 @@ export class AudioEngine {
       if (track.type !== 'midi' || track.instrument !== 'library' || !track.library) continue
       const events: { sample: number; pitch: number; vel: number }[] = []
       for (const clip of track.midiClips) {
-        if (clip.slotOnly || clip.scene != null) continue
+        if (clip.slotOnly || clip.scene != null || clip.muted) continue
         for (const note of prepareClipNotes(project, track, clip)) {
           if (note.muted || !(note.velocity > 0)) continue
           const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
@@ -3711,7 +3711,7 @@ export class AudioEngine {
   private scheduleMidiLoop(track: Track, strip: StripNodes, clipId: string, firstWhen: number) {
     const project = this.project!
     const clip = track.midiClips.find((c) => c.id === clipId)
-    if (!clip || !this.ctx) return
+    if (!clip || clip.muted || !this.ctx) return
     let voice = track
     let out = strip
     if (track.instrument === 'scaler') {
@@ -3848,7 +3848,7 @@ export class AudioEngine {
       }
       for (const group of performancesOn(project, track)) {
         for (const clip of group.clips) {
-          if (clip.slotOnly || clip.scene != null) continue
+          if (clip.slotOnly || clip.scene != null || clip.muted) continue
           for (const note of prepareClipNotes(project, group.owner, clip)) {
             const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
             if (span.start < timelineStart || span.start >= timelineEnd) continue
@@ -3882,7 +3882,7 @@ export class AudioEngine {
     const clips = transportPatternClips(project, ctx === this.ctx)
     const masterPass = trackId === project.tracks[0]?.id
     for (const clip of clips) {
-      if (clip.scene != null || clip.suppressed) continue
+      if (clip.scene != null || clip.suppressed || clip.muted) continue
       if (clip.id === 'live-pattern') continue
       if (stepPatternOwner(project, clip.patternId)) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)

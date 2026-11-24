@@ -1,0 +1,85 @@
+.render-audio-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px 8px;
+}
+
+.render-switches,
+.render-places,
+.render-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.render-audio-sheet button {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #18231d;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.render-switches button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.render-switches button[aria-pressed="true"],
+.render-places button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.render-places {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.render-go {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.render-progress {
+  position: relative;
+  height: 44px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #101814;
+  border: 1px solid var(--line);
+}
+
+.render-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.render-progress em {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-style: normal;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.render-error,
+.render-warn p {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}

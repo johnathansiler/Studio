@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { VariationBar } from './VariationBar'
+import { RenderAudioSheet } from './RenderAudioSheet'
 import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
@@ -433,6 +434,7 @@ export function PhoneDock({
   return (
     <>
       {host && sheet ? createPortal(sheet, host) : null}
+      {store.renderAudio && host ? createPortal(<RenderAudioSheet store={store} />, host) : null}
       {trackDelete ? createPortal(
         <DeleteTrackConfirm
           name={trackDelete.name}

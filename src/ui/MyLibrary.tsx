@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type FormEvent, type RefObject } from 'react'
 import { SOUND_MIME } from '../audio/sample/slot'
 import { LibraryAuthError, clearLibraryAccessKey, libraryStatus, readLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { loadLibraryCatalog } from '../library/audio'
@@ -29,6 +29,7 @@ import { retargetLibraryMemory } from '../library/retarget'
 import { KEY_TONICS, libraryDetectKeys, parseMusicalKey, projectKeyFromScale, resolveEntryKey, type MusicalKey } from '../library/musicalKey'
 import { libraryRowWindow, searchLibrary, type LibraryIndex } from '../library/search'
 import { EMPTY_LIBRARY_QUERY, type LibraryDocument, type LibraryEntry, type LibraryQuery } from '../library/types'
+import { LIBRARY_UPLOAD_MAX_BYTES, readWavFacts, uploadLibraryWavs } from '../library/upload'
 import type { ProjectStore } from '../state/store'
 import { useProjectVersion } from './playbackUi'
 
@@ -151,6 +152,13 @@ export function MyLibrary({
   const recent = useSyncExternalStore(subscribeRecent, recentSounds, recentSounds)
   const favorites = useSyncExternalStore(subscribeFavorites, favoriteSounds, favoriteSounds)
   const listRef = useRef<HTMLDivElement>(null)
+  const addFiles = useRef<HTMLInputElement>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  const [addCategory, setAddCategory] = useState('')
+  const [addBpm, setAddBpm] = useState('')
+  const [addKey, setAddKey] = useState('')
+  const [addMessage, setAddMessage] = useState('')
+  const [adding, setAdding] = useState(false)
   const swipe = useRef({ x: 0, y: 0, moved: false })
   const previewGen = useRef(0)
   const previewAbort = useRef<AbortController | null>(null)
@@ -325,7 +333,10 @@ export function MyLibrary({
         .flatMap((row) => row.kind === 'sound' ? [row.entry] : [])
       pool = mergeBrowseHits(sounds, extra, text, fastMode)
     }
-    if (lane === 'drums') pool = pool.filter((entry) => classifyDrum(entry))
+    if (lane === 'drums') pool = pool.filter((entry) => {
+      const drum = classifyDrum(entry)
+      return !!drum && drum.id !== 'bass'
+    })
     return buildFastRows({
       entries: pool,
       mode: fastMode,
@@ -478,6 +489,62 @@ export function MyLibrary({
     writeLibraryAccessKey(next)
     setPassphrase('')
     await openCatalog()
+  }
+
+  async function submitAdds(event: FormEvent) {
+    event.preventDefault()
+    const picked = [...(addFiles.current?.files ?? [])]
+    if (!picked.length) {
+      setAddMessage('Choose WAV files.')
+      return
+    }
+    const accessKey = readLibraryAccessKey()
+    if (!accessKey) {
+      setPhase('lock')
+      setMessage('Enter the library passphrase. It stays on this phone.')
+      return
+    }
+    const tempo = addBpm.trim()
+    const bpm = tempo ? Number(tempo) : null
+    if (tempo && !(bpm && Number.isFinite(bpm) && bpm > 0 && bpm <= 400)) {
+      setAddMessage('BPM should be a tempo, or left blank.')
+      return
+    }
+    setAdding(true)
+    setAddMessage('Uploading…')
+    try {
+      const files: { name: string; size: number; bytes: ArrayBuffer }[] = []
+      let rejected = 0
+      for (const file of picked) {
+        if (!file.name.toLowerCase().endsWith('.wav') || file.size < 1 || file.size > LIBRARY_UPLOAD_MAX_BYTES) {
+          rejected += 1
+          continue
+        }
+        const bytes = await file.arrayBuffer()
+        if (!readWavFacts(bytes)) {
+          rejected += 1
+          continue
+        }
+        files.push({ name: file.name, size: bytes.byteLength, bytes })
+      }
+      const result = files.length
+        ? await uploadLibraryWavs({ files, category: addCategory, bpm, musicalKey: addKey, accessKey })
+        : { uploaded: 0, skipped: 0, added: 0, failed: 0 }
+      const failed = rejected + result.failed
+      setAddMessage(`Added ${result.added}. Skipped ${result.skipped}. Failed ${failed}.`)
+      if (addFiles.current) addFiles.current.value = ''
+      if (result.added > 0) await openCatalog()
+    } catch (error) {
+      if (error instanceof LibraryAuthError) {
+        setPhase('lock')
+        setMessage(error.message)
+        return
+      }
+      const text = error instanceof Error ? error.message : 'Could not add those sounds.'
+      setAddMessage(accessKey && text.includes(accessKey) ? 'Could not add those sounds.' : text)
+    } finally {
+      setAdding(false)
+    }
   }
 
   function lock() {
@@ -816,6 +883,22 @@ export function MyLibrary({
             </button>
             <button type="button" className="sound-filter library-lock-btn" onClick={lock}>Lock</button>
           </div>
+          {variant === 'library' && (
+            <LibraryAddSounds
+              open={addOpen}
+              category={addCategory}
+              bpm={addBpm}
+              musicalKey={addKey}
+              message={addMessage}
+              busy={adding}
+              fileRef={addFiles}
+              onToggle={() => setAddOpen((open) => !open)}
+              onCategory={setAddCategory}
+              onBpm={setAddBpm}
+              onKey={setAddKey}
+              onSubmit={(event) => void submitAdds(event)}
+            />
+          )}
           {variant === 'library' && <LibraryLanes lane={lane} onPick={pickLane} />}
           {filtersOpen && <div className="sound-filter-menu library-filter-sheet" role="dialog" aria-label="Filter">
               <div className="library-filter-chips" role="group" aria-label="Filter groups">
@@ -1177,6 +1260,52 @@ function memoryKeys(items: { id: string; legacyId?: string; library?: { key?: st
     keys.push(key)
   }
   return keys
+}
+
+export function LibraryAddSounds({
+  open,
+  category,
+  bpm,
+  musicalKey,
+  message,
+  busy,
+  fileRef,
+  onToggle,
+  onCategory,
+  onBpm,
+  onKey,
+  onSubmit,
+}: {
+  open: boolean
+  category: string
+  bpm: string
+  musicalKey: string
+  message: string
+  busy: boolean
+  fileRef: RefObject<HTMLInputElement | null>
+  onToggle: () => void
+  onCategory: (value: string) => void
+  onBpm: (value: string) => void
+  onKey: (value: string) => void
+  onSubmit: (event: FormEvent) => void
+}) {
+  return (
+    <>
+      <div className="library-add-row">
+        <button type="button" className="library-add-btn" aria-expanded={open} onClick={onToggle}>Add sounds</button>
+      </div>
+      {open && (
+        <form className="library-add-form" data-add-sounds="open" onSubmit={onSubmit}>
+          <input ref={fileRef} type="file" accept=".wav,audio/wav,audio/wave,audio/x-wav" multiple aria-label="WAV files" />
+          <input aria-label="Sound category" placeholder="Category" value={category} onChange={(event) => onCategory(event.target.value)} />
+          <input aria-label="Sound BPM" inputMode="decimal" placeholder="BPM" value={bpm} onChange={(event) => onBpm(event.target.value)} />
+          <input aria-label="Sound key" placeholder="Key" value={musicalKey} onChange={(event) => onKey(event.target.value)} />
+          <button type="submit" className="library-add-btn" disabled={busy}>Upload</button>
+          {message ? <p className="sound-status">{message}</p> : null}
+        </form>
+      )}
+    </>
+  )
 }
 
 const LIBRARY_LANES: { id: LibraryLane; label: string }[] = [

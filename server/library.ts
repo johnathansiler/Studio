@@ -1,11 +1,16 @@
 /**
  * Owner-only presign for the private R2 library.
- * The server never reads or streams audio. The browser fetches the signed GET itself.
+ * Audio bytes are not streamed through this process. The phone fetches a signed GET,
+ * or uploads a WAV with a signed PUT under the audio prefix.
+ * Catalog updates download catalog/catalog.json.gz, append rows, and write the gzip back.
+ * The library passphrase is never written to a log.
  * Credentials stay in the process environment.
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { AwsClient } from 'aws4fetch'
 import { layersForNotes, type InstrumentQuery, type LibraryInstrument } from '../src/library/group.ts'
+import { LIBRARY_UPLOAD_MAX_KEYS, libraryAudioKey, libraryUploadSize, mergeCatalogEntries } from '../src/library/upload.ts'
 
 export const LIBRARY_EXPIRES_SEC = 15 * 60
 export const LIBRARY_CATALOG_KEY = 'catalog/catalog.json.gz'
@@ -64,6 +69,112 @@ export function libraryObjectKey(input: unknown): string | null {
 export function r2ObjectUrl(accountId: string, bucket: string, key: string) {
   const encoded = key.split('/').map((part) => encodeURIComponent(part)).join('/')
   return `https://${accountId}.r2.cloudflarestorage.com/${encodeURIComponent(bucket)}/${encoded}`
+}
+
+/** A catalog object key. Audio keys are not writable through the catalog copier. */
+export function libraryCatalogWriteKey(input: unknown): string | null {
+  const key = libraryObjectKey(input)
+  if (!key || !key.startsWith('catalog/')) return null
+  return key
+}
+
+/**
+ * Presign one create-only PUT for a WAV under the audio prefix.
+ * `If-None-Match: *` is part of the signature, so the URL cannot replace an object that already exists.
+ * The secret is not placed in the URL.
+ */
+export async function presignR2Put(env: LibraryEnv, key: string, expires = LIBRARY_EXPIRES_SEC): Promise<string> {
+  const ready = readLibraryEnv(env)
+  const objectKey = libraryAudioKey(key)
+  if (!ready || !objectKey) throw new Error(LIBRARY_NOT_READY)
+  const url = new URL(r2ObjectUrl(ready.accountId, ready.bucket, objectKey))
+  url.searchParams.set('X-Amz-Expires', String(expires))
+  const client = new AwsClient({
+    accessKeyId: ready.accessKeyId,
+    secretAccessKey: ready.secretAccessKey,
+    service: 's3',
+    region: 'auto',
+  })
+  const signed = await client.sign(
+    new Request(url, { method: 'PUT', headers: { 'if-none-match': '*' } }),
+    { aws: { signQuery: true } },
+  )
+  return signed.url
+}
+
+export interface LibraryObjectBody {
+  status: number
+  bytes: Uint8Array | null
+}
+
+/** Catalog bytes only. Audio objects are not read here except for a HEAD used to skip an existing upload. */
+export interface LibraryObjects {
+  get(key: string): Promise<LibraryObjectBody>
+  put(key: string, bytes: Uint8Array, contentType: string): Promise<void>
+  copy(from: string, to: string): Promise<void>
+  head?(key: string): Promise<boolean>
+}
+
+function awsClient(ready: LibraryReady) {
+  return new AwsClient({
+    accessKeyId: ready.accessKeyId,
+    secretAccessKey: ready.secretAccessKey,
+    service: 's3',
+    region: 'auto',
+  })
+}
+
+function r2Objects(readEnv: () => LibraryEnv): LibraryObjects {
+  async function call(method: string, key: string, init?: { body?: Uint8Array; contentType?: string; copySource?: string }) {
+    const ready = readLibraryEnv(readEnv())
+    const objectKey = method === 'PUT' ? libraryCatalogWriteKey(key) : libraryObjectKey(key)
+    if (!ready || !objectKey) throw new Error(LIBRARY_NOT_READY)
+    const headers: Record<string, string> = {}
+    if (init?.contentType) headers['content-type'] = init.contentType
+    if (init?.copySource) headers['x-amz-copy-source'] = init.copySource
+    const response = await awsClient(ready).fetch(r2ObjectUrl(ready.accountId, ready.bucket, objectKey), {
+      method,
+      headers,
+      body: init?.body as BodyInit | undefined,
+    })
+    return response
+  }
+  return {
+    async get(key) {
+      const response = await call('GET', key)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (response.status === 404) return { status: 404, bytes: null }
+      if (!response.ok) return { status: response.status, bytes: null }
+      return { status: 200, bytes }
+    },
+    async put(key, bytes, contentType) {
+      const response = await call('PUT', key, { body: bytes, contentType })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new Error('Could not write the library catalog.')
+      }
+      await response.body?.cancel().catch(() => undefined)
+    },
+    async copy(from, to) {
+      const ready = readLibraryEnv(readEnv())
+      const sourceKey = libraryCatalogWriteKey(from)
+      if (!ready || !sourceKey) throw new Error(LIBRARY_NOT_READY)
+      const source = `/${ready.bucket}/${sourceKey.split('/').map((part) => encodeURIComponent(part)).join('/')}`
+      const response = await call('PUT', to, { copySource: source })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new Error('Could not write the library catalog.')
+      }
+      await response.body?.cancel().catch(() => undefined)
+    },
+    async head(key) {
+      const response = await call('HEAD', key)
+      await response.body?.cancel().catch(() => undefined)
+      if (response.status === 404) return false
+      if (response.ok) return true
+      throw new Error('Could not sign that sound.')
+    },
+  }
 }
 
 /** Presign one GET. The secret is not placed in the URL. */
@@ -128,15 +239,29 @@ export interface InstrumentCatalog {
   get(id: string): Promise<LibraryInstrument | null>
 }
 
+const LIBRARY_POST = new Set(['/api/library/sign', '/api/library/upload-sign', '/api/library/catalog-append'])
+
 export function createLibraryApi(deps: {
   env: () => LibraryEnv
   sign?: (key: string, env: LibraryEnv) => Promise<string>
+  signPut?: (key: string, env: LibraryEnv) => Promise<string>
   now?: () => number
   instruments?: InstrumentCatalog
+  objects?: LibraryObjects
 }): LibraryApi {
   const failures = new Map<string, number[]>()
   const successes = new Map<string, number[]>()
   const sign = deps.sign ?? ((key: string, env: LibraryEnv) => presignR2Get(env, key))
+  const signPut = deps.signPut ?? ((key: string, env: LibraryEnv) => presignR2Put(env, key))
+  const objects = deps.objects ?? r2Objects(deps.env)
+  let catalogTail: Promise<unknown> = Promise.resolve()
+  let writeSeq = 0
+
+  function exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const run = catalogTail.then(task, task)
+    catalogTail = run.then(() => undefined, () => undefined)
+    return run
+  }
 
   return {
     async handle(call) {
@@ -144,12 +269,12 @@ export function createLibraryApi(deps: {
       const ready = readLibraryEnv(env)
       const path = call.pathname
       const instrumentPath = instrumentRoute(path)
-      if (!instrumentPath && path !== '/api/library' && path !== '/api/library/sign') {
+      if (!instrumentPath && path !== '/api/library' && !LIBRARY_POST.has(path)) {
         return { status: 404, body: { error: 'Not found.' } }
       }
       if (!ready) return { status: call.method === 'GET' && path === '/api/library' ? 200 : 503, body: { ready: false, message: LIBRARY_NOT_READY } }
       if (call.method === 'GET' && path === '/api/library') return { status: 200, body: { ready: true } }
-      if (!instrumentPath && (call.method !== 'POST' || path !== '/api/library/sign')) return { status: 405, body: { error: 'Use POST.' } }
+      if (!instrumentPath && (call.method !== 'POST' || !LIBRARY_POST.has(path))) return { status: 405, body: { error: 'Use POST.' } }
 
       const now = call.now
       const ip = call.ip || 'local'
@@ -176,6 +301,24 @@ export function createLibraryApi(deps: {
         successes.set(ip, recent)
         return serveInstruments(deps.instruments, instrumentPath, call, (key) => sign(key, env))
       }
+      if (path === '/api/library/upload-sign') {
+        const items = uploadItems(call.body)
+        if (!items) return { status: 400, body: { error: 'Those library paths cannot be signed.' } }
+        recent.push(now)
+        successes.set(ip, recent)
+        return signUploads(items, env, signPut, objects)
+      }
+      if (path === '/api/library/catalog-append') {
+        const listed = entriesFromBody(call.body)
+        const probe = listed ? mergeCatalogEntries({ version: 0, generated_at: '', count: 0, pending: '', entries: [] }, listed, now) : { ok: false as const }
+        if (!probe.ok) return { status: 400, body: { error: 'Those catalog entries cannot be added.' } }
+        recent.push(now)
+        successes.set(ip, recent)
+        return exclusive(() => appendCatalog(listed!, objects, now, () => {
+          writeSeq += 1
+          return writeSeq
+        }))
+      }
       const keys = keysFromBody(call.body)
       if (!keys) return { status: 400, body: { error: 'Those library paths cannot be signed.' } }
       recent.push(now)
@@ -187,6 +330,98 @@ export function createLibraryApi(deps: {
       return { status: 200, body: { ready: true, expiresIn: LIBRARY_EXPIRES_SEC, urls } }
     },
   }
+}
+
+function uploadItems(body: unknown): { key: string; size: number }[] | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const raw = body as { keys?: unknown; files?: unknown }
+  const listed = Array.isArray(raw.keys) ? raw.keys : Array.isArray(raw.files) ? raw.files : null
+  if (!listed || !listed.length || listed.length > LIBRARY_UPLOAD_MAX_KEYS) return null
+  const items: { key: string; size: number }[] = []
+  for (const item of listed) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+    const row = item as { key?: unknown; size?: unknown }
+    const key = libraryAudioKey(row.key)
+    const size = libraryUploadSize(row.size)
+    if (!key || size == null) return null
+    items.push({ key, size })
+  }
+  return items
+}
+
+function entriesFromBody(body: unknown): unknown[] | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const listed = (body as { entries?: unknown }).entries
+  return Array.isArray(listed) ? listed : null
+}
+
+async function signUploads(
+  items: { key: string; size: number }[],
+  env: LibraryEnv,
+  signPut: (key: string, env: LibraryEnv) => Promise<string>,
+  objects: LibraryObjects,
+): Promise<LibraryResult> {
+  if (!objects.head) return { status: 503, body: { error: 'Could not sign that sound.' } }
+  const urls: { key: string; url: string; exists: boolean }[] = []
+  for (const item of items) {
+    let exists = false
+    try {
+      exists = await objects.head(item.key)
+    } catch {
+      return { status: 503, body: { error: 'Could not sign that sound.' } }
+    }
+    if (exists) {
+      urls.push({ key: item.key, url: '', exists: true })
+      continue
+    }
+    try {
+      urls.push({ key: item.key, url: await signPut(item.key, env), exists: false })
+    } catch {
+      return { status: 503, body: { error: 'Could not sign that sound.' } }
+    }
+  }
+  return { status: 200, body: { ready: true, expiresIn: LIBRARY_EXPIRES_SEC, urls } }
+}
+
+async function appendCatalog(
+  listed: unknown[],
+  objects: LibraryObjects,
+  now: number,
+  nextSeq: () => number,
+): Promise<LibraryResult> {
+  let current: unknown = { version: 0, generated_at: '', count: 0, pending: '', entries: [] }
+  try {
+    const loaded = await objects.get(LIBRARY_CATALOG_KEY)
+    if (loaded.status === 200 && loaded.bytes) {
+      current = JSON.parse(gunzipSync(loaded.bytes).toString('utf8')) as unknown
+      const parsed = current && typeof current === 'object' && !Array.isArray(current) ? current as { entries?: unknown } : null
+      if (!parsed || !Array.isArray(parsed.entries)) return { status: 503, body: { error: 'Could not update the library catalog.' } }
+    } else if (loaded.status !== 404) return { status: 503, body: { error: 'Could not update the library catalog.' } }
+  } catch {
+    return { status: 503, body: { error: 'Could not update the library catalog.' } }
+  }
+  const merged = mergeCatalogEntries(current, listed, now)
+  if (!merged.ok) return { status: 400, body: { error: 'Those catalog entries cannot be added.' } }
+  const version = typeof merged.document.version === 'number' && Number.isFinite(merged.document.version) ? merged.document.version : 0
+  const generatedAt = typeof merged.document.generated_at === 'string' ? merged.document.generated_at : ''
+  const count = Array.isArray(merged.document.entries) ? merged.document.entries.length : 0
+  const previous = current && typeof current === 'object' && !Array.isArray(current) && Array.isArray((current as { entries?: unknown }).entries)
+    ? (current as { entries: unknown[] }).entries.length
+    : 0
+  if (count < previous) return { status: 503, body: { error: 'Could not update the library catalog.' } }
+  if (!merged.changed) return { status: 200, body: { ready: true, version, generatedAt, count, added: 0, skipped: merged.skipped } }
+  try {
+    const gzip = gzipSync(Buffer.from(JSON.stringify(merged.document)))
+    const stamp = `${new Date(now).toISOString().replace(/[:.]/g, '-')}-${nextSeq()}`
+    const tempKey = `catalog/tmp/catalog-${stamp}.json.gz`
+    const backupKey = `catalog/backups/catalog-${stamp}.json.gz`
+    await objects.put(tempKey, gzip, 'application/gzip')
+    await objects.copy(tempKey, backupKey)
+    await objects.copy(tempKey, LIBRARY_CATALOG_KEY)
+  } catch {
+    return { status: 503, body: { error: 'Could not update the library catalog.' } }
+  }
+  return { status: 200, body: { ready: true, version, generatedAt, count, added: merged.added, skipped: merged.skipped } }
 }
 
 function instrumentRoute(path: string): { id: string; notes: boolean } | null {

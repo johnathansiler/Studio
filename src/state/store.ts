@@ -147,7 +147,9 @@ import { canArmAudio, clipWantsLoopTrack } from '../model/audioKind'
 import { applyHarmonizeToProject, transposeMidiClip, type HarmonizeMove } from '../model/harmonize'
 import { clampInputDb, isRecordedClip } from '../audio/recordTake'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
+import { LibrarySamplesMissing } from '../audio/arrangeSources'
 import { applyFreeze } from '../audio/bounce'
+import { audioName, installRender, renderClipToAudio, RenderCancelled, RenderEmpty, withNormalize, type RenderedAudio, type RenderPlace, type RenderTarget } from '../audio/renderToAudio'
 import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead, stampMidiAtBeat } from '../model/playheadPlace'
 import { TEMPO_MAX, TEMPO_MIN } from '../model/tap'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
@@ -353,6 +355,21 @@ export class ProjectStore {
   private takeNotes: { trackId: string; clipId: string; noteId: string }[] = []
   /** Clip settings. Not saved. */
   clipSheet = false
+  /** Bounce a MIDI clip or pattern to audio. Not saved. */
+  renderAudio: {
+    target: RenderTarget
+    name: string
+    includeEffects: boolean
+    normalize: boolean
+    place: RenderPlace
+    running: boolean
+    progress: number
+    warnDb: number | null
+    error: string | null
+  } | null = null
+  private pendingRender: RenderedAudio | null = null
+  private renderToken = 0
+  private renderPaint = 0
   /** Selected song section. Not saved. */
   sectionId: string | null = null
   /** Selected tempo-map point, by its quarter-note beat. Not saved. */
@@ -541,6 +558,7 @@ export class ProjectStore {
     this.editGeneration += 1
     fn()
     this.journal.seal(this.project, label)
+    this.pruneRenderBuffers()
     this.emit()
   }
 
@@ -596,6 +614,7 @@ export class ProjectStore {
     const step = this.journal.undo(this.project)
     if (!step) return
     this.quantizePreview = null
+    this.pruneRenderBuffers()
     this.toast(`Undid: ${step.label}`)
     this.emit()
   }
@@ -607,6 +626,7 @@ export class ProjectStore {
     const step = this.journal.redo(this.project)
     if (!step) return
     this.quantizePreview = null
+    this.pruneRenderBuffers()
     this.toast(`Redid: ${step.label}`)
     this.emit()
   }
@@ -4591,6 +4611,185 @@ export class ProjectStore {
       this.selectedNoteId = null
       this.selectedNoteIds = []
     }, 'Convert to MIDI')
+  }
+
+  /** Open the render sheet for the MIDI clip or Beat Machine pattern selected on Arrange. */
+  openRenderForSelection() {
+    if (this.selectedPatternClipId) {
+      this.openRenderAudio({ kind: 'pattern', clipId: this.selectedPatternClipId })
+      return
+    }
+    if (this.selectedMidiClipId) {
+      for (const track of this.project.tracks) {
+        if (track.midiClips.some((clip) => clip.id === this.selectedMidiClipId)) {
+          this.openRenderAudio({ kind: 'midi', trackId: track.id, clipId: this.selectedMidiClipId })
+          return
+        }
+      }
+    }
+    this.toast('Select a MIDI clip first.', 'warn')
+  }
+
+  openRenderTrack(trackId: string) {
+    this.openRenderAudio({ kind: 'track', trackId })
+  }
+
+  openRenderAudio(target: RenderTarget) {
+    const name = this.renderTargetName(target)
+    if (!name) {
+      this.toast('Nothing on that track to render.', 'warn')
+      return
+    }
+    this.renderToken += 1
+    this.pendingRender = null
+    this.renderAudio = {
+      target,
+      name,
+      includeEffects: true,
+      normalize: false,
+      place: 'mute',
+      running: false,
+      progress: 0,
+      warnDb: null,
+      error: null,
+    }
+    this.emit()
+  }
+
+  setRenderChoice(patch: Partial<Pick<NonNullable<ProjectStore['renderAudio']>, 'includeEffects' | 'normalize' | 'place'>>) {
+    if (!this.renderAudio || this.renderAudio.running || this.renderAudio.warnDb != null) return
+    Object.assign(this.renderAudio, patch)
+    this.emit()
+  }
+
+  cancelRenderAudio() {
+    this.renderToken += 1
+    this.pendingRender = null
+    this.renderAudio = null
+    this.emit()
+  }
+
+  /** Offline bounce. One undo places the audio clip and mutes, replaces, or keeps the source. */
+  async runRenderAudio() {
+    const ui = this.renderAudio
+    if (!ui || ui.running || ui.warnDb != null) return
+    const token = ++this.renderToken
+    ui.running = true
+    ui.progress = 0.02
+    ui.error = null
+    this.emit()
+    try {
+      const result = await renderClipToAudio({
+        project: this.project,
+        assets: this.buffers,
+        target: ui.target,
+        includeEffects: ui.includeEffects,
+        normalize: false,
+        shouldCancel: () => {
+          if (token !== this.renderToken) throw new RenderCancelled()
+        },
+        onProgress: (ratio) => {
+          if (token !== this.renderToken || !this.renderAudio) return
+          const now = Date.now()
+          if (ratio < 1 && now - this.renderPaint < 80) return
+          this.renderPaint = now
+          this.renderAudio.progress = ratio
+          this.emit()
+        },
+      })
+      if (token !== this.renderToken) return
+      if (result.clipped && !ui.normalize) {
+        this.pendingRender = result
+        ui.running = false
+        ui.progress = 1
+        ui.warnDb = result.peakDb
+        this.emit()
+        return
+      }
+      this.commitRendered(ui.normalize ? withNormalize(result) : result, ui.place)
+    } catch (error) {
+      if (token !== this.renderToken || error instanceof RenderCancelled) return
+      if (!this.renderAudio) return
+      this.renderAudio.running = false
+      this.renderAudio.progress = 0
+      const message = error instanceof RenderEmpty
+        ? 'Nothing to render on that clip.'
+        : error instanceof LibrarySamplesMissing
+          ? error.message
+          : 'Could not render that audio.'
+      this.renderAudio.error = message
+      this.toast(message, 'warn')
+      this.emit()
+    }
+  }
+
+  /** Place a render that peaked above 0 dBFS, with or without normalize. Still one undo. */
+  confirmRendered(normalize: boolean) {
+    const pending = this.pendingRender
+    const ui = this.renderAudio
+    if (!pending || !ui) return
+    this.pendingRender = null
+    this.commitRendered(normalize ? withNormalize(pending) : pending, ui.place)
+  }
+
+  private commitRendered(result: RenderedAudio, place: RenderPlace) {
+    if (this.remoteFollow) return
+    const id = uid('rend')
+    this.buffers.set(id, {
+      id,
+      name: audioName(result.name),
+      sampleRate: result.sampleRate,
+      channels: result.channels,
+      pcmBits: 24,
+    })
+    let placed: { trackId: string; clipId: string } | null = null
+    this.mutate(() => {
+      placed = installRender(this.project, result, place, id)
+      if (!placed) return
+      this.selectedTrackId = placed.trackId
+      this.selectedClipId = placed.clipId
+      this.selectedClipIds = [placed.clipId]
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedPatternClipId = null
+      this.selectedPatternClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    }, 'Render to audio')
+    this.pendingRender = null
+    this.renderAudio = null
+    if (result.clipped) this.toast(`Rendered. Peaks at ${result.peakDb.toFixed(1)} dB will clip in the 24-bit file.`, 'warn')
+    else this.toast(`Rendered ${audioName(result.name)}`)
+  }
+
+  private renderTargetName(target: RenderTarget) {
+    if (target.kind === 'midi') {
+      for (const track of this.project.tracks) {
+        const clip = track.midiClips.find((item) => item.id === target.clipId)
+        if (clip) return clip.name || 'MIDI'
+      }
+      return null
+    }
+    if (target.kind === 'pattern') {
+      const clip = this.project.patternClips?.find((item) => item.id === target.clipId)
+      if (!clip) return null
+      return this.project.beats?.patterns.find((item) => item.id === clip.patternId)?.name || 'Pattern'
+    }
+    const track = this.project.tracks.find((item) => item.id === target.trackId)
+    if (!track) return null
+    const midi = track.midiClips.some((clip) => !clip.slotOnly && clip.scene == null)
+    const pattern = (this.project.patternClips ?? []).some((clip) => clip.trackId === track.id && clip.scene == null && !clip.suppressed)
+    return midi || pattern ? track.name || 'Track' : null
+  }
+
+  private pruneRenderBuffers() {
+    const ids = [...this.buffers.keys()].filter((id) => id.startsWith('rend_'))
+    if (!ids.length) return
+    const hay = JSON.stringify(this.project)
+    for (const id of ids) {
+      if (hay.includes(`"${id}"`) || this.journal.mentions(id)) continue
+      this.buffers.delete(id)
+    }
   }
 
   addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0, coalesce = false) {
