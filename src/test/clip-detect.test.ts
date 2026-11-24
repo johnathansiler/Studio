@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { renderStretch } from '../audio/stretch/engine'
-import { detectKey, detectTempo, hearingOf } from '../analysis/clipKey'
+import { clipDeniesKey, detectKey, detectTempo, hearingOf } from '../analysis/clipKey'
 import { handleClipDetect } from '../analysis/clipWorker'
 import { altReadout, keyReadout, relateTempo, tempoForSong, tempoReadout } from '../model/clipHearing'
 import { migrateProject } from '../model/schema'
@@ -218,14 +218,20 @@ describe('clip key and tempo', () => {
     expect(card.altConfidence).toBeLessThanOrEqual(card.confidence + 1e-9)
     const bed = new Float32Array(rate * 3)
     for (let i = 0; i < bed.length; i++) bed[i] = noise(i) * (i < rate ? 0.02 : 0.8)
-    expect(detectKey(bed, rate).clear).toBe(false)
+    const bedKey = detectKey(bed, rate)
+    expect(bedKey.clear).toBe(false)
+    expect(bedKey.label).toBe('No clear key')
+    expect(bedKey.best).toBeNull()
     const white = new Float32Array(rate * 3)
     let seed = 1
     for (let i = 0; i < white.length; i++) {
       seed = (seed * 1664525 + 1013904223) >>> 0
       white[i] = (seed / 2 ** 32) * 2 - 1
     }
-    expect(detectKey(white, rate).clear).toBe(false)
+    const whiteKey = detectKey(white, rate)
+    expect(whiteKey.clear).toBe(false)
+    expect(whiteKey.label).toBe('No clear key')
+    expect(whiteKey.best).toBeNull()
     const brown = new Float32Array(rate * 3)
     let prev = 0
     for (let i = 0; i < brown.length; i++) {
@@ -234,7 +240,75 @@ describe('clip key and tempo', () => {
       prev = prev * 0.98 + sample * 0.02
       brown[i] = prev
     }
-    expect(detectKey(brown, rate).clear).toBe(false)
+    const brownKey = detectKey(brown, rate)
+    expect(brownKey.clear).toBe(false)
+    expect(brownKey.label).toBe('No clear key')
+    expect(brownKey.best).toBeNull()
+  })
+
+  it('does not name a one-shot', () => {
+    const rate = 22050
+    const audio = progression(MAJOR_CADENCE, 0, rate, 0)
+    const clip: AudioClip = {
+      id: 'stab',
+      name: 'Chord stab',
+      bufferId: 'buf',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: audio.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+      soundType: 'one-shot',
+      soundCategory: 'chord',
+    }
+    const response = handleClipDetect({
+      id: 9,
+      type: 'clip-detect',
+      sampleRate: rate,
+      channels: [audio],
+      clip,
+      tempo: 120,
+    })
+    expect(response.hearing?.clearKey).toBe(false)
+    expect(response.hearing?.key).toBe('')
+    expect(response.hearing?.maybeKey ?? '').toBe('')
+    expect(response.hearing?.root).toBeNull()
+  })
+
+  it('does not name a drum loop that is filed as drums', () => {
+    const rate = 22050
+    const audio = progression(MAJOR_CADENCE, 0, rate, 0)
+    expect(detectKey(audio, rate).clear).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'drums' })).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'piano' })).toBe(false)
+    const clip: AudioClip = {
+      id: 'beat',
+      name: 'Downbeat Drums',
+      bufferId: 'buf',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: audio.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+      soundType: 'loop',
+      soundCategory: 'drums',
+    }
+    const response = handleClipDetect({
+      id: 10,
+      type: 'clip-detect',
+      sampleRate: rate,
+      channels: [audio],
+      clip,
+      tempo: 120,
+    })
+    expect(response.hearing?.clearKey).toBe(false)
+    expect(response.hearing?.key).toBe('')
+    expect(response.hearing?.maybeKey ?? '').toBe('')
+    expect(response.hearing?.root).toBeNull()
   })
 
   it('says there is no clear key on a drum loop', () => {
@@ -242,6 +316,8 @@ describe('clip key and tempo', () => {
     const heard = detectKey(drums(100, 4, rate), rate)
     expect(heard.clear).toBe(false)
     expect(heard.label).toBe('No clear key')
+    expect(heard.best).toBeNull()
+    expect(heard.unsure).toBeUndefined()
     const hearing = hearingOf(heard, detectTempo(drums(96, 4, rate), rate))
     expect(hearing.clearKey).toBe(false)
     expect(hearing.key).toBe('')
@@ -437,6 +513,46 @@ describe('clip key and tempo', () => {
     expect(card).not.toContain('Use for song')
     expect(card).not.toContain('Set song tempo')
     expect(card).not.toContain('data-hearing-bpm')
+    store.rememberClipHearing(track.id, 'loop', {
+      key: '',
+      root: null,
+      scale: '',
+      confidence: 0.4,
+      alt: '',
+      altRoot: null,
+      altScale: '',
+      altConfidence: 0,
+      clearKey: false,
+      maybeKey: 'E minor',
+      bpm: 0,
+      bpmConfidence: 0,
+      cents: 0,
+    })
+    const unsure = dock(store)
+    expect(unsure).toContain('Unsure')
+    expect(unsure).toContain('maybe E minor')
+    expect(unsure).toContain('data-hearing-unsure')
+    expect(unsure).not.toContain('Set song key to E minor')
+    store.rememberClipHearing(track.id, 'loop', {
+      key: '',
+      root: null,
+      scale: '',
+      confidence: 0,
+      alt: '',
+      altRoot: null,
+      altScale: '',
+      altConfidence: 0,
+      clearKey: false,
+      maybeKey: '',
+      bpm: 96,
+      bpmConfidence: 0.8,
+      cents: 0,
+    })
+    const unnamed = dock(store)
+    expect(unnamed).toContain('No clear key')
+    expect(unnamed).not.toContain('maybe')
+    expect(unnamed).not.toContain('Set song key')
+    expect(unnamed).not.toContain('data-hearing-bpm')
     store.selectClip(track.id, null)
     expect(dock(store)).not.toContain('data-clip-detect')
     const worker = readFileSync('src/analysis/clipWorker.ts', 'utf8')

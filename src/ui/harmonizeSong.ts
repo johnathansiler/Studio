@@ -122,6 +122,8 @@ async function detectAudioKey(store: ProjectStore, trackId: string, clipId: stri
     .map((channel) => channel.subarray(offset, Math.min(channel.length, offset + source)))
     .filter((channel) => channel.length > 0)
   if (!slices.length) return null
+  if (clip.soundType && /one[-\s]?shot/i.test(clip.soundType)) return null
+  if (clip.soundRole && /drum/i.test(clip.soundRole)) return null
   try {
     const { detectKeyOffThread } = await import('../analysis/keyJob')
     const heard = await detectKeyOffThread(monoMix(slices), asset.sampleRate)
