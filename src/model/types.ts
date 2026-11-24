@@ -356,6 +356,11 @@ export interface ClipHearing {
   altScale: '' | 'ionian' | 'aeolian'
   altConfidence: number
   clearKey: boolean
+  /**
+   * Grey guess when Detect says Unsure. Empty when the key is confident,
+   * and empty for drums, one-shots, and noise so those stay unnamed.
+   */
+  maybeKey?: string
   /** Source tempo in BPM. 0 when the onsets do not settle. */
   bpm: number
   bpmConfidence: number
