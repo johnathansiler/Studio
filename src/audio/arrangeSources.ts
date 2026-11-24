@@ -24,7 +24,7 @@ import { stepNotes } from '../instruments/scaler/route'
 import { hitRoute } from '../instruments/mpc/model'
 import { padSendGain, renderPadVoice } from '../instruments/mpc/render'
 import { matchBufferRate, renderPatchSpan } from '../instruments/patch/engine'
-import { renderNotes, type SampleBuffer } from './rack/dsp'
+import { renderNotes, renderNotesPaced, type SampleBuffer } from './rack/dsp'
 import { isDrumsPlugin } from './plugins/ids'
 import { renderSamplerSpan } from './plugins/sampler'
 import { clipNeedsStretch, renderClipChannels } from './stretch/engine'
@@ -49,6 +49,8 @@ export interface ArrangePrint {
   shouldCancel?: () => void
   /** Used for starter zones that are still URLs. Defaults to the platform fetch. */
   fetchImpl?: FetchLike
+  /** Yield during a long instrument print so the page can paint. */
+  tick?: (ratio: number) => Promise<void> | void
 }
 
 /**
@@ -75,7 +77,7 @@ export async function renderArrangeInputs(
     options.shouldCancel?.()
     const out = buffers.get(track.id)!
     mixAudioClips(out, project, track, assets, origin, length)
-    mixMidi(out, project, track, assets, origin, length, scheduleEnd, options.shouldCancel, buffers)
+    await mixMidi(out, project, track, assets, origin, length, scheduleEnd, options.shouldCancel, buffers, options.tick)
   }
   mixStepSequencers(buffers, project, assets, origin, length, scheduleEnd, options.shouldCancel)
   mixPatternClips(buffers, project, assets, origin, length, scheduleEnd, options.shouldCancel)
@@ -173,7 +175,7 @@ function libraryEvents(project: Project, track: Track, origin: number, scheduleE
   for (const group of performancesOn(project, track)) {
     if (group.voice.instrument !== 'library') continue
     for (const clip of group.clips) {
-      if (clip.slotOnly || clip.scene != null) continue
+      if (clip.slotOnly || clip.scene != null || clip.muted) continue
       for (const note of prepareClipNotes(project, group.owner, clip)) {
         if (note.muted) continue
         const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
@@ -304,7 +306,7 @@ interface TimedNote {
   duration: number
 }
 
-function mixMidi(
+async function mixMidi(
   out: Float32Array[],
   project: Project,
   track: Track,
@@ -314,12 +316,13 @@ function mixMidi(
   scheduleEnd: number,
   shouldCancel?: () => void,
   buffers?: Map<string, Float32Array[]>,
+  tick?: (ratio: number) => Promise<void> | void,
 ) {
   const groups = performancesOn(project, track)
   for (const group of groups) {
     const notes: TimedNote[] = []
     for (const clip of group.clips) {
-      if (clip.slotOnly || clip.scene != null) continue
+      if (clip.slotOnly || clip.scene != null || clip.muted) continue
       for (const note of prepareClipNotes(project, group.owner, clip)) {
         if (note.muted) continue
         const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
@@ -327,7 +330,7 @@ function mixMidi(
         notes.push(timed(note, span.start, span.duration))
       }
     }
-    if (notes.length) mixVoice(out, project, group.voice, notes, assets, origin, length, shouldCancel, buffers)
+    if (notes.length) await mixVoice(out, project, group.voice, notes, assets, origin, length, shouldCancel, buffers, tick)
   }
 }
 
@@ -345,7 +348,7 @@ function timed(note: Pick<MidiNote, 'pitch' | 'fine' | 'velocity' | 'pan' | 'sli
   }
 }
 
-function mixVoice(
+async function mixVoice(
   out: Float32Array[],
   project: Project,
   track: Track,
@@ -355,6 +358,7 @@ function mixVoice(
   length: number,
   shouldCancel?: () => void,
   buffers?: Map<string, Float32Array[]>,
+  tick?: (ratio: number) => Promise<void> | void,
 ) {
   const rate = project.sampleRate
   const sampler = samplerInsert(track)
@@ -420,9 +424,13 @@ function mixVoice(
       ]
     })
     if (!events.length) return
-    const buffers = new Map<string, SampleBuffer>()
-    for (const [id, asset] of assets) buffers.set(id, { sampleRate: asset.sampleRate, channels: asset.channels })
-    const rendered = renderNotes(track.rack, events, rate, project.tempo, length, buffers, rackLanesFor(project, track.id))
+    const lanes = rackLanesFor(project, track.id)
+    const sampleBuffers = new Map<string, SampleBuffer>()
+    for (const [id, asset] of assets) sampleBuffers.set(id, { sampleRate: asset.sampleRate, channels: asset.channels })
+    const originBeat = projectSampleBeat(project, origin)
+    const rendered = tick
+      ? await renderNotesPaced(track.rack, events, rate, project.tempo, length, sampleBuffers, lanes, tick, originBeat)
+      : renderNotes(track.rack, events, rate, project.tempo, length, sampleBuffers, lanes, originBeat)
     addStereo(out, rendered, origin, origin, length, 0)
     return
   }
@@ -640,6 +648,7 @@ function mixStepSequencers(
     const clips = (project.patternClips ?? []).filter((clip) => (
       clip.scene == null
       && !clip.suppressed
+      && !clip.muted
       && owned.has(clip.patternId)
       && (!clip.trackId || clip.trackId === track.id)
     ))
@@ -699,7 +708,7 @@ function mixPatternClips(
 ) {
   const clips = transportPatternClips(project, false)
   for (const clip of clips) {
-    if (clip.scene != null || clip.suppressed || clip.id === 'live-pattern') continue
+    if (clip.scene != null || clip.suppressed || clip.muted || clip.id === 'live-pattern') continue
     if (stepPatternOwner(project, clip.patternId)) continue
     const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
     if (!pattern) continue

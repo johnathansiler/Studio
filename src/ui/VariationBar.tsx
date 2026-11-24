@@ -10,6 +10,7 @@ const AMOUNTS: { id: VaryAmount; name: string }[] = [
 /** Amount, Variation, and Re-roll for the clip selected on Arrange. */
 export function VariationBar({ store }: { store: ProjectStore }) {
   const amount = store.varyAmount
+  const canRender = Boolean(store.selectedMidiClipId || store.selectedPatternClipId)
   void store.version
   return (
     <div className="variation-dock" data-variation="dock" role="group" aria-label="Variation">
@@ -26,6 +27,17 @@ export function VariationBar({ store }: { store: ProjectStore }) {
       ))}
       <button type="button" data-variation="make" onClick={() => store.varyArrangeClip()}>Variation</button>
       <button type="button" data-variation="reroll" onClick={() => store.varyArrangeClip({ reroll: true })}>Re-roll</button>
+      {canRender ? (
+        <button
+          type="button"
+          className="render-audio"
+          data-variation="render"
+          title="Bounce this clip through its instrument onto a new audio track. One undo puts it back."
+          onClick={() => store.openRenderForSelection()}
+        >
+          Render to audio
+        </button>
+      ) : null}
     </div>
   )
 }

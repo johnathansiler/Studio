@@ -141,7 +141,7 @@ async function planLoopKeyShift(
     }
     const live = store.track(trackId)?.clips.find((item) => item.id === clipId)
     if (!live) return null
-    if (!heard.clear || heard.root == null) return null
+    if (!heard.clear || heard.unsure || heard.root == null) return null
     if (heard.scale !== 'ionian' && heard.scale !== 'aeolian') return null
     loop = { root: heard.root, minor: heard.scale === 'aeolian', label: heard.label, scaleId: heard.scale }
   }

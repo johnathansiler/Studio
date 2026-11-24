@@ -91,6 +91,12 @@
   border-color: transparent;
 }
 
+.variation-dock button.render-audio {
+  grid-column: 1 / -1;
+  min-height: 44px;
+  font-size: 13px;
+}
+
 .shell .phone-context {
   order: 1;
   display: flex;

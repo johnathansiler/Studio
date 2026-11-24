@@ -356,6 +356,11 @@ export interface ClipHearing {
   altScale: '' | 'ionian' | 'aeolian'
   altConfidence: number
   clearKey: boolean
+  /**
+   * Grey guess when Detect says Unsure. Empty when the key is confident,
+   * and empty for drums, one-shots, and noise so those stay unnamed.
+   */
+  maybeKey?: string
   /** Source tempo in BPM. 0 when the onsets do not settle. */
   bpm: number
   bpmConfidence: number
@@ -451,6 +456,8 @@ export interface MidiClip {
   activeTakeId?: string
   /** Session color. Missing uses the track color. */
   color?: string
+  /** Silenced in place. The notes stay; playback and bounce skip the clip. */
+  muted?: boolean
   /** 0–0.9. Odd sixteenths sound later by this fraction of a sixteenth. */
   swing?: number
   /** Semitone move applied to the notes. Revert puts the pitches back. */
@@ -699,6 +706,11 @@ export interface AudioAsset {
   name: string
   sampleRate: number
   channels: Float32Array[]
+  /**
+   * Bit depth written the next time this asset is saved.
+   * Missing stays 32-bit float. A rendered clip uses 24-bit with TPDF.
+   */
+  pcmBits?: 16 | 24
 }
 
 export const TRACK_COLORS = ['#ef6b6b', '#73c48f', '#79b8d4', '#e0b15a', '#c58be0', '#f09a6a']

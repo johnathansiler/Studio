@@ -70,6 +70,12 @@ function VolumeRange({ store, engine, trackId, volume, label, title }: { store: 
   )
 }
 
+export function canRenderTrack(store: { project: { patternClips?: { trackId?: string; scene: number | null; suppressed?: boolean }[] } }, track: { id: string; type: string; midiClips: { slotOnly?: boolean; scene?: number | null }[] }) {
+  if (track.type === 'midi') return true
+  if (track.midiClips.some((clip) => !clip.slotOnly && clip.scene == null)) return true
+  return (store.project.patternClips ?? []).some((clip) => clip.trackId === track.id && clip.scene == null && !clip.suppressed)
+}
+
 export function trackCanArm(track: { type: string; kind?: string }, userAgent = '') {
   if (track.type === 'audio') return track.kind !== 'loop'
   return track.type === 'midi' && hardwareMidiAllowed(userAgent)
@@ -183,6 +189,7 @@ export function TrackOptions({
   }
 
   const sequencer = hasStepSequencer(track)
+  const showRender = canRenderTrack(store, track)
   return (
     <div className="track-options">
       <label className="route-field track-rename">
@@ -333,6 +340,18 @@ export function TrackOptions({
         <InsertList store={store} trackId={track.id} />
       </div>
       {(track.sends.length > 0 || buses) && <SendList store={store} trackId={track.id} />}
+      {showRender ? (
+        <button
+          type="button"
+          className="track-secondary"
+          data-track-action="render-audio"
+          title="Bounce this track's MIDI through its instrument onto a new audio track below."
+          aria-label="Render track to audio. Bounce this track's MIDI through its instrument onto a new audio track below."
+          onClick={() => { onClose(); store.openRenderTrack(track.id) }}
+        >
+          Render track to audio
+        </button>
+      ) : null}
       <button
         type="button"
         className="track-secondary"
