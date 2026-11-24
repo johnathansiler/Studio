@@ -1,0 +1,250 @@
+/* Play along sits above the dock and rises over the timeline. The lane moves on the compositor. */
+
+.play-along-sheet {
+  --px: 44;
+  --beat: 0;
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: var(--along-bottom, 96px);
+  z-index: 420;
+  display: flex;
+  flex-direction: column;
+  height: var(--sheet-h, auto);
+  max-height: min(72dvh, calc(100dvh - var(--along-bottom, 96px) - 8px));
+  box-sizing: border-box;
+  border-radius: 16px 16px 0 0;
+  border: 1px solid var(--line, #2c3c34);
+  background-color: #141c18;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.18));
+  color: var(--text, #e7f2ea);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  animation: along-rise 220ms ease-out;
+}
+
+@keyframes along-rise {
+  from { transform: translateY(110%); }
+  to { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .play-along-sheet { animation: none; }
+}
+
+.play-along-sheet .bottom-sheet-grab { position: relative; flex: 0 0 16px; }
+
+.along-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 8px 6px;
+}
+
+.along-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 30%;
+}
+
+.along-title strong,
+.along-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.along-title span { color: var(--muted, #9bb0a4); font-size: 12px; }
+
+.along-chord {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 72px;
+  text-align: right;
+}
+
+.along-chord b {
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.along-chord small { color: var(--muted, #9bb0a4); font-size: 12px; }
+
+.along-chord[data-approximate='true'] small::before { content: ''; }
+
+.along-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+
+.along-tools button,
+.along-convert {
+  min-height: 40px;
+  min-width: 44px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line, #2c3c34);
+  background: #1c2b24;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.along-tools button[aria-pressed='true'],
+.along-keys button.lit,
+.along-pads button.lit {
+  background: var(--accent, #73c48f);
+  color: var(--accent-ink, #102016);
+  border-color: transparent;
+}
+
+.along-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 0 8px 8px;
+  gap: 6px;
+}
+
+.along-lane {
+  position: relative;
+  flex: 1 1 128px;
+  min-height: 112px;
+  max-height: 168px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #0d1411;
+  contain: paint;
+}
+
+.along-scroll {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  height: 0;
+  transform: translate3d(0, calc(var(--beat) * var(--px) * 1px), 0);
+  will-change: transform;
+}
+
+.along-note {
+  position: absolute;
+  bottom: 0;
+  min-width: 28px;
+  height: 22px;
+  margin-left: -14px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: rgba(115, 196, 143, 0.85);
+  color: #102016;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 22px;
+  text-align: center;
+  transform: translate3d(0, calc(var(--start) * var(--px) * -1px), 0);
+  white-space: nowrap;
+}
+
+.along-note.chord-pill {
+  left: 8px !important;
+  margin-left: 0;
+  min-width: 48px;
+  background: #244233;
+  color: #e7f2ea;
+}
+
+.along-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  height: 2px;
+  background: #f2f7f3;
+  pointer-events: none;
+}
+
+.along-keys {
+  display: flex;
+  justify-content: center;
+  height: 78px;
+  flex: 0 0 78px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #090d0b;
+}
+
+.along-keybed { position: relative; height: 78px; }
+
+.along-keys button {
+  position: absolute;
+  top: 0;
+  width: 26px;
+  height: 100%;
+  margin: 0;
+  padding: 0 0 4px;
+  border: 1px solid #1a1a1a;
+  border-radius: 0 0 4px 4px;
+  background: #f4f1ea;
+  color: #1a1a1a;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.along-keys button.black {
+  z-index: 1;
+  width: 16px;
+  height: 48px;
+  margin-left: 0;
+  border-radius: 0 0 3px 3px;
+  background: #1b1b1b;
+  color: #f4f1ea;
+}
+
+.along-keys button .key-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  pointer-events: none;
+}
+
+.along-pads {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.along-pads button {
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--line, #2c3c34);
+  background: #1c2b24;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.along-convert { width: 100%; }
+
+.along-status {
+  margin: 0;
+  color: var(--muted, #9bb0a4);
+  font-size: 13px;
+}
+
+.shell.phone .phone-context .phone-hit[data-phone-action='play-along'] .phone-face {
+  white-space: normal;
+  line-height: 1.05;
+  font-size: 10px;
+  text-align: center;
+}

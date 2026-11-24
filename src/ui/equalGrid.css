@@ -238,6 +238,13 @@
 .shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="count-in"] { order: 8; }
 .shell.phone .phone-context[data-phone-context="arrange"] .t-btn.duplicate { order: 9; }
 .shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="delete"] { order: 10; }
+.shell.phone .phone-context[data-phone-context="arrange"] .phone-hit[data-phone-action="play-along"] { order: 11; }
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit[data-phone-action="play-along"] .phone-face {
+  white-space: normal;
+  line-height: 1.05;
+  font-size: 10px;
+  text-align: center;
+}
 
 /* The shared tray pad is 5px. On a short landscape that extra 10px drops the
    first track's Mute row just under the header scroller. Keep the 44px hits
