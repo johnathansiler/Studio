@@ -9,6 +9,7 @@ export function ChoiceTray({
   title,
   value,
   onClose,
+  extra,
   children,
 }: {
   id: string
@@ -16,6 +17,7 @@ export function ChoiceTray({
   title: string
   value: string
   onClose: () => void
+  extra?: ReactNode
   children: ReactNode
 }) {
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -70,6 +72,7 @@ export function ChoiceTray({
           <strong>{title}</strong>
           <span className="choice-tray-value">{value}</span>
         </div>
+        {extra}
         <button type="button" className="guide-x overlay-close choice-tray-close" aria-label="Close" title="Close" onClick={onClose}>
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M3 3l8 8M11 3L3 11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />

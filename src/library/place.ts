@@ -55,6 +55,11 @@ export function libraryEntryForDrag(id: string) {
   return registry.get(id.slice('library:'.length)) ?? null
 }
 
+/** Catalog row kept for this session. Null when the library has not been loaded. */
+export function publishedLibraryEntry(key: string): LibraryEntry | null {
+  return registry.get(key) ?? null
+}
+
 export async function readLibraryAsset(entry: LibraryEntry, decode?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>): Promise<AudioAsset> {
   const bytes = await fetchLibraryBytes(entry.key)
   const decoded = await (decode ?? decodeSlotFile)(bytes)

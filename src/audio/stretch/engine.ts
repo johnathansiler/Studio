@@ -159,8 +159,11 @@ export function sourceSamplesOf(clip: AudioClip) {
 }
 
 export function clipNeedsStretch(clip: AudioClip, project: Project) {
-  if (clip.playback === 'recorded') return false
   const stretch = clip.stretch
+  // A recorded take stays at the sung length. A Harmonize opt-in only pitches it.
+  if (clip.playback === 'recorded') {
+    return !!clip.keyShift && !!stretch && ((stretch.semitones || 0) !== 0 || (stretch.cents || 0) !== 0)
+  }
   if (!stretch) return false
   if ((stretch.semitones || 0) !== 0 || (stretch.cents || 0) !== 0) return true
   if (stretch.mode === 'tape' && Math.abs(clip.durationSamples - stretch.sourceSamples) > 1) return true
@@ -215,7 +218,7 @@ export function formantEnabled(mode: StretchMode, formant?: boolean) {
 
 /** Pitch PCM rendered offline. Missing means the clip still uses the live shifter. */
 function cachedFormantPitch(clip: AudioClip, sliced: Float32Array[], sampleRate: number) {
-  if (clip.playback === 'recorded') return null
+  if (clip.playback === 'recorded' && !clip.keyShift) return null
   const stretch = clip.stretch
   if (!stretch || !(stretch.semitones || stretch.cents)) return null
   if (stretch.mode !== 'pro' && stretch.mode !== 'tonal') return null
@@ -278,6 +281,10 @@ export function renderClipChannels(
       project,
       quality,
     )
+  }
+  if (clip.playback === 'recorded' && clip.keyShift && stretch && ((stretch.semitones || 0) !== 0 || (stretch.cents || 0) !== 0)) {
+    const mode = stretch.mode === 'tonal' ? 'tonal' : 'pro'
+    return shiftAll(sliced, project.sampleRate, stretch.semitones || 0, stretch.cents || 0, true, quality, mode)
   }
   const outLen = timelineSamples(clip, project)
   if (!stretch || !clipNeedsStretch(clip, project)) return fitChannels(sliced, outLen)

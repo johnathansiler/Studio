@@ -8,6 +8,7 @@ import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { quartersPerBar } from '../model/time'
 import { songKeyChip } from '../model/keyFit'
+import { HarmonizeButton } from './HarmonizeSheet'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -662,7 +663,10 @@ export function TransportBar({
           ) : null}
         </div>
       </ButtonTray>
-      {songKey ? <p className="song-key-readout" data-song-key={songKey}>Song key: {songKey}</p> : null}
+      <div className="song-key-line">
+        {songKey ? <p className="song-key-readout" data-song-key={songKey}>Song key: {songKey}</p> : null}
+        <HarmonizeButton store={store} place="transport" />
+      </div>
       {extrasHost ? createPortal(extras, extrasHost) : extras}
       {contextualDelete}
       {trackDelete ? createPortal(

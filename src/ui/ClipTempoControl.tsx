@@ -12,6 +12,7 @@ import {
 } from '../model/clipTempo'
 import type { ClipTempoMode } from '../model/types'
 import type { ProjectStore } from '../state/store'
+import { HarmonizeButton } from './HarmonizeSheet'
 import { clipShiftPlan, runKeyShift } from './offerKeyShift'
 import './clipTempo.css'
 
@@ -67,7 +68,7 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
   const playsText = plays != null ? `Plays ${formatBpm(plays)}` : 'Plays with the file'
   const hearing = clip.hearing
   const recorded = isRecordedClip(clip)
-  const keyLine = recorded ? null : keyShiftReadout(clip)
+  const keyLine = keyShiftReadout(clip)
   const shift = recorded ? null : clipShiftPlan(store, trackId, clipId)
   const summary = mode === 'free'
     ? `Original. ${sourceText}. ${playsText}. Pick Follow, half, double, or Lock. Detect reads the key and the scale.`
@@ -168,7 +169,12 @@ export function ClipTempoControl({ store, trackId, clipId }: { store: ProjectSto
         </button>
       ) : null}
       {note ? <p className="clip-tempo-note">{note}</p> : null}
-      {songKey ? <p className="clip-tempo-readout" data-song-key={songKey}>Song key: {songKey}</p> : null}
+      {songKey ? (
+        <div className="song-key-line">
+          <p className="clip-tempo-readout" data-song-key={songKey}>Song key: {songKey}</p>
+          <HarmonizeButton store={store} place="dock" />
+        </div>
+      ) : null}
       {keyLine ? (
         <div className="clip-hearing" data-key-shift-dock="" role="region" aria-label="Shifted key">
           <p data-key-shift-readout="">{keyLine}</p>

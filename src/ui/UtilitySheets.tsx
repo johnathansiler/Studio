@@ -6,6 +6,7 @@ import type { AudioEngine } from '../audio/engine'
 import type { SessionClient } from '../remote/session'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { ChoiceChip, ChoiceTray } from './ChoiceTray'
+import { HarmonizeButton } from './HarmonizeSheet'
 import { SongPanel } from './SongPanel'
 import type { UtilitySheet } from './arrangePanel'
 import { useFormFactor } from './form'
@@ -96,7 +97,14 @@ export function ToolChoices({
   const title = listed.includes('select') ? 'Select' : 'Tools'
   const current = listed.includes(value) ? toolFace(value) : null
   return (
-    <ChoiceTray id="tool-choices" label={title} title={title} value={current?.label ?? (TOOL_INFO[value]?.label ?? title)} onClose={onClose}>
+    <ChoiceTray
+      id="tool-choices"
+      label={title}
+      title={title}
+      value={current?.label ?? (TOOL_INFO[value]?.label ?? title)}
+      onClose={onClose}
+      extra={<HarmonizeButton store={store} place="tools" onOpened={onClose}>Harmonize</HarmonizeButton>}
+    >
       {listed.map((id) => {
         const face = toolFace(id)
         const key = keyForTool(id)

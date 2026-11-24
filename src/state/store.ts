@@ -108,6 +108,7 @@ import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
 import { isSampledInstrument } from '../instruments/sampled'
 import { placeholderInstrumentName } from '../sounds/instruments'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
+import { transposeMidiNotes, type HarmonizeShift } from '../model/harmonize'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { clipFromNotes, recordOnto, rememberVoice } from '../instruments/scaler/clips'
 import { audioChordSymbols, pitchesFromAudio } from '../instruments/scaler/listen'
@@ -353,6 +354,8 @@ export class ProjectStore {
   tempoPointBeat: number | null = null
   /** Offer after a recording or import whose pulse is not the song tempo. Not saved. */
   smartTempo: { trackId: string; clipId: string; bpm: number } | null = null
+  /** Ask which key to move every melodic clip onto. Not saved. */
+  harmonizeOpen = false
   /** Ask before shifting a newly dropped loop. Not saved. */
   keyShiftOffer: {
     trackId: string
@@ -2128,6 +2131,18 @@ export class ProjectStore {
     this.emit()
   }
 
+  openHarmonizeSheet() {
+    if (this.harmonizeOpen) return
+    this.harmonizeOpen = true
+    this.emit()
+  }
+
+  closeHarmonizeSheet() {
+    if (!this.harmonizeOpen) return
+    this.harmonizeOpen = false
+    this.emit()
+  }
+
   /**
    * Move one clip into the project key.
    * One undo puts the semitones, the formant flag, and the "always" choice back.
@@ -2170,11 +2185,59 @@ export class ProjectStore {
     })
   }
 
+  /**
+   * Move every chosen clip onto one key, and set that key on the song.
+   * Pitch is already cached. This mutate is the only undo step.
+   */
+  applyHarmonizeSong(input: { root: number; minor: boolean; shifts: HarmonizeShift[] }) {
+    this.keyShiftOffer = null
+    this.mutate(() => {
+      this.project.scale = normalizeScale({
+        ...this.scaleState(),
+        root: input.root,
+        scale: input.minor ? 'aeolian' : 'ionian',
+        library: '',
+        keySet: true,
+      })
+      for (const shift of input.shifts) {
+        if (shift.kind === 'midi') {
+          const clip = this.track(shift.trackId)?.midiClips.find((item) => item.id === shift.clipId)
+          if (!clip || !shift.semitones) continue
+          transposeMidiNotes(clip.notes, shift.semitones)
+          for (const take of clip.takes ?? []) transposeMidiNotes(take.notes, shift.semitones)
+          continue
+        }
+        const clip = this.track(shift.trackId)?.clips.find((item) => item.id === shift.clipId)
+        if (!clip) continue
+        const current = clip.stretch?.semitones ?? 0
+        if (!shift.semitones && !current) continue
+        const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+        const formantBefore = clip.keyShift ? clip.keyShift.formantBefore === true : base.formant === true
+        if (!shift.semitones) {
+          clip.stretch = { ...base, semitones: 0, cents: 0, formant: formantBefore, markers: base.markers }
+          delete clip.keyShift
+        } else {
+          const mode = base.mode === 'tonal' ? 'tonal' : 'pro'
+          clip.stretch = { ...base, semitones: shift.semitones, cents: 0, formant: true, mode, markers: base.markers }
+          clip.keyShift = {
+            semitones: shift.semitones,
+            from: shift.from,
+            to: shift.to,
+            tonicOnly: shift.tonicOnly,
+            formantBefore,
+          }
+        }
+        if (!isRecordedClip(clip) && clip.stretch && tempoDrivesLength(clip.stretch)) clip.durationSamples = timelineSamples(clip, this.project)
+        this.commitClip(clip)
+      }
+    }, 'Harmonize song')
+  }
+
   /** Put the clip back on its original pitch. One undo. */
   revertKeyShift(trackId: string, clipId: string) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
-      if (!clip?.stretch || isRecordedClip(clip)) return
+      if (!clip?.stretch || (isRecordedClip(clip) && !clip.keyShift)) return
       const formant = clip.keyShift?.formantBefore === true
       clip.stretch = { ...clip.stretch, semitones: 0, formant, markers: clip.stretch.markers }
       delete clip.keyShift

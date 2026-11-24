@@ -1,0 +1,192 @@
+.harmonize-song,
+.harmonize-tools {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #24382e;
+  color: var(--text, #e7eee8);
+  font: 700 13px/1.2 var(--font, inherit);
+  white-space: nowrap;
+}
+
+.harmonize-tools {
+  width: 100%;
+  margin: 0 0 4px;
+}
+
+.song-key-line {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.song-key-line > .song-key-readout,
+.song-key-line > .clip-tempo-readout {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.harmonize-sheet {
+  width: 100%;
+}
+
+.harmonize-sheet .sheet-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.harmonize-detail {
+  display: block;
+  color: var(--muted, #b7c4bb);
+  font: 600 12px/1.3 var(--font, inherit);
+}
+
+.harmonize-vocals small {
+  display: block;
+  font: 600 12px/1.3 var(--font, inherit);
+  color: var(--muted, #b7c4bb);
+}
+
+.harmonize-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 12px;
+}
+
+.harmonize-note,
+.harmonize-empty {
+  margin: 0;
+  color: var(--muted, #b7c4bb);
+  font: 600 13px/1.35 var(--font, inherit);
+}
+
+.harmonize-notes {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.harmonize-notes button,
+.harmonize-modes button {
+  min-height: 44px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: #18231d;
+  color: var(--text, #e7eee8);
+  font: 700 14px/1 var(--font, inherit);
+}
+
+.harmonize-notes button[aria-pressed='true'],
+.harmonize-modes button[aria-pressed='true'] {
+  background: var(--accent, #73c48f);
+  color: var(--accent-ink, #102117);
+}
+
+.harmonize-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.harmonize-vocals {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0;
+  font: 700 15px/1.3 var(--font, inherit);
+}
+
+.harmonize-vocals input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.harmonize-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.harmonize-list h3 {
+  margin: 2px 0 0;
+  font: 700 11px/1.2 var(--font, inherit);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #b7c4bb);
+}
+
+.harmonize-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) auto;
+  gap: 6px;
+  align-items: baseline;
+  min-height: 22px;
+  font: 600 13px/1.25 var(--font, inherit);
+}
+
+.harmonize-list li span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harmonize-list li[data-harmonize-row='skip'] {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--muted, #b7c4bb);
+}
+
+.harmonize-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.harmonize-progress i {
+  display: block;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--accent, #73c48f);
+}
+
+.harmonize-foot {
+  flex: 0 0 auto;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+}
+
+.harmonize-foot button {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent, #73c48f);
+  color: var(--accent-ink, #102117);
+  font: 750 15px/1 var(--font, inherit);
+}
+
+.shell .tool-slot > .phone-sheet-host > .bottom-sheet.arrange-sheet.harmonize-sheet {
+  max-height: min(68dvh, calc(100dvh - 108px));
+}

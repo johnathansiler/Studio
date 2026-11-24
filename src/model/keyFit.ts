@@ -34,7 +34,7 @@ const FLATS: Record<string, string> = {
   BB: 'A#',
 }
 
-const MINOR_SCALES = new Set<string>([
+export const MINOR_SCALES = new Set<string>([
   'aeolian',
   'dorian',
   'phrygian',

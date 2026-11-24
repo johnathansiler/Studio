@@ -11,6 +11,7 @@ import { SnapChoices } from './UtilitySheets'
 import { DeleteTrackConfirm, applyTrackDelete } from './equalGrid'
 import { useScreenOverlay } from './screenOverlay'
 import { ClipTempoControl } from './ClipTempoControl'
+import { HarmonizeButton } from './HarmonizeSheet'
 import {
   phoneContextKind,
   type PhonePlace,
@@ -411,6 +412,11 @@ export function PhoneDock({
         document.body,
       ) : null}
       {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
+      {toolsOpen ? (
+        <HarmonizeButton store={store} place="tools" className="harmonize-tools" onOpened={closeTools}>
+          Harmonize song
+        </HarmonizeButton>
+      ) : null}
       {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
       {audioTempo ? <ClipTempoControl store={store} trackId={audioTempo.trackId} clipId={audioTempo.clipId} /> : null}
       {clip && place === 'arrange' ? <VariationBar store={store} /> : null}

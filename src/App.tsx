@@ -61,6 +61,7 @@ import { activeTool } from './state/tools'
 import { visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
+import { HarmonizeSheet } from './ui/HarmonizeSheet'
 import { KeyShiftPrompt } from './ui/KeyShiftPrompt'
 import { offerLoopKeyShift } from './ui/offerKeyShift'
 import { BOTTOM_COVER_EVENT, CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
@@ -2301,6 +2302,7 @@ async function importDropped(files: FileList) {
           )}
           <div id="phone-sheet-host" className="phone-sheet-host">
             {phone && <MidiTools store={store} engine={engine} phone />}
+            <HarmonizeSheet store={store} />
           </div>
           <PhoneDock
             store={store}
