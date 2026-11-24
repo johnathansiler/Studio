@@ -95,12 +95,15 @@ function num(params: Record<string, number>, key: string, fallback: number) {
 export function bassNote(state: Bass808State, pitch: number, vel: number, slide: boolean, params: Record<string, number>, sampleRate: number) {
   const midi = Math.max(0, Math.min(127, Math.round(pitch)))
   if (vel <= 0.0001) {
+    const active = Math.round(state.glideTo)
     state.held = state.held.filter((note) => note !== midi)
-    if (state.held.length) {
-      begin(state, state.held[state.held.length - 1], state.vel, true, params, sampleRate)
+    if (!state.held.length) {
+      if (state.live) state.released = true
       return
     }
-    if (state.live) state.released = true
+    // Releasing the note we slid away from must not restart the glide.
+    if (midi !== active && state.held.includes(active)) return
+    begin(state, state.held[state.held.length - 1], state.vel, true, params, sampleRate)
     return
   }
   const overlap = state.held.length > 0 && state.live && !state.released
@@ -233,7 +236,8 @@ export function renderBass808(
   buffers: Bass808Buffers = {},
 ): Bass808Render {
   const state = createBassState()
-  const ordered = events.slice().sort((a, b) => a.sample - b.sample || b.vel - a.vel)
+  // Note-offs at a sample run before note-ons there, matching a finger that leaves one key and then plays the next.
+  const ordered = events.slice().sort((a, b) => a.sample - b.sample || a.vel - b.vel)
   const left = new Float32Array(length)
   const midi = new Float32Array(length)
   const buffer = buffers.samples ?? null

@@ -318,6 +318,8 @@ export class RackRuntime {
     const asset = zone ? this.bassLookup?.get(zone.bufferId) : undefined
     this.bassBuffer = asset?.channels[0] ?? null
     this.bassRate = asset?.sampleRate || this.sampleRate
+    // Same ordering as renderBass808: a key release lands before the note that replaces it.
+    pending.sort((a, b) => (a.vel <= 0.0001 ? 0 : 1) - (b.vel <= 0.0001 ? 0 : 1))
     for (const event of pending) {
       bassNote(this.bass, event.pitch, event.vel, event.slide, device.params, this.sampleRate)
     }

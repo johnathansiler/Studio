@@ -9,6 +9,11 @@
   color: var(--text, #eef3ea);
 }
 
+/* The shared overlay scrolls. This panel must not: Record, Stop, and Play stay put. */
+[data-screen-overlay].bass808 {
+  overflow: hidden !important;
+}
+
 .bass808-bar {
   display: flex;
   align-items: center;

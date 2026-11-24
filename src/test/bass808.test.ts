@@ -2,10 +2,10 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { renderBass808, bassActive, bassNote, createBassState, glideLength, midiHz } from '../audio/bass808/voice'
+import { RackRuntime, renderNotes } from '../audio/rack/dsp'
 import { bassPadPitches, slideLinks } from '../audio/bass808/pattern'
 import { BASS808_SHOTS, shotRoot } from '../audio/bass808/shots'
 import { graphPlugins } from '../audio/arrangeSources'
-import { RackRuntime } from '../audio/rack/dsp'
 import { createPlugin, defaultParams, normalizeProject } from '../audio/plugins/catalog'
 import { migratePlugin } from '../audio/plugins/ids'
 import { transposeMidiClip } from '../model/harmonize'
@@ -99,6 +99,90 @@ describe('808 bass voice', () => {
     }
     expect(maxDelta(rendered.left, start - 8, start + span + 8)).toBeLessThan(0.08)
     for (const sample of rendered.left) expect(Number.isFinite(sample)).toBe(true)
+  })
+
+  it('keeps gliding to the target when the note it left is released', () => {
+    const sr = 48000
+    const span = glideLength(100, sr)
+    const start = 2000
+    const off = start + Math.floor(span / 2)
+    const rendered = renderBass808(
+      { ...clean, glide: 100, gmode: 1 },
+      [
+        { sample: 0, pitch: 36, vel: 0.9 },
+        { sample: start, pitch: 48, vel: 0.9, slide: true },
+        { sample: off, pitch: 36, vel: 0 },
+      ],
+      sr,
+      start + span + 32,
+    )
+    expect(Math.abs(rendered.midi[off] - 36)).toBeGreaterThan(1)
+    expect(Math.abs(rendered.midi[start + span] - 48)).toBeLessThan(0.02)
+    for (let i = start; i < start + span; i++) {
+      expect(rendered.midi[i + 1]).toBeGreaterThanOrEqual(rendered.midi[i] - 1e-6)
+    }
+    expect(maxDelta(rendered.left, off - 8, off + 8)).toBeLessThan(0.08)
+  })
+
+  it('glides a same-sample handoff only in always mode or when the note is marked slide', () => {
+    const sr = 48000
+    const span = glideLength(80, sr)
+    const at = 2400
+    const events = [
+      { sample: 0, pitch: 36, vel: 0.9 },
+      { sample: at, pitch: 36, vel: 0 },
+      { sample: at, pitch: 48, vel: 0.85 },
+    ]
+    const legato = renderBass808({ ...clean, glide: 80, gmode: 1 }, events, sr, at + 8)
+    expect(Math.abs(legato.midi[at] - 48)).toBeLessThan(0.02)
+    const marked = renderBass808(
+      { ...clean, glide: 80, gmode: 1 },
+      events.map((event, index) => index === 2 ? { ...event, slide: true } : event),
+      sr,
+      at + span + 8,
+    )
+    expect(Math.abs(marked.midi[at] - 36)).toBeLessThan(0.5)
+    expect(Math.abs(marked.midi[at + span] - 48)).toBeLessThan(0.02)
+    const always = renderBass808({ ...clean, glide: 80, gmode: 0 }, events, sr, at + span + 8)
+    expect(Math.abs(always.midi[at] - 36)).toBeLessThan(0.5)
+    expect(Math.abs(always.midi[at + span] - 48)).toBeLessThan(0.02)
+    for (let i = at; i < at + span; i++) {
+      expect(always.midi[i + 1]).toBeGreaterThanOrEqual(always.midi[i] - 1e-6)
+    }
+  })
+
+  it('matches the rack bounce to the voice, including a queued release', () => {
+    const sr = 48000
+    const length = 9000
+    const params = { ...clean, glide: 90, gmode: 1 }
+    const events = [
+      { sample: 0, pitch: 36, vel: 0.9 },
+      { sample: 4000, pitch: 36, vel: 0 },
+      { sample: 4000, pitch: 43, vel: 0.8, slide: true },
+      { sample: 7000, pitch: 43, vel: 0 },
+    ]
+    const voice = renderBass808(params, events, sr, length)
+    const device = makeDevice('bass808')
+    Object.assign(device.params, params)
+    const rack = { devices: [device], cables: [], polyphony: 1 }
+    const bounced = renderNotes(rack, events, sr, 140, length)[0]
+    const live = new RackRuntime(sr)
+    live.note(36, 0.9, 1, false)
+    live.render(rack, 4000, 140, 'full', new Map())
+    live.note(43, 0.8, 1, true)
+    live.note(36, 0, 1, false)
+    const mid = live.render(rack, 3000, 140, 'full', new Map())[0]
+    live.note(43, 0, 1, false)
+    const rest = live.render(rack, 2000, 140, 'full', new Map())[0]
+    let bounceGap = 0
+    let liveGap = 0
+    for (let i = 0; i < length; i++) bounceGap = Math.max(bounceGap, Math.abs(bounced[i] - voice.left[i]))
+    for (let i = 0; i < mid.length; i++) liveGap = Math.max(liveGap, Math.abs(mid[i] - voice.left[4000 + i]))
+    for (let i = 0; i < rest.length; i++) liveGap = Math.max(liveGap, Math.abs(rest[i] - voice.left[7000 + i]))
+    expect(bounceGap).toBeLessThan(1e-5)
+    expect(liveGap).toBeLessThan(1e-5)
+    expect(Math.abs(voice.midi[4000] - 36)).toBeLessThan(0.5)
+    expect(Math.abs(voice.midi[4000 + glideLength(90, sr)] - 43)).toBeLessThan(0.02)
   })
 
   it('steals the single voice in mono mode', () => {

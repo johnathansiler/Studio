@@ -218,6 +218,7 @@ export function Bass808Panel({
                     event.preventDefault()
                     down(pitch)
                     event.currentTarget.classList.add('on')
+                    try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* synthetic */ }
                   }}
                   onPointerUp={(event) => {
                     up(pitch)
