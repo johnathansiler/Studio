@@ -150,7 +150,7 @@ export function PlayAlongSheet({ store, engine, onClose }: { store: ProjectStore
   useEffect(() => {
     const place = () => {
       const slot = document.getElementById('tool-slot')
-      const gap = slot ? Math.max(64, Math.round(window.innerHeight - slot.getBoundingClientRect().top)) : 96
+      const gap = slot ? Math.max(64, Math.round(window.innerHeight - slot.getBoundingClientRect().top) + 8) : 104
       rootRef.current?.style.setProperty('--along-bottom', `${gap}px`)
     }
     place()

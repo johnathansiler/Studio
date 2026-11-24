@@ -194,6 +194,74 @@ describe('play-along transcription', () => {
     console.log(`PLAY_ALONG_MONO ${JSON.stringify({ lead: leadAccuracy, bass: bassAccuracy, walk: walkAccuracy })}`)
   })
 
+  it('keeps low bass, onsets, beat-sized chords, and arpeggio notes', () => {
+    const rate = 48000
+    const lowWant = [28, 31, 35, 33, 31, 28]
+    const low = transcribeScore({
+      channels: [line(lowWant, 0.45, rate)],
+      sampleRate: rate,
+      tempo: 90,
+      name: 'Low bass',
+      soundCategory: 'bass',
+      part: 'mono',
+    })
+    expect(sequenceAccuracy(low.notes.map((note) => note.pitch), lowWant)).toBe(1)
+
+    const tempo = 100
+    const finger = transcribeScore({
+      channels: [line([40, 43, 47], 0.4, rate)],
+      sampleRate: rate,
+      tempo,
+      name: 'Finger bass',
+      soundCategory: 'bass',
+      part: 'mono',
+    })
+    expect(finger.notes.map((note) => note.pitch)).toEqual([40, 43, 47])
+    const onsetMs = (index: number, atSeconds: number) => Math.abs(finger.notes[index].startBeat * 60 / tempo - atSeconds) * 1000
+    expect(onsetMs(0, 0)).toBeLessThan(50)
+    expect(onsetMs(1, 0.46)).toBeLessThan(50)
+    expect(onsetMs(2, 0.92)).toBeLessThan(50)
+
+    const beatTempo = 120
+    const changes = transcribeScore({
+      channels: [concat([
+        chordBar([48, 60, 64, 67], 1, beatTempo, rate),
+        chordBar([43, 55, 59, 62], 1, beatTempo, rate),
+        chordBar([45, 57, 60, 64], 1, beatTempo, rate),
+        chordBar([41, 53, 57, 60], 1, beatTempo, rate),
+      ])],
+      sampleRate: rate,
+      tempo: beatTempo,
+      name: 'Beat chords',
+      soundTags: ['chords', 'piano'],
+      part: 'poly',
+    })
+    expect(changes.chords.map((chord) => chord.symbol)).toEqual(['C', 'G', 'Am', 'F'])
+
+    const arpeggio = transcribeScore({
+      channels: [line([62, 65, 69, 72], 0.28, rate)],
+      sampleRate: rate,
+      tempo: 96,
+      name: 'felt piano arpeggio',
+      soundTags: ['piano', 'arpeggio'],
+      part: 'auto',
+    })
+    expect(arpeggio.kind).toBe('mono')
+    expect(sequenceAccuracy(arpeggio.notes.map((note) => note.pitch), [62, 65, 69, 72])).toBe(1)
+
+    const dyad = transcribeScore({
+      channels: [chordBar([41, 48], 4, 80, rate)],
+      sampleRate: rate,
+      tempo: 80,
+      name: 'Eerie pad',
+      soundTags: ['pad'],
+      part: 'poly',
+    })
+    expect(dyad.chords.length).toBeGreaterThan(0)
+    expect(dyad.confidence).toBeLessThanOrEqual(0.6)
+    expect(dyad.approximate).toBe(true)
+  })
+
   it('names synthetic chords and felt-piano library loops', async () => {
     const rate = 16000
     const tempo = 120

@@ -53,7 +53,7 @@ function mean(values: number[]) {
 }
 
 function hzFor(text: string) {
-  if (/\bbass\b/.test(text)) return { minHz: 40, maxHz: 450 }
+  if (/\bbass\b/.test(text)) return { minHz: 32, maxHz: 500 }
   if (/\b(vocal|vox|lead|melody|flute|sax)\b/.test(text)) return { minHz: 75, maxHz: 1100 }
   return { minHz: 65, maxHz: 950 }
 }
@@ -67,6 +67,20 @@ function collapse(notes: PlayNote[]) {
       const end = note.startBeat + note.durationBeats
       prev.durationBeats = Math.max(prev.durationBeats, end - prev.startBeat)
       prev.confidence = Math.max(prev.confidence, note.confidence)
+      prev.velocity = Math.max(prev.velocity, note.velocity)
+      continue
+    }
+    // A slide or a vibrato wobble shows up as a very short neighbor into the landing pitch.
+    if (
+      prev
+      && Math.abs(prev.pitch - note.pitch) === 1
+      && prev.durationBeats < 0.22
+      && note.startBeat <= prev.startBeat + prev.durationBeats + 0.05
+    ) {
+      const end = note.startBeat + note.durationBeats
+      prev.pitch = note.pitch
+      prev.durationBeats = Math.max(prev.durationBeats, end - prev.startBeat)
+      prev.confidence = Math.min(prev.confidence, note.confidence)
       prev.velocity = Math.max(prev.velocity, note.velocity)
       continue
     }
@@ -107,53 +121,144 @@ function tonesOf(root: number, id: string, bass: number | null) {
   return tones
 }
 
+function familyOf(id: string) {
+  if (id === 'maj' || id === 'maj7' || id === '7' || id === '6') return 'maj'
+  if (id === 'min' || id === 'm7' || id === 'mMaj7' || id === 'm6') return 'min'
+  return id
+}
+
 function polyScore(mixed: Float32Array, sampleRate: number, tempo: number, beats: number, key: { root: number; scale: ScaleId } | null, numerator: number, denominator: number): { chords: PlayChord[]; notes: PlayNote[]; density: number[] } {
   const frames = spectralFrames(mixed, sampleRate)
   if (!frames.length) return { chords: [], notes: [], density: [] }
   const shift = tuningShift(frames)
-  const barBeats = Math.max(1, numerator * (4 / Math.max(1, denominator)))
   const seconds = mixed.length / sampleRate
-  const barSeconds = (60 / Math.max(1, tempo)) * barBeats
-  const barCount = Math.max(1, Math.ceil(seconds / barSeconds - 1e-6))
-  const bars = blankBars(barCount)
+  const beatSeconds = 60 / Math.max(1, tempo)
+  const beatCount = Math.max(1, Math.round(Math.min(beats, seconds / beatSeconds)))
+  const beatsPerBar = Math.max(1, Math.round(numerator * (4 / Math.max(1, denominator))))
+  const barsForKey = blankBars(Math.max(1, Math.ceil(beatCount / beatsPerBar)))
+  const beatsChroma = blankBars(beatCount)
+  const density: number[] = []
+  let frameClasses = 0
+  let frameCount = 0
   for (const frame of frames) {
-    const index = Math.min(barCount - 1, Math.max(0, Math.floor(frame.time / barSeconds)))
-    accumulateBar(bars[index], foldChroma(frame.fine, shift), frame.bass, frame.rms, frame.flux)
+    const chroma = foldChroma(frame.fine, shift)
+    const beatIndex = Math.min(beatCount - 1, Math.max(0, Math.floor(frame.time / beatSeconds)))
+    accumulateBar(beatsChroma[beatIndex], chroma, frame.bass, frame.rms, frame.flux)
+    const barIndex = Math.min(barsForKey.length - 1, Math.floor(beatIndex / beatsPerBar))
+    accumulateBar(barsForKey[barIndex], chroma, frame.bass, frame.rms, frame.flux)
+    if (frame.rms > 1e-4) {
+      frameClasses += strongClasses(chroma)
+      frameCount++
+    }
   }
+  if (frameCount) density.push(frameClasses / frameCount)
   const fitted = key ?? (() => {
-    const heard = keyFromHistogram(histogramFromFrames(frames, shift, foldChroma), bars)
+    const heard = keyFromHistogram(histogramFromFrames(frames, shift, foldChroma), barsForKey)
     return { root: heard.root, scale: heard.scale }
   })()
-  const density: number[] = []
-  const chords: PlayChord[] = []
-  const notes: PlayNote[] = []
-  bars.forEach((bar, index) => {
-    density.push(strongClasses(bar.chroma))
+  const barFit = barsForKey.map((bar) => (bar.energy > 1e-5 ? chordFromChroma(bar.chroma, bar.bass, fitted) : null))
+  interface BeatChord extends PlayChord { id: string; classes: number }
+  const raw: BeatChord[] = []
+  beatsChroma.forEach((bar, index) => {
+    const covered = index === beatCount - 1 ? Math.min(1, seconds / beatSeconds - index) : 1
+    if (covered < 0.45 || bar.energy <= 1e-5) return
     const fit = chordFromChroma(bar.chroma, bar.bass, fitted)
-    if (!fit || bar.energy <= 1e-5) return
+    if (!fit) return
+    const classes = strongClasses(bar.chroma)
+    // Two tones do not identify a seventh or a sus. Say so in the confidence.
+    let confidence = Math.max(0, Math.min(1, fit.score))
+    if (classes < 3) confidence = Math.min(confidence, 0.55)
     const bass = bassOf(bar.bass)
-    const startBeat = Math.min(beats, index * barBeats)
-    const durationBeats = Math.min(barBeats, Math.max(0.25, beats - startBeat))
-    const tones = tonesOf(fit.root, fit.id, bass)
-    chords.push({
+    raw.push({
       symbol: fit.symbol,
       root: fit.root,
       bass,
+      startBeat: index,
+      durationBeats: 1,
+      confidence,
+      tones: tonesOf(fit.root, fit.id, bass),
+      id: fit.id,
+      classes,
+    })
+  })
+  // A one-beat name sandwiched between the same chord is a flicker, not a new change.
+  for (let index = 1; index < raw.length - 1; index++) {
+    const prev = raw[index - 1]
+    const beat = raw[index]
+    const next = raw[index + 1]
+    if (beat.durationBeats > 1 || prev.symbol !== next.symbol || beat.symbol === prev.symbol) continue
+    if (beat.startBeat !== prev.startBeat + prev.durationBeats || next.startBeat !== beat.startBeat + beat.durationBeats) continue
+    raw[index] = { ...prev, startBeat: beat.startBeat, durationBeats: beat.durationBeats }
+  }
+  const groups: BeatChord[][] = []
+  for (const beat of raw) {
+    const group = groups[groups.length - 1]
+    const head = group?.[0]
+    const tail = group?.[group.length - 1]
+    if (
+      group
+      && head
+      && tail
+      && familyOf(head.id) === familyOf(beat.id)
+      && head.root === beat.root
+      && beat.startBeat <= tail.startBeat + tail.durationBeats + 0.01
+    ) {
+      group.push(beat)
+    } else groups.push([beat])
+  }
+  const chords: PlayChord[] = []
+  const notes: PlayNote[] = []
+  for (const group of groups) {
+    const tally = new Map<string, { n: number; beat: BeatChord }>()
+    let confidence = 1
+    for (const beat of group) {
+      const key = `${beat.symbol}|${beat.id}`
+      const have = tally.get(key) ?? { n: 0, beat }
+      have.n += 1
+      tally.set(key, have)
+      confidence = Math.min(confidence, beat.confidence)
+    }
+    let chosen = group[0]
+    let bestCount = -1
+    for (const item of tally.values()) {
+      const tieSimpler = item.n === bestCount && item.beat.id.length < chosen.id.length
+      if (item.n > bestCount || tieSimpler) {
+        bestCount = item.n
+        chosen = item.beat
+      }
+    }
+    const startBeat = group[0].startBeat
+    const durationBeats = group[group.length - 1].startBeat + group[group.length - 1].durationBeats - startBeat
+    const barIndex = Math.floor(startBeat / beatsPerBar)
+    const bar = barFit[barIndex]
+    const coversBar = startBeat <= barIndex * beatsPerBar + 0.01 && startBeat + durationBeats >= (barIndex + 1) * beatsPerBar - 0.01
+    if (bar && coversBar && bar.root === chosen.root && familyOf(bar.id) === familyOf(chosen.id)) {
+      chosen = {
+        ...chosen,
+        symbol: bar.symbol,
+        tones: tonesOf(bar.root, bar.id, chosen.bass),
+        id: bar.id,
+      }
+    }
+    chords.push({
+      symbol: chosen.symbol,
+      root: chosen.root,
+      bass: chosen.bass,
       startBeat,
       durationBeats,
-      confidence: Math.max(0, Math.min(1, fit.score)),
-      tones,
+      confidence,
+      tones: chosen.tones,
     })
-    if (bass != null) {
+    if (chosen.bass != null) {
       notes.push({
-        pitch: bass,
+        pitch: chosen.bass,
         startBeat,
         durationBeats,
         velocity: 0.8,
-        confidence: Math.max(0, Math.min(1, fit.score)),
+        confidence,
       })
     }
-  })
+  }
   return { chords, notes, density }
 }
 

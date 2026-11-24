@@ -2,7 +2,7 @@ import { autocorrelate } from './fft'
 import type { AnalysisBuffer, HumNote, TranscribeOptions } from './types'
 import { monoMix } from './mix'
 
-const LOW = 36
+const LOW = 24
 const HIGH = 84
 const STATES = HIGH - LOW + 2
 
@@ -205,7 +205,10 @@ function segment(frames: FramePitch[], path: Int16Array, hopSeconds: number): Ra
       return
     }
     let startIndex = run[0]
-    for (let i = run[0]; i >= Math.max(0, run[0] - 10); i--) {
+    // A slide is voiced before the pitch settles. Follow that voiced region
+    // back to its attack, and stop at a rest so the previous note is left alone.
+    for (let i = run[0] - 1; i >= Math.max(0, run[0] - 8); i--) {
+      if (midiOfState(path[i]) <= 0) break
       if (frames[i].onset) startIndex = i
     }
     const start = frames[startIndex].time
@@ -219,6 +222,7 @@ function segment(frames: FramePitch[], path: Int16Array, hopSeconds: number): Ra
     let conf = 0
     let rms = 0
     let weight = 0
+    let wobble = 0
     for (const index of run) {
       const midi = midiOfState(path[index])
       counts.set(midi, (counts.get(midi) ?? 0) + 1)
@@ -228,6 +232,23 @@ function segment(frames: FramePitch[], path: Int16Array, hopSeconds: number): Ra
       conf += frameConf
       rms += frames[index].rms
       weight += Math.max(0.05, frameConf)
+      let low = 1e9
+      let high = 0
+      for (const candidate of frames[index].candidates) {
+        if (candidate.cmnd > 0.35) continue
+        const midiGuess = 69 + 12 * Math.log2(candidate.hz / 440)
+        if (Math.abs(midiGuess - midi) > 1.2) continue
+        low = Math.min(low, midiGuess)
+        high = Math.max(high, midiGuess)
+      }
+      if (high > low) wobble = Math.max(wobble, high - low)
+      const near = frames[index].candidates
+        .map((candidate) => ({ candidate, midi: 69 + 12 * Math.log2(candidate.hz / 440) }))
+        .filter((item) => Math.abs(item.midi - midi) < 1.4)
+        .sort((a, b) => a.candidate.cmnd - b.candidate.cmnd)
+      if (near.length > 1 && near[1].candidate.cmnd < near[0].candidate.cmnd + 0.12 && Math.abs(near[0].midi - near[1].midi) > 0.55) {
+        wobble = Math.max(wobble, 1)
+      }
     }
     let pitch = midiOfState(path[run[0]])
     let best = 0
@@ -237,7 +258,9 @@ function segment(frames: FramePitch[], path: Int16Array, hopSeconds: number): Ra
         pitch = midi
       }
     }
-    const meanConf = conf / run.length
+    let meanConf = conf / run.length
+    // Wide vibrato that crosses a semitone is a less sure pitch.
+    if (wobble > 0.8 || counts.size > 1) meanConf *= 0.62
     if (meanConf >= 0.28) {
       notes.push({ pitch, hz: hz / weight, confidence: meanConf, rms: rms / run.length, start, end })
     }
@@ -314,7 +337,7 @@ export function transcribeHum(buffer: AnalysisBuffer, options: TranscribeOptions
     }
     const rms = Math.sqrt(energy / span)
     const heard = rms > 0.008 ? yinFrame(block, sampleRate, minHz, maxHz) : { candidates: [], unvoiced: 1 }
-    frames.push({ time: start / sampleRate, rms, onset: false, candidates: heard.candidates, unvoiced: heard.unvoiced })
+    frames.push({ time: (start + span / 2) / sampleRate, rms, onset: false, candidates: heard.candidates, unvoiced: heard.unvoiced })
   }
   if (!frames.length) return []
   markOnsets(frames)

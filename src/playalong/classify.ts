@@ -16,20 +16,24 @@ export function clipText(clip: {
   return parts.join(' ').toLowerCase()
 }
 
-/** Metadata guess. Null when the name does not say. */
+/** Metadata guess. Null when the name does not say, so the sound can decide. */
 export function partFromLabel(text: string): AudioPart | null {
   if (/\b(drum|percussion|perc|kick|snare|hat|clap|rimshot|cymbal|shaker)\b/.test(text) && !/\bbass\b/.test(text)) return 'drums'
+  // A broken chord is still one note at a time. Check it before "piano" or "guitar".
+  if (/\barpeggio\b/.test(text)) return 'mono'
   if (/\b(bass|lead|vocal|vox|melody|mono|flute|sax|trumpet|violin|horn)\b/.test(text)) return 'mono'
-  if (/\b(chord|keys|piano|guitar|pad|strum|poly|rhodes|organ)\b/.test(text)) return 'poly'
+  if (/\b(chord|keys|pad|strum|poly|rhodes|organ)\b/.test(text)) return 'poly'
   return null
 }
 
 /**
- * Pitch-class spread of one bar. Three or more strong classes is a chord.
- * A single line stays under that.
+ * How many pitch classes sound at once.
+ * A bar of an arpeggio collects several classes that never ring together, so
+ * the decision uses the average frame, not the whole bar.
+ * Three simultaneous classes is a chord. A line, including octaves, stays under that.
  */
-export function partFromDensity(classesPerBar: number[]) {
-  if (!classesPerBar.length) return 'mono' as const
-  const mean = classesPerBar.reduce((sum, count) => sum + count, 0) / classesPerBar.length
-  return mean >= 2.4 ? 'poly' as const : 'mono' as const
+export function partFromDensity(classesPerFrame: number[]) {
+  if (!classesPerFrame.length) return 'mono' as const
+  const mean = classesPerFrame.reduce((sum, count) => sum + count, 0) / classesPerFrame.length
+  return mean >= 2.35 ? 'poly' as const : 'mono' as const
 }
