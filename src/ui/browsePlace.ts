@@ -1,3 +1,4 @@
+import type { DrumSub, FastSort } from '../library/fastBrowse'
 import { EMPTY_LIBRARY_QUERY, type LibraryQuery } from '../library/types'
 import type { BrowseRow } from '../library/browse'
 
@@ -20,6 +21,20 @@ export interface BrowsePlace {
   patternFocus: string
   clipText: string
   clipFocus: string
+  /** Last drum shelf in the one-shot browser. Empty is every shelf. */
+  drumCategory: string
+  drumSub: DrumSub | ''
+  /** Last loop shelf, genre chip, and sort. */
+  loopCategory: string
+  loopGenre: string
+  loopSort: FastSort
+  /** Section ids the person closed. */
+  collapsedSections: string[]
+  /** Beat Machine pad browser, kept apart from the Arrange library. */
+  padText: string
+  padCategory: string
+  padSub: DrumSub | ''
+  padAnchor: string
 }
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>
@@ -39,6 +54,16 @@ export function emptyBrowsePlace(): BrowsePlace {
     patternFocus: '',
     clipText: '',
     clipFocus: '',
+    drumCategory: '',
+    drumSub: '',
+    loopCategory: '',
+    loopGenre: '',
+    loopSort: 'name',
+    collapsedSections: [],
+    padText: '',
+    padCategory: '',
+    padSub: '',
+    padAnchor: '',
   }
 }
 
@@ -80,6 +105,16 @@ export function readBrowsePlace(storage: Store | null = defaultStorage()): Brows
       patternFocus: typeof parsed.patternFocus === 'string' ? parsed.patternFocus : '',
       clipText: typeof parsed.clipText === 'string' ? parsed.clipText : '',
       clipFocus: typeof parsed.clipFocus === 'string' ? parsed.clipFocus : '',
+      drumCategory: typeof parsed.drumCategory === 'string' ? parsed.drumCategory : '',
+      drumSub: parsed.drumSub === 'closed' || parsed.drumSub === 'open' || parsed.drumSub === 'crash' || parsed.drumSub === 'ride' ? parsed.drumSub : '',
+      loopCategory: typeof parsed.loopCategory === 'string' ? parsed.loopCategory : '',
+      loopGenre: typeof parsed.loopGenre === 'string' ? parsed.loopGenre : '',
+      loopSort: parsed.loopSort === 'bpm' || parsed.loopSort === 'key' || parsed.loopSort === 'name' ? parsed.loopSort : 'name',
+      collapsedSections: Array.isArray(parsed.collapsedSections) ? parsed.collapsedSections.filter((item) => typeof item === 'string') : [],
+      padText: typeof parsed.padText === 'string' ? parsed.padText : '',
+      padCategory: typeof parsed.padCategory === 'string' ? parsed.padCategory : '',
+      padSub: parsed.padSub === 'closed' || parsed.padSub === 'open' || parsed.padSub === 'crash' || parsed.padSub === 'ride' ? parsed.padSub : '',
+      padAnchor: typeof parsed.padAnchor === 'string' ? parsed.padAnchor : '',
     }
   } catch {
     return empty

@@ -31,6 +31,7 @@ import { PadScreen } from './PadScreen'
 import { notifyKeyboard, releaseOrientation } from './keyboardStage'
 import { useScreenOverlay } from './screenOverlay'
 import { residentDrums } from '../model/drums'
+import { PadBrowserHost } from './PadBrowserHost'
 import { slicesFor } from '../model/padChop'
 import { resolveHighpass } from '../audio/voices/program'
 import './pads.css'
@@ -112,6 +113,7 @@ export function PadsPanel({
   const [padPage, setPadPage] = useState<0 | 1>(0)
   const [chopOpen, setChopOpen] = useState(chopStartsOpen)
   const [face, setFace] = useState<'pads' | 'sound' | 'pattern'>('pads')
+  const [browserOpen, setBrowserOpen] = useState(false)
   useLayoutEffect(() => {
     const root = document.documentElement
     const sync = () => {
@@ -520,6 +522,19 @@ export function PadsPanel({
           </div>
           <button
             type="button"
+            className={`mpc-browser${browserOpen ? ' on' : ''}`}
+            aria-pressed={browserOpen}
+            aria-expanded={browserOpen}
+            title="Browse drum one-shots and load one onto the selected pad."
+            onClick={() => {
+              engine.unlock()
+              setBrowserOpen((open) => !open)
+            }}
+          >
+            Browser
+          </button>
+          <button
+            type="button"
             className="mpc-keyboard"
             data-beat-keyboard={trackId}
             onClick={() => {
@@ -903,6 +918,14 @@ export function PadsPanel({
         </div>
 
       </div>
+      {browserOpen && (
+        <PadBrowserHost
+          store={store}
+          engine={engine}
+          pad={{ trackId, bank, index: selected }}
+          onClose={() => setBrowserOpen(false)}
+        />
+      )}
     </div>
   )
 }
