@@ -662,7 +662,20 @@ export function TransportBar({
           ) : null}
         </div>
       </ButtonTray>
-      {songKey ? <p className="song-key-readout" data-song-key={songKey}>Song key: {songKey}</p> : null}
+      {songKey ? (
+        <div className="song-key-row">
+          <p className="song-key-readout" data-song-key={songKey}>Song key: {songKey}</p>
+          <button
+            type="button"
+            className="harmonize-song"
+            data-harmonize-song=""
+            title="Shift every harmonic clip into this key. Drums, percussion, and effects stay put."
+            onClick={() => store.requestHarmonize()}
+          >
+            Harmonize
+          </button>
+        </div>
+      ) : null}
       {extrasHost ? createPortal(extras, extrasHost) : extras}
       {contextualDelete}
       {trackDelete ? createPortal(
