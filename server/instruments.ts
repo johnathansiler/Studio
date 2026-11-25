@@ -70,9 +70,9 @@ function rowsFromGzip(gzip: Buffer): SlimCatalogRow[] {
   return slimCatalogRows(parsed)
 }
 
-async function readPrivateObject(env: LibraryEnv, key: string): Promise<Buffer | null> {
+async function readPrivateObject(env: LibraryEnv, key: string, fetchImpl: typeof fetch): Promise<Buffer | null> {
   const url = await presignR2Get(env, key)
-  const response = await fetch(url)
+  const response = await fetchImpl(url)
   if (response.status === 404) {
     await response.arrayBuffer().catch(() => undefined)
     return null
@@ -84,23 +84,28 @@ async function readPrivateObject(env: LibraryEnv, key: string): Promise<Buffer |
   return Buffer.from(await response.arrayBuffer())
 }
 
-async function entriesFromR2(env: LibraryEnv) {
-  let gzip: Buffer | null = await readPrivateObject(env, LIBRARY_CATALOG_KEY)
+async function entriesFromR2(env: LibraryEnv, fetchImpl: typeof fetch) {
+  let gzip: Buffer | null = await readPrivateObject(env, LIBRARY_CATALOG_KEY, fetchImpl)
   if (!gzip) throw new Error('Could not read the library catalog.')
   const hash = createHash('sha256')
   hash.update(gzip)
   const entries = rowsFromGzip(gzip)
   gzip = null
-  const extra = await readPrivateObject(env, LIBRARY_ADDITIONS_KEY)
+  // A missing or unreadable sidecar leaves the base catalog searchable.
+  let extra: Buffer | null = null
+  try {
+    extra = await readPrivateObject(env, LIBRARY_ADDITIONS_KEY, fetchImpl)
+  } catch {
+    extra = null
+  }
   if (extra) {
-    hash.update(extra)
-    let parsed: unknown
     try {
-      parsed = JSON.parse(extra.toString('utf8')) as unknown
+      const parsed = JSON.parse(extra.toString('utf8')) as unknown
+      overlayRowsByKey(entries, slimCatalogRows(parsed))
+      hash.update(extra)
     } catch {
-      throw new Error('Could not read the library catalog.')
+      // Bad JSON must not fail the search. The base rows stay as they were.
     }
-    overlayRowsByKey(entries, slimCatalogRows(parsed))
   }
   return { hash: hash.digest('hex'), entries }
 }
@@ -109,6 +114,8 @@ export function createInstrumentSource(deps: {
   env: () => LibraryEnv
   load?: () => Promise<{ hash: string; entries: Parameters<typeof groupLibraryInstruments>[0] }>
   now?: () => number
+  /** Tests pass this so a sidecar read never calls R2. */
+  fetch?: typeof fetch
 }): InstrumentSource {
   let cache: { hash: string; at: number; instruments: LibraryInstrument[] } | null = null
   let pending: Promise<LibraryInstrument[]> | null = null
@@ -118,7 +125,7 @@ export function createInstrumentSource(deps: {
     if (cache && now() - cache.at < CACHE_MS) return cache.instruments
     if (pending) return pending
     pending = (async () => {
-      const loaded = deps.load ? await deps.load() : await entriesFromR2(deps.env())
+      const loaded = deps.load ? await deps.load() : await entriesFromR2(deps.env(), deps.fetch ?? globalThis.fetch)
       if (cache && cache.hash === loaded.hash) {
         cache.at = now()
         return cache.instruments
