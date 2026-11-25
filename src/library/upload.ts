@@ -9,6 +9,8 @@ import { LibraryAuthError, clearLibraryAccessKey, signedUrlKeepsSecret } from '.
 export const LIBRARY_AUDIO_PREFIX = 'audio/'
 export const LIBRARY_UPLOAD_MAX_KEYS = 50
 export const LIBRARY_APPEND_MAX = 500
+/** Rows per catalog-append call. The sidecar write stays small. */
+export const LIBRARY_APPEND_BATCH = 50
 export const LIBRARY_UPLOAD_MAX_BYTES = 60 * 1024 * 1024
 /** The only Content-Type a signed upload accepts. The signature binds this value. */
 export const LIBRARY_PUT_CONTENT_TYPE = 'audio/wav'
@@ -492,17 +494,22 @@ export async function uploadLibraryWavs(input: {
     }
   }
   if (!appended.length) return counts
-  const response = await fetchImpl('/api/library/catalog-append', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-library-key': input.accessKey },
-    body: JSON.stringify({ entries: appended }),
-  })
-  const body = await readJson(response)
-  if (response.status === 401) {
-    clearLibraryAccessKey()
-    throw new LibraryAuthError(publicError(typeof body?.error === 'string' ? body.error : '', input.accessKey, 'That passphrase does not unlock the library.'))
+  let added = 0
+  for (let offset = 0; offset < appended.length; offset += LIBRARY_APPEND_BATCH) {
+    const slice = appended.slice(offset, offset + LIBRARY_APPEND_BATCH)
+    const response = await fetchImpl('/api/library/catalog-append', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-library-key': input.accessKey },
+      body: JSON.stringify({ entries: slice }),
+    })
+    const body = await readJson(response)
+    if (response.status === 401) {
+      clearLibraryAccessKey()
+      throw new LibraryAuthError(publicError(typeof body?.error === 'string' ? body.error : '', input.accessKey, 'That passphrase does not unlock the library.'))
+    }
+    if (!response.ok) throw new Error(publicError(typeof body?.error === 'string' ? body.error : '', input.accessKey, 'Could not update the library catalog.'))
+    added += typeof body?.added === 'number' ? body.added : slice.length
   }
-  if (!response.ok) throw new Error(publicError(typeof body?.error === 'string' ? body.error : '', input.accessKey, 'Could not update the library catalog.'))
-  counts.added = typeof body?.added === 'number' ? body.added : appended.length
+  counts.added = added
   return counts
 }

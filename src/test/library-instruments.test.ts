@@ -6,6 +6,7 @@ import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, planSignKe
 import { cleanLibraryFiles } from '../library/project'
 import { programFromLibraryInstrument } from '../library/instrumentProgram'
 import { createLibraryApi, type LibraryEnv } from '../../server/library.ts'
+import { mergeCatalogRows } from '../../server/instruments.ts'
 import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { memoryAudioCache, setLibraryCaches } from '../library/audio'
 import { rememberInstrumentLayers } from '../library/instrumentsApi'
@@ -311,6 +312,25 @@ describe('lazy note signing', () => {
     const again = await loadLibrarySampleBytes(librarySampleUrl('lib_piano', layers[10]!.key), true)
     expect(again.byteLength).toBeGreaterThan(0)
     expect(bodies).toHaveLength(1)
+  })
+})
+
+describe('catalog additions on the instrument search', () => {
+  it('merges sidecar rows onto the base and keeps the added note searchable', () => {
+    const folder = 'Orchestral/Horns/french horn'
+    const base = [48, 60].flatMap((midi) => ['piano', 'forte'].map((dynamic) => row(`${folder}/french-horn_${midiName(midi)}_1_${dynamic}_normal.mp3`, { note: midiName(midi) })))
+    const added = row(`${folder}/french-horn_${midiName(72)}_1_piano_normal.mp3`, { note: midiName(72), size: 44 })
+    const replaced = row(`${folder}/french-horn_${midiName(48)}_1_piano_normal.mp3`, { note: midiName(48), size: 99 })
+    const merged = mergeCatalogRows({ entries: base }, { entries: [replaced, added] })
+    expect(merged.filter((entry) => entry.key === replaced.key)).toHaveLength(1)
+    expect(merged.find((entry) => entry.key === replaced.key)?.size).toBe(99)
+    expect(merged.some((entry) => entry.key === added.key)).toBe(true)
+    const instruments = groupLibraryInstruments(merged)
+    const page = searchInstruments(instruments, { text: 'french', category: '', pack: '', offset: 0, limit: 10 })
+    expect(page.total).toBe(1)
+    const horn = instruments.find((item) => item.id === page.instruments[0]?.id)
+    expect(horn?.layers.some((layer) => layer.key === added.key)).toBe(true)
+    expect(horn?.layers.find((layer) => layer.key === replaced.key)?.size).toBe(99)
   })
 })
 
