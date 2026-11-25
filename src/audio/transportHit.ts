@@ -53,11 +53,19 @@ export function startTransportHit(opts: {
   const { ctx, destination, hit, when, noise, resident, hold } = opts
   const dur = opts.dur
   if (hit.kind === 'kick') {
-    const osc = ctx.createOscillator()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(160, when)
-    osc.frequency.exponentialRampToValueAtTime(48, when + Math.max(0.02, Math.min(0.18, dur)))
-    envelope(ctx, osc, when, Math.min(0.28, dur + 0.05), hit, undefined, destination, hold)
+    // A realtime frequency ramp is k-rate and an offline ramp is per-sample, so the
+    // sweep's phase drifts. Both paths play this buffer instead.
+    const peak = Math.max(0.001, 0.22 * hit.velocity * Math.max(0, hit.volume ?? 1))
+    const data = renderKick(ctx.sampleRate, dur, peak)
+    const buffer = ctx.createBuffer(1, data.length, ctx.sampleRate)
+    buffer.getChannelData(0).set(data)
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    connectNotePan(ctx, src, destination, hit.pan || 0)
+    src.start(when)
+    const end = when + data.length / ctx.sampleRate
+    src.stop(end)
+    hold?.(end + 0.03, [src])
     return
   }
   if (hit.kind === 'perc') {
@@ -114,6 +122,31 @@ export function startTransportHit(opts: {
   source.connect(filter)
   envelope(ctx, filter, when, Math.min(0.16, dur), hit, source, destination, hold)
   envelope(ctx, tone, when, 0.08, { ...hit, velocity: hit.velocity * 0.4 }, undefined, destination, hold)
+}
+
+/** Sample-accurate 160 Hz to 48 Hz kick, including the transport envelope. */
+function renderKick(sampleRate: number, dur: number, peak: number) {
+  const ramp = Math.max(0.02, Math.min(0.18, dur))
+  const envDur = Math.min(0.28, dur + 0.05)
+  const release = Math.max(0.03, envDur)
+  const stop = envDur + 0.02
+  const count = Math.max(1, Math.ceil(stop * sampleRate))
+  const out = new Float32Array(count)
+  const f0 = 160
+  const f1 = 48
+  let phase = 0
+  for (let i = 0; i < count; i++) {
+    const t = i / sampleRate
+    const swept = t < ramp ? f0 * (f1 / f0) ** (t / ramp) : f1
+    const attack = 0.005
+    let gain = peak
+    if (t < attack) gain = 0.0001 * (peak / 0.0001) ** (t / attack)
+    else gain = peak * (0.0001 / peak) ** ((t - attack) / (release - attack))
+    out[i] = Math.sin(phase) * gain
+    phase += (2 * Math.PI * swept) / sampleRate
+    if (phase > Math.PI * 2) phase -= Math.PI * 2
+  }
+  return out
 }
 
 function playResident(

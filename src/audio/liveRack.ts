@@ -89,6 +89,18 @@ export class LiveRack {
     }
   }
 
+  private settled: Promise<void> = Promise.resolve()
+
+  /** Resolves once an in-flight insert splice has built its worklet. */
+  whenReady() {
+    return this.settled
+  }
+
+  /** Post-insert sum for one owner. Null when that owner has no insert splice. */
+  heardNode(id: string): AudioNode | null {
+    return this.taps.get(id)?.output ?? null
+  }
+
   spectrum(pluginId: string) {
     return this.spectra.get(pluginId) ?? null
   }
@@ -245,7 +257,7 @@ export class LiveRack {
     if (next !== this.topology) {
       this.topology = next
       const generation = ++this.generation
-      void this.finish(ctx, project, strips, master, generation).catch(() => undefined)
+      this.settled = this.finish(ctx, project, strips, master, generation).then(() => undefined, () => undefined)
     } else this.pushParams()
     this.connectIfNeeded()
   }

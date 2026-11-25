@@ -16,11 +16,12 @@ import { renderSamplerSpan } from './plugins/sampler'
 import { writeSharedNoise } from './sharedNoise'
 import { startTransportHit } from './transportHit'
 import { patternHitTrack } from '../model/channelRack'
+import { findStepChannel } from '../model/stepPlugin'
 import { DRUM_PADS, residentDrums } from '../model/drums'
 import { rackLanesFor } from '../model/automation'
 import { prepareClipNotes } from '../model/midiTools'
 import { beatSpanSamples, projectSampleBeat } from '../model/tempoMap'
-import { patternPlayRange, renderPattern } from '../model/steps'
+import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
 import { performancesOn } from '../instruments/scaler/model'
 import type { AudioAsset, MidiNote, PluginInstance, Project, Track } from '../model/types'
 
@@ -90,7 +91,7 @@ async function renderRack(
   if (viaWorklet) return viaWorklet
   const voice = new CueRackVoice(rate)
   voice.onMessage({ type: 'clock', originTime: 0, originBeat, tempo, lanes })
-  voice.onMessage({ type: 'state', rack: source.rack!, tempo, quality: 'full', buffers: [] })
+  voice.onMessage({ type: 'state', rack: source.rack!, tempo, quality: playbackQuality(), buffers: [] })
   for (const note of notes) {
     voice.onMessage({ type: 'note', pitch: note.pitch, vel: note.velocity, time: note.time, slide: note.slide })
     voice.onMessage({ type: 'note', pitch: note.pitch, vel: 0, time: note.off })
@@ -139,7 +140,7 @@ async function renderRackWorklet(
   const node = new AudioWorkletNode(ctx, 'cueharbor-rack', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
   node.connect(ctx.destination)
   try {
-    await once(node, 'ready', () => node.port.postMessage({ type: 'state', rack, tempo, quality: 'full', buffers: [] }))
+    await once(node, 'ready', () => node.port.postMessage({ type: 'state', rack, tempo, quality: playbackQuality(), buffers: [] }))
     node.port.postMessage({ type: 'clock', originTime: 0, originBeat, tempo, lanes })
     for (const note of notes) {
       node.port.postMessage({ type: 'note', pitch: note.pitch, vel: note.velocity, time: note.time, slide: note.slide })
@@ -225,10 +226,11 @@ async function renderPatternHits(
       const span = beatSpanSamples(project, clip.startBeat + (hit.startBeat - range.from), hit.durationBeats)
       const when = (span.start - origin) / rate
       if (when >= length / rate) continue
+      const routed = routeHit(ctx, dest, project, hit)
       startTransportHit({
         ctx,
-        destination: dest,
-        hit,
+        destination: routed.destination,
+        hit: routed.hit,
         when: Math.max(0, when),
         dur: span.duration / rate,
         noise,
@@ -425,6 +427,29 @@ function midiNotes(project: Project, source: Track, target: HeardTarget) {
     }
   }
   return out
+}
+
+/** Same split scheduleHit uses when a drum row has an output: unity hit into the row gain and stereo pan. */
+function routeHit(ctx: BaseAudioContext, dest: AudioNode, project: Project, hit: RenderedHit) {
+  if (!hit.output) return { destination: dest, hit }
+  const channel = findStepChannel(project, hit.channelId)
+  const channelPan = channel?.pan || 0
+  const gain = ctx.createGain()
+  const pan = ctx.createStereoPanner()
+  gain.gain.value = Math.max(0, channel?.volume ?? hit.volume ?? 1)
+  pan.pan.value = channelPan
+  gain.connect(pan)
+  pan.connect(dest)
+  return {
+    destination: gain,
+    hit: { ...hit, volume: 1, pan: Math.max(-1, Math.min(1, (hit.pan || 0) - channelPan)) },
+  }
+}
+
+function playbackQuality(): 'full' | 'eco' {
+  if (typeof matchMedia !== 'function') return 'full'
+  const phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+  return phone ? 'eco' : 'full'
 }
 
 function copyChannel(buffer: AudioBuffer, index: number) {

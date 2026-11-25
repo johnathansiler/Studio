@@ -395,6 +395,55 @@ export class AudioEngine {
     return this.ctx?.sampleRate ?? this.project?.sampleRate ?? 48000
   }
 
+  /**
+   * Open the interactive device at an exact rate.
+   * Desktop normally keeps the hardware rate. The live-print null uses this
+   * so 44.1 kHz and 48 kHz are both real AudioContexts, not offline stand-ins.
+   */
+  async openDevice(rate: number) {
+    this.dropGraph()
+    const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: rate })
+    this.ctx = ctx
+    this.buildMaster()
+    this.bindAudioSession(ctx)
+    if (ctx.state !== 'running') {
+      try { await ctx.resume() } catch { /* a headless run may already be running */ }
+    }
+    await preloadWasmInserts()
+    await this.ensureWorklets()
+    return ctx
+  }
+
+  insertsReady() {
+    return this.rack.whenReady()
+  }
+
+  closeDevice() {
+    try { this.stop() } catch { /* already stopped */ }
+    this.dropGraph()
+  }
+
+  /**
+   * Copy what leaves the instrument and its inserts, before the strip EQ and fader.
+   * Falls back to the strip input when the track has no insert splice.
+   */
+  probeInstrument(trackId: string, into: AudioNode) {
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    const wet = track?.plugins.some((plugin) => plugin.enabled && plugin.wet > 0.0001 && plugin.pluginId !== 'bass808' && plugin.pluginId !== 'steps')
+    const post = wet ? this.rack.heardNode(trackId) : null
+    const strip = this.strips.get(trackId)
+    const source = post ?? strip?.input
+    if (!source) return false
+    const node = source as AudioNode & { channelCount?: number; channelCountMode?: string; channelInterpretation?: string }
+    try {
+      node.channelCount = 2
+      node.channelCountMode = 'explicit'
+      node.channelInterpretation = 'discrete'
+    } catch { /* a node with no inputs keeps its count */ }
+    source.connect(into)
+    return true
+  }
+
   /** baseLatency is the graph block; outputLatency is the device after that. */
   get outputLatencyMs() {
     if (!this.ctx) return 0
@@ -3833,6 +3882,8 @@ export class AudioEngine {
     const ctx = this.ctx
     const handoff = this.joining
     if (!project || !ctx) return
+    // Freeze "now" for the whole pass. Building the nodes must not push later hits onto the next quantum.
+    const asOf = ctx.currentTime
     this.scheduleStepSequencers(ctx, project, ctxTime, timelineStart, timelineEnd)
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)
@@ -3856,7 +3907,7 @@ export class AudioEngine {
             const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
             if (span.start < timelineStart || span.start >= timelineEnd) continue
             const rawWhen = ctxTime + (span.start - timelineStart) / this.sampleRate
-            const when = ctx === this.ctx ? placeNoteTime(rawWhen, ctx.currentTime) : rawWhen
+            const when = ctx === this.ctx ? placeNoteTime(rawWhen, asOf) : rawWhen
             if (when == null) continue
             this.queueTag = {
               owner: `note:${group.owner.id}:${clip.id}:${note.id}`,
@@ -3868,7 +3919,7 @@ export class AudioEngine {
           }
         }
       }
-      this.schedulePatternClips(ctx, strip, project, track.id, ctxTime, timelineStart, timelineEnd)
+      this.schedulePatternClips(ctx, strip, project, track.id, ctxTime, timelineStart, timelineEnd, asOf)
     }
     if (handoff) this.joining = false
   }
@@ -3881,12 +3932,12 @@ export class AudioEngine {
     ctxTime: number,
     timelineStart: number,
     timelineEnd: number,
+    asOf = ctx.currentTime,
   ) {
     const clips = transportPatternClips(project, ctx === this.ctx)
     const masterPass = trackId === project.tracks[0]?.id
     for (const clip of clips) {
       if (clip.scene != null || clip.suppressed || clip.muted) continue
-      if (clip.id === 'live-pattern') continue
       if (stepPatternOwner(project, clip.patternId)) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue
@@ -3908,18 +3959,19 @@ export class AudioEngine {
           startAt: when,
           content: row ? row.cells.map((cell) => (cell.on ? `${cell.velocity}:${cell.pitch}` : '0')).join(',') : `${hit.velocity}:${hit.pitch}`,
         }
-        this.scheduleHit(ctx, bus, hit, when, span.duration / this.sampleRate)
+        this.scheduleHit(ctx, bus, hit, when, span.duration / this.sampleRate, asOf)
         this.queueTag = null
       }
     }
   }
 
-  private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number, durationSec?: number) {
+  private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number, durationSec?: number, asOf?: number) {
     const live = ctx === this.ctx
     const level = Math.max(0, hit.volume ?? 1)
     if (!live && level <= 0.0001) return
-    if (live && when < ctx.currentTime - 0.05) return
-    if (live && when < ctx.currentTime) when = ctx.currentTime + 0.001
+    const now = asOf ?? ctx.currentTime
+    if (live && when < now - 0.05) return
+    if (live && when < now) when = now + 0.001
     const dur = durationSec ?? Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
     const routed = live && hit.output != null
     const mix = routed ? this.drumMix(hit.channelId) : null
@@ -6046,9 +6098,11 @@ export class AudioEngine {
     }
     if (track?.rack && ctx === this.ctx) {
       const voiceId = track.id
-      const at = Math.max(when, ctx.currentTime)
+      const rate = ctx.sampleRate
+      const at = Math.round(Math.max(when, ctx.currentTime) * rate) / rate
+      const off = at + Math.round(dur * rate) / rate
       this.rackHost.note(voiceId, note.pitch, note.velocity, at, !!note.slide)
-      this.rackHost.note(voiceId, note.pitch, 0, at + dur)
+      this.rackHost.note(voiceId, note.pitch, 0, off)
       this.previewRelease(bucket, () => this.rackHost.release(voiceId, note.pitch, this.ctx?.currentTime ?? 0))
       return
     }

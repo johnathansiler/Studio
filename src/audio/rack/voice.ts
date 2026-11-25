@@ -76,13 +76,14 @@ export class CueRackVoice {
     let rendered = 0
     while (rendered < frames) {
       const at = now + rendered / this.sampleRate
-      while (this.pending.length && this.pending[0].time <= at + 0.5 / this.sampleRate) {
+      const atSample = Math.round(at * this.sampleRate)
+      while (this.pending.length && Math.round(this.pending[0].time * this.sampleRate) <= atSample) {
         const note = this.pending.shift()!
         this.runtime.note(note.pitch, note.vel, rack.polyphony, !!note.slide)
       }
       let until = frames
       if (this.pending.length) {
-        const next = Math.floor((this.pending[0].time - now) * this.sampleRate)
+        const next = Math.round(this.pending[0].time * this.sampleRate) - Math.round(now * this.sampleRate)
         if (next > rendered) until = Math.min(frames, next)
       }
       const span = Math.max(1, Math.min(frames - rendered, until - rendered))

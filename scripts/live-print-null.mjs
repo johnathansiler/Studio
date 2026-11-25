@@ -5,7 +5,7 @@ const browser = await chromium.launch({
   headless: true,
   args: ['--autoplay-policy=no-user-gesture-required'],
 })
-const page = await browser.newPage()
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 page.setDefaultTimeout(120000)
 page.on('pageerror', (error) => console.error('PAGE', error.message))
 page.on('console', (msg) => {
