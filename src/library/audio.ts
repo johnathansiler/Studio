@@ -1,4 +1,4 @@
-import { LIBRARY_ADDITIONS_KEY, LIBRARY_CATALOG_KEY, gunzipText, idbCatalogCache, indexParsedCatalog, parseLibraryCatalog, type CachedCatalog, type CatalogCache } from './catalog'
+import { LIBRARY_ADDITIONS_KEY, LIBRARY_CATALOG_KEY, catalogAdditionsDocument, gunzipText, idbCatalogCache, indexParsedCatalog, parseLibraryCatalog, type CachedCatalog, type CatalogCache } from './catalog'
 import { LibraryAuthError, readLibraryAccessKey, signLibraryKeys } from './access'
 import type { LibraryDocument } from './types'
 import type { LibraryIndex } from './search'
@@ -224,16 +224,56 @@ async function catalogHash(gzip: ArrayBuffer, additions: ArrayBuffer | null) {
   return sha256Hex(mixed.buffer)
 }
 
+const ADDITIONS_SKIPPED = 'My Library additions were skipped. The base catalog is shown.'
+
+/**
+ * Sidecar bytes, or null when there is nothing to merge.
+ * A missing object (404) is normal. Any other fetch or parse problem is logged
+ * and ignored so unlock still shows the base catalog.
+ */
 async function fetchAdditions(url: string, fetchImpl: typeof fetch) {
-  const response = await fetchImpl(url)
-  if (response.status === 404) return null
-  if (!response.ok) throw new Error('Could not download the library catalog.')
-  return response.arrayBuffer()
+  try {
+    const response = await fetchImpl(url)
+    if (response.status === 404) return null
+    if (!response.ok) {
+      console.warn(ADDITIONS_SKIPPED)
+      return null
+    }
+    const bytes = await response.arrayBuffer()
+    if (!bytes.byteLength) {
+      console.warn(ADDITIONS_SKIPPED)
+      return null
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    } catch {
+      console.warn(ADDITIONS_SKIPPED)
+      return null
+    }
+    if (!catalogAdditionsDocument(parsed)) {
+      console.warn(ADDITIONS_SKIPPED)
+      return null
+    }
+    return bytes
+  } catch {
+    console.warn(ADDITIONS_SKIPPED)
+    return null
+  }
 }
 
 async function parseGzip(bytes: ArrayBuffer, additions?: ArrayBuffer | null) {
   const text = await gunzipText(bytes)
-  const extra = additions && additions.byteLength ? JSON.parse(new TextDecoder().decode(additions)) as unknown : undefined
+  let extra: unknown
+  if (additions && additions.byteLength) {
+    try {
+      extra = JSON.parse(new TextDecoder().decode(additions)) as unknown
+      if (!catalogAdditionsDocument(extra)) extra = undefined
+    } catch {
+      console.warn(ADDITIONS_SKIPPED)
+      extra = undefined
+    }
+  }
   const parsed = parseLibraryCatalog(JSON.parse(text) as unknown, extra)
   if (!parsed) throw new Error('The library catalog could not be read.')
   return parsed

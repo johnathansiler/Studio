@@ -31,13 +31,20 @@ export async function gunzipText(bytes: ArrayBuffer) {
   return new Response(stream).text()
 }
 
-/** Rows from a sidecar document `{ entries: [...] }` or from a bare array. */
-export function catalogAdditionRows(additions: unknown): unknown[] {
-  if (additions == null) return []
+/**
+ * Rows from a sidecar document `{ entries: [...] }` or from a bare array.
+ * Null when the value is not that shape, including a missing `entries` array.
+ */
+export function catalogAdditionsDocument(additions: unknown): unknown[] | null {
   if (Array.isArray(additions)) return additions
-  if (typeof additions !== 'object') return []
+  if (!additions || typeof additions !== 'object') return null
   const entries = (additions as { entries?: unknown }).entries
-  return Array.isArray(entries) ? entries : []
+  return Array.isArray(entries) ? entries : null
+}
+
+/** Rows from a sidecar document. A bad shape contributes nothing. */
+export function catalogAdditionRows(additions: unknown): unknown[] {
+  return catalogAdditionsDocument(additions) ?? []
 }
 
 export function parseLibraryCatalog(input: unknown, additions?: unknown): { document: LibraryDocument; words: string[][] } | null {

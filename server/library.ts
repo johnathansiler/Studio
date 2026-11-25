@@ -4,7 +4,9 @@
  * or uploads a WAV with a signed PUT under the audio prefix.
  * The big catalog/catalog.json.gz object stays immutable. Appended rows live in the
  * small catalog/catalog-additions.json sidecar. Readers merge the two; additions win.
- * catalog-append reads and writes only that sidecar.
+ * catalog-append reads and writes only that sidecar. A key that exists only in the
+ * base catalog is not looked up, so the first append of that key reports added: 1
+ * and stores a sidecar row. A later append of a key already in the sidecar adds nothing.
  * The library passphrase is never written to a log.
  * Credentials stay in the process environment.
  */
@@ -438,6 +440,10 @@ async function readAdditions(objects: LibraryObjects): Promise<{ ok: true; docum
   }
 }
 
+/**
+ * Append into the sidecar. `added` counts rows that were not already in the sidecar.
+ * A key that exists only in the base catalog still counts as added on the first append.
+ */
 async function appendCatalog(
   listed: unknown[],
   objects: LibraryObjects,

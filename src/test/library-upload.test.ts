@@ -909,6 +909,63 @@ describe('merged catalog browse', () => {
       setLibraryCaches({ catalog: null })
     }
   })
+
+  it('opens the base catalog when the sidecar is missing, not JSON, or the wrong shape', async () => {
+    const base = {
+      version: 2,
+      generated_at: '2026-11-11T00:00:00Z',
+      count: 1,
+      pending: '',
+      entries: [wire('audio/bass/Hit.wav', { size: 32, type: 'one-shot', search: 'bass hit' })],
+    }
+    const gzip = gzipSync(Buffer.from(JSON.stringify(base)))
+    const warned: string[] = []
+    const original = console.warn
+    console.warn = (...args: unknown[]) => { warned.push(args.map((item) => String(item)).join(' ')) }
+    const cases: { name: string; additions: Response | null; warn: boolean }[] = [
+      { name: 'missing', additions: new Response('', { status: 404 }), warn: false },
+      { name: 'status', additions: new Response('no', { status: 500 }), warn: true },
+      { name: 'riff', additions: new Response(new Uint8Array([82, 73, 70, 70])), warn: true },
+      { name: 'shape', additions: new Response(JSON.stringify({ nope: true })), warn: true },
+      { name: 'network', additions: null, warn: true },
+    ]
+    try {
+      for (const item of cases) {
+        warned.length = 0
+        writeLibraryAccessKey('owner-pass')
+        const cache = memoryCatalogCache()
+        const fetchImpl = (async (input: RequestInfo | URL) => {
+          const url = String(input)
+          if (url.endsWith('/api/library/sign')) {
+            return new Response(JSON.stringify({
+              expiresIn: 900,
+              urls: [
+                { key: CLIENT_CATALOG_KEY, url: 'https://library.test/catalog.json.gz' },
+                { key: CLIENT_ADDITIONS_KEY, url: 'https://library.test/catalog-additions.json' },
+              ],
+            }), { status: 200 })
+          }
+          if (url.endsWith('catalog-additions.json')) {
+            if (!item.additions) throw new Error('offline')
+            return item.additions
+          }
+          return new Response(gzip)
+        }) as typeof fetch
+        const loaded = await loadLibraryCatalog(fetchImpl, cache)
+        expect(loaded.document.entries.map((entry) => entry.key), item.name).toEqual(['audio/bass/Hit.wav'])
+        expect(loaded.document.count, item.name).toBe(1)
+        expect(warned.join('\n'), item.name).not.toContain('owner-pass')
+        expect(warned.length > 0, item.name).toBe(item.warn)
+        if (item.warn) expect(warned.join('\n'), item.name).toContain('My Library additions were skipped')
+        clearLibraryAccessKey()
+        setLibraryCaches({ catalog: null })
+      }
+    } finally {
+      console.warn = original
+      clearLibraryAccessKey()
+      setLibraryCaches({ catalog: null })
+    }
+  })
 })
 
 describe('library upload script', () => {
