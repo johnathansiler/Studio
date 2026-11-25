@@ -10,6 +10,20 @@ export const LIBRARY_AUDIO_PREFIX = 'audio/'
 export const LIBRARY_UPLOAD_MAX_KEYS = 50
 export const LIBRARY_APPEND_MAX = 500
 export const LIBRARY_UPLOAD_MAX_BYTES = 60 * 1024 * 1024
+/** The only Content-Type a signed upload accepts. The signature binds this value. */
+export const LIBRARY_PUT_CONTENT_TYPE = 'audio/wav'
+
+const AUDIO_KEY_HIDDEN = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
+const AUDIO_KEY_ENCODED = /%(?:2e|2f|5c|00)/i
+
+function audioSegmentOk(part: string) {
+  if (!part || part === '.' || part === '..') return false
+  const folded = part.normalize('NFKC')
+  if (!folded || folded === '.' || folded === '..') return false
+  if (folded.includes('/') || folded.includes('\\') || AUDIO_KEY_HIDDEN.test(folded)) return false
+  if (AUDIO_KEY_ENCODED.test(part) || AUDIO_KEY_ENCODED.test(folded)) return false
+  return true
+}
 
 export interface CatalogWireEntry {
   key: string
@@ -49,16 +63,17 @@ export interface UploadCounts {
   failed: number
 }
 
-/** A WAV object key under the audio prefix. Rejects traversal, catalog paths, and other formats. */
+/** A WAV object key under the audio prefix. Rejects traversal, catalog paths, encoded dots, and lookalike separators. */
 export function libraryAudioKey(input: unknown): string | null {
   if (typeof input !== 'string') return null
   const key = input.trim()
   if (!key.startsWith(LIBRARY_AUDIO_PREFIX) || key.length > 512) return null
-  if (key.includes('\\') || key.includes('://') || key.includes('\0')) return null
-  if (/[\u0000-\u001f\u007f]/.test(key)) return null
-  const parts = key.split('/')
-  if (parts.some((part) => part === '' || part === '.' || part === '..')) return null
+  if (key.includes('\\') || key.includes('://') || AUDIO_KEY_HIDDEN.test(key) || AUDIO_KEY_ENCODED.test(key)) return null
+  if (!key.split('/').every(audioSegmentOk)) return null
   if (!key.toLowerCase().endsWith('.wav')) return null
+  const folded = key.normalize('NFKC')
+  if (!folded.startsWith(LIBRARY_AUDIO_PREFIX) || !folded.toLowerCase().endsWith('.wav')) return null
+  if (!folded.split('/').every(audioSegmentOk)) return null
   return key
 }
 
@@ -336,6 +351,11 @@ async function readJson(response: Response) {
   return response.json().catch(() => null) as Promise<Record<string, unknown> | null>
 }
 
+function publicError(message: string, accessKey: string, fallback: string) {
+  if (!message || (accessKey && message.includes(accessKey))) return fallback
+  return message
+}
+
 async function signUploadBatch(items: { key: string; size: number }[], accessKey: string, fetchImpl: typeof fetch): Promise<SignedUpload[]> {
   const response = await fetchImpl('/api/library/upload-sign', {
     method: 'POST',
@@ -345,9 +365,9 @@ async function signUploadBatch(items: { key: string; size: number }[], accessKey
   const body = await readJson(response)
   if (response.status === 401) {
     clearLibraryAccessKey()
-    throw new LibraryAuthError(typeof body?.error === 'string' ? body.error : 'That passphrase does not unlock the library.')
+    throw new LibraryAuthError(publicError(typeof body?.error === 'string' ? body.error : '', accessKey, 'That passphrase does not unlock the library.'))
   }
-  if (!response.ok || !Array.isArray(body?.urls)) throw new Error(typeof body?.error === 'string' ? body.error : 'Could not prepare the upload.')
+  if (!response.ok || !Array.isArray(body?.urls)) throw new Error(publicError(typeof body?.error === 'string' ? body.error : '', accessKey, 'Could not prepare the upload.'))
   return body.urls.filter((item): item is SignedUpload => {
     if (!item || typeof item !== 'object') return false
     const row = item as SignedUpload
@@ -371,7 +391,11 @@ async function putWav(url: string, bytes: ArrayBuffer, fetchImpl: typeof fetch) 
   const response = await fetchImpl(url, {
     method: 'PUT',
     redirect: 'error',
-    headers: { 'content-type': 'audio/wav', 'if-none-match': '*' },
+    headers: {
+      'content-type': LIBRARY_PUT_CONTENT_TYPE,
+      'content-length': String(bytes.byteLength),
+      'if-none-match': '*',
+    },
     body: bytes,
   })
   return response.ok
@@ -476,9 +500,9 @@ export async function uploadLibraryWavs(input: {
   const body = await readJson(response)
   if (response.status === 401) {
     clearLibraryAccessKey()
-    throw new LibraryAuthError(typeof body?.error === 'string' ? body.error : 'That passphrase does not unlock the library.')
+    throw new LibraryAuthError(publicError(typeof body?.error === 'string' ? body.error : '', input.accessKey, 'That passphrase does not unlock the library.'))
   }
-  if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : 'Could not update the library catalog.')
+  if (!response.ok) throw new Error(publicError(typeof body?.error === 'string' ? body.error : '', input.accessKey, 'Could not update the library catalog.'))
   counts.added = typeof body?.added === 'number' ? body.added : appended.length
   return counts
 }
