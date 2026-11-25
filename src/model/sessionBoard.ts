@@ -32,6 +32,7 @@ export const MIDI_DEVICES: BrowserDevice[] = [
 export const INSTRUMENT_DEVICES: BrowserDevice[] = [
   { id: 'steps', name: 'Step Sequencer', hint: 'Program beats on a step grid. The sound stays on this track.', kind: 'instrument' },
   { id: 'pads', name: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.', kind: 'instrument' },
+  { id: 'bass808', name: '808 Bass', hint: 'Trap and drill bass with slides.', kind: 'instrument' },
   { id: 'synth', name: 'Synth', hint: 'A played synthesizer.', kind: 'instrument' },
   { id: 'sampler', name: 'Sampler', hint: 'Play a loaded sample across the keys.', kind: 'instrument' },
   { id: 'library', name: 'Library', hint: 'A multi-sampled instrument from the library.', kind: 'instrument' },
@@ -48,6 +49,7 @@ export const PLUGIN_DEVICES: BrowserDevice[] = [
   { id: 'steps', name: 'Step Sequencer', hint: 'Program beats on a step grid. The sound stays on this track.', kind: 'instrument' },
   { id: 'pads', name: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.', kind: 'instrument' },
   { id: 'scaler', name: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions.', kind: 'instrument' },
+  { id: 'bass808', name: '808 Bass', hint: 'Trap and drill bass with slides.', kind: 'instrument' },
   { id: 'synth', name: 'Synth', hint: 'A played synthesizer.', kind: 'instrument' },
   { id: 'sampler', name: 'Sampler', hint: 'Play a loaded sample across the keys.', kind: 'instrument' },
 ]
@@ -83,7 +85,7 @@ export function sceneTitle(names: string[] | undefined, scene: number): string {
 }
 
 export function instrumentFor(id: string): TrackInstrument | null {
-  if (id === 'synth' || id === 'sampler' || id === 'library' || id === '808' || id === 'drum-machine' || id === 'scaler' || id === 'pads' || id === 'none') return id
+  if (id === 'synth' || id === 'sampler' || id === 'library' || id === '808' || id === 'bass808' || id === 'drum-machine' || id === 'scaler' || id === 'pads' || id === 'none') return id
   return null
 }
 

@@ -5,6 +5,7 @@ import { RackRuntime, renderNotes, renderNotesPaced } from '../audio/rack/dsp'
 import { glideValue } from '../audio/paramCurve'
 import { prepareClipNotes } from '../model/midiTools'
 import type { RackState } from '../model/rack'
+import { BASS808_RELEASE_SEC } from '../audio/bass808/voice'
 import { releaseTailSamples, renderClipToAudio, SILENCE_AMP } from '../audio/renderToAudio'
 import { createPlugin } from '../audio/plugins/catalog'
 import { rackLanesFor } from '../model/automation'
@@ -427,6 +428,69 @@ describe('render to audio', () => {
       points: [{ beat: 0, value: 180 }, { beat: 8, value: 9000 }],
     }], 0)
     expect(residual(rendered.channels[0], atStart[0]).peakDb).toBeGreaterThan(-40)
+  })
+
+  it('prints an 808 slide with the same voice and keeps the release', async () => {
+    const store = new ProjectStore(createEmptyProject(48000, '808'))
+    const id = store.addQuickTrack('bass808')!
+    const track = store.track(id)!
+    track.midiClips = [{
+      id: 'slide',
+      name: 'Slide',
+      startBeat: 0,
+      durationBeats: 2,
+      notes: [
+        { id: 'a', pitch: 36, startBeat: 0, durationBeats: 1, velocity: 0.9 },
+        { id: 'b', pitch: 48, startBeat: 1, durationBeats: 1, velocity: 0.85, slide: true },
+      ],
+    }]
+    const tail = releaseTailSamples(track, 48000, false)
+    expect(tail).toBeGreaterThanOrEqual(Math.round(BASS808_RELEASE_SEC * 10.36 * 48000) - 1)
+    const rendered = await renderClipToAudio({
+      project: store.project,
+      assets: store.buffers,
+      target: { kind: 'midi', trackId: id, clipId: 'slide' },
+      includeEffects: false,
+      normalize: false,
+    })
+    const clip = track.midiClips[0]
+    const span = beatSpanSamples(store.project, clip.startBeat, clip.durationBeats)
+    const length = span.duration + tail
+    const events: { sample: number; pitch: number; vel: number; slide?: boolean }[] = []
+    for (const note of prepareClipNotes(store.project, track, clip)) {
+      const noteSpan = beatSpanSamples(store.project, clip.startBeat + note.startBeat, note.durationBeats)
+      const on = Math.round(noteSpan.start - span.start)
+      const off = Math.min(length - 1, Math.round(noteSpan.start + noteSpan.duration - span.start))
+      events.push({ sample: Math.max(0, on), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
+      events.push({ sample: Math.max(0, off), pitch: note.pitch, vel: 0 })
+    }
+    expect(events.some((event) => event.slide)).toBe(true)
+    const originBeat = projectSampleBeat(store.project, span.start)
+    const reference = renderNotes(
+      track.rack!,
+      events,
+      48000,
+      store.project.tempo,
+      length,
+      new Map(),
+      rackLanesFor(store.project, id),
+      originBeat,
+    )
+    const left = residual(rendered.channels[0], reference[0])
+    const right = residual(rendered.channels[1], reference[1])
+    expect(left.peakDb).toBeLessThanOrEqual(-60)
+    expect(right.peakDb).toBeLessThanOrEqual(-60)
+    expect(left.rmsDb).toBeLessThanOrEqual(-60)
+    expect(right.rmsDb).toBeLessThanOrEqual(-60)
+    expect(rendered.channels[0].length).toBeGreaterThan(rendered.musicalSamples)
+    const after = rendered.musicalSamples + Math.round(0.2 * 48000)
+    let release = 0
+    for (let i = rendered.musicalSamples; i < Math.min(rendered.channels[0].length, after); i++) {
+      release = Math.max(release, Math.abs(rendered.channels[0][i] || 0))
+    }
+    expect(release).toBeGreaterThan(SILENCE_AMP)
+    const end = Math.max(Math.abs(rendered.channels[0].at(-1) || 0), Math.abs(rendered.channels[1].at(-1) || 0))
+    expect(end).toBeLessThan(SILENCE_AMP * 4)
   })
 
   it('matches a paced block render to the realtime block render', async () => {

@@ -14,6 +14,7 @@ import './pluginPages.css'
 const NOTES: Record<string, string> = {
   steps: 'A grid of notes you step through.',
   pads: 'Drum pads for one-shots and kits.',
+  bass808: 'Slide 808 bass for trap and drill.',
   synth: 'A keyboard instrument that plays notes.',
   sampler: 'Play a recording across the keys.',
   scaler: 'Chords and scales in front of the sound.',
@@ -29,7 +30,7 @@ const NOTES: Record<string, string> = {
 }
 
 const GROUPS: { id: string; title: string; ids: string[] }[] = [
-  { id: 'instruments', title: 'Instruments', ids: ['steps', 'pads', 'synth', 'sampler', 'scaler'] },
+  { id: 'instruments', title: 'Instruments', ids: ['steps', 'pads', 'bass808', 'synth', 'sampler', 'scaler'] },
   { id: 'pitch', title: 'Pitch', ids: ['tune'] },
   { id: 'tone', title: 'Tone', ids: ['eq', 'saturator', 'mod'] },
   { id: 'dynamics', title: 'Dynamics', ids: ['compressor', 'vocal'] },

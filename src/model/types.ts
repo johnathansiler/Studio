@@ -11,7 +11,7 @@ import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
-export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'scaler' | 'pads' | 'none'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'bass808' | 'drum-machine' | 'library' | 'scaler' | 'pads' | 'none'
 
 export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
