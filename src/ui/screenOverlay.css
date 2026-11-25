@@ -256,8 +256,7 @@ body:has(.shell.phone) [data-screen-overlay].guide-sheet {
 }
 
 .dock-slot.panel-slot:has([data-screen-overlay]) {
-  z-index: calc(var(--overlay-z) + 8);
-  overflow: visible;
+  overflow: hidden;
 }
 
 [data-screen-overlay].step-sequencer > .preset-dock,

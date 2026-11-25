@@ -217,6 +217,117 @@ describe('built app on a phone', () => {
         expect(room.sampleBottom, `808 shot inside the plugin at ${width}`).toBeLessThanOrEqual(room.pluginBottom + 1)
         await page.screenshot({ path: `/opt/cursor/artifacts/bass-reopen-${width}.png` })
         await page.locator('.bass-close').click()
+        await page.locator('[data-bass808="open"]').waitFor({ state: 'hidden' })
+
+        const faces = [
+          { kind: 'scaler', selector: '[data-scaler="plugin"]' },
+          { kind: 'rack', selector: '.rack.inst-panel' },
+          { kind: 'pads', selector: '[data-pads="plugin"]' },
+          { kind: 'steps', selector: '[data-step-sequencer="open"]' },
+          { kind: 'patch', selector: '.patch-sheet' },
+        ] as const
+        for (const face of faces) {
+          await page.evaluate((kind) => {
+            const store = (window as unknown as {
+              __cueharbor: {
+                store: {
+                  project: { tracks: { id: string; type: string }[] }
+                  setTrackInstrument: (id: string, instrument: string) => void
+                  showScaler: (id: string) => void
+                  showRack: (id: string) => void
+                  showPads: (id: string) => void
+                  showPatch: (id: string) => void
+                  addQuickTrack: (choice: string) => string | null
+                  openSteps: (id: string) => void
+                  closeSteps: () => void
+                  closePads: () => void
+                  closeBass: () => void
+                  closeScaler: () => void
+                  openRack: (id: string) => void
+                  openPatch: (id: string) => void
+                  rackTrackId: string | null
+                  patchTrackId: string | null
+                }
+              }
+            }).__cueharbor.store
+            store.closeSteps()
+            store.closePads()
+            store.closeBass()
+            store.closeScaler()
+            if (store.rackTrackId) store.openRack(store.rackTrackId)
+            if (store.patchTrackId) store.openPatch(store.patchTrackId)
+            const id = store.project.tracks.find((track) => track.type === 'midi')?.id
+            if (!id) throw new Error('no midi track')
+            if (kind === 'scaler') {
+              store.setTrackInstrument(id, 'scaler')
+              store.showScaler(id)
+            } else if (kind === 'rack') {
+              store.setTrackInstrument(id, 'sampler')
+              store.showRack(id)
+            } else if (kind === 'pads') {
+              store.showPads(id)
+            } else if (kind === 'steps') {
+              const stepId = store.addQuickTrack('steps')
+              if (!stepId) throw new Error('no step track')
+              store.openSteps(stepId)
+            } else {
+              store.setTrackInstrument(id, 'synth')
+              store.showPatch(id)
+            }
+          }, face.kind)
+          await page.locator(face.selector).waitFor()
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined)))))
+          const hit = await page.evaluate(() => {
+            function target(selector: string) {
+              const node = document.querySelector(selector)
+              if (!(node instanceof HTMLElement)) return { found: false, hit: '' }
+              const box = node.getBoundingClientRect()
+              const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+              const own = top instanceof Node && (top === node || node.contains(top))
+              return {
+                found: true,
+                own,
+                hit: top instanceof Element ? `${top.tagName}.${top.className}` : '',
+                width: box.width,
+                height: box.height,
+              }
+            }
+            return {
+              play: target('.transport .t-btn.play'),
+              loop: target('[data-loop-region="arrange"] [data-loop-edge="start"]'),
+            }
+          })
+          expect(hit.play.found, `${face.kind} play button at ${width}`).toBe(true)
+          expect(hit.play.own, `${face.kind} play receives the tap at ${width} (${hit.play.hit})`).toBe(true)
+          expect(hit.loop.found, `${face.kind} loop grip at ${width}`).toBe(true)
+          expect(hit.loop.height, `${face.kind} loop grip height at ${width}`).toBeGreaterThan(8)
+          expect(hit.loop.own, `${face.kind} loop grip receives the tap at ${width} (${hit.loop.hit})`).toBe(true)
+          if (face.kind === 'scaler' || face.kind === 'rack') {
+            await page.screenshot({ path: `/opt/cursor/artifacts/${face.kind}-clear-${width}.png` })
+          }
+        }
+        await page.evaluate(() => {
+          const store = (window as unknown as {
+            __cueharbor: {
+              store: {
+                closeSteps: () => void
+                closePads: () => void
+                closeBass: () => void
+                closeScaler: () => void
+                openRack: (id: string) => void
+                openPatch: (id: string) => void
+                rackTrackId: string | null
+                patchTrackId: string | null
+              }
+            }
+          }).__cueharbor.store
+          store.closeSteps()
+          store.closePads()
+          store.closeBass()
+          store.closeScaler()
+          if (store.rackTrackId) store.openRack(store.rackTrackId)
+          if (store.patchTrackId) store.openPatch(store.patchTrackId)
+        })
 
         await page.getByRole('button', { name: 'Browse', exact: true }).click()
         await page.locator('[data-playlist-browser="open"]').waitFor()

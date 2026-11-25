@@ -2202,7 +2202,7 @@ async function importDropped(files: FileList) {
       data-collab="closed"
       data-dock={dockShown ? 'open' : 'closed'}
       data-editor={dockShown ? panel : 'none'}
-      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps' || panel === 'bass') ? panel : 'none'}
+      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps' || panel === 'bass' || panel === 'rack') ? panel : 'none'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
       }}
