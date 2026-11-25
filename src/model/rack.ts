@@ -628,8 +628,14 @@ export function normalizeProjectRack(project: Project): Project {
   return project
 }
 
-/** A new bass synth takes the saved player Attack, not the Analog default of 8 ms. */
+/**
+ * A new bass synth takes a saved player Attack. Projects that never stored
+ * one keep the device default (8 ms). The builtin voice still falls back to
+ * 4 ms through `bassPlayerAttackMs`.
+ */
 function stampBassPlayerAttack(project: Project, track: Track) {
+  const saved = project.players?.bassAttack
+  if (typeof saved !== 'number' || !Number.isFinite(saved)) return
   const ms = bassPlayerAttackMs(project, track)
   if (ms == null) return
   const device = track.rack?.devices.find((item) => item.kind === 'sub' || item.kind === 'fm' || item.kind === 'wave')

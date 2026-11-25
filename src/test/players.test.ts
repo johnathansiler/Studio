@@ -4,7 +4,7 @@ import { renderArrangeInputs } from '../audio/arrangeSources'
 import { ATTACK_SEC, builtinAttackSec, builtinEnvelope } from '../audio/liveStage'
 import { DRUM_PADS } from '../model/drums'
 import { createEmptyProject, makeTrack, type MidiClip } from '../model/types'
-import { BASS_PLAYER_ATTACK_MS, buildSession, chordsFromAnalysis } from '../players'
+import { BASS_PLAYER_ATTACK_MS, bassPlayerAttackMs, buildSession, chordsFromAnalysis } from '../players'
 import { diffProject } from '../state/ops'
 import { selectPlayers } from '../state/select'
 import { ProjectStore } from '../state/store'
@@ -265,5 +265,38 @@ describe('session players', () => {
     loaded.setAutomated({ trackId: bass.id, target: 'instrument', param: 'attack', deviceId: device.id, min: 0, max: 2000 }, 120, false, 0)
     expect(loaded.playerState().bassAttack).toBe(120)
     expect(loaded.project.tracks.find((track) => track.name === 'Bass')!.rack!.devices.find((item) => item.kind === 'sub')!.params.attack).toBe(120)
+  })
+
+  it('leaves the device default when a bass project never saved an attack', () => {
+    const unsaved = (players?: { style: string }) => {
+      const project = createEmptyProject()
+      if (players) project.players = players as typeof project.players
+      else delete project.players
+      project.tracks.push(makeTrack({
+        name: 'Bass',
+        type: 'midi',
+        instrument: 'synth',
+        midiClips: [{
+          id: 'bass-clip',
+          name: 'Pop bass player',
+          startBeat: 0,
+          durationBeats: 1,
+          notes: [{ id: 'n', pitch: 40, startBeat: 0, durationBeats: 1, velocity: 1 }],
+        }],
+      }))
+      return JSON.parse(JSON.stringify(project))
+    }
+    const attackOf = (store: ProjectStore) => store.project.tracks.find((track) => track.name === 'Bass')!.rack!.devices.find((item) => item.kind === 'sub')!.params.attack
+    const opened = new ProjectStore(unsaved())
+    const partial = new ProjectStore(unsaved({ style: 'pop' }))
+    expect(attackOf(opened)).toBe(8)
+    expect(attackOf(partial)).toBe(8)
+    expect(bassPlayerAttackMs(opened.project, opened.project.tracks.find((track) => track.name === 'Bass')!)).toBe(BASS_PLAYER_ATTACK_MS)
+
+    const host = new ProjectStore(createEmptyProject())
+    host.loadProject(unsaved(), new Map())
+    expect(attackOf(host)).toBe(8)
+    host.loadProject(unsaved({ style: 'pop' }), new Map())
+    expect(attackOf(host)).toBe(8)
   })
 })
