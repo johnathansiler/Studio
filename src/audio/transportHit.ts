@@ -161,6 +161,7 @@ function playResident(
   const gain = ctx.createGain()
   src.buffer = buffer
   const peak = Math.max(0.001, 0.22 * hit.velocity * Math.max(0, hit.volume ?? 1))
+  gain.gain.value = 0.0001
   gain.gain.setValueAtTime(0.0001, when)
   gain.gain.exponentialRampToValueAtTime(peak, when + 0.003)
   src.connect(gain)
@@ -185,6 +186,9 @@ function envelope(
 ) {
   const gain = ctx.createGain()
   const peak = Math.max(0.001, 0.22 * hit.velocity * Math.max(0, hit.volume ?? 1))
+  // The node is born at unity. A scheduled ramp that has not reached the audio
+  // thread yet leaves one sample at that unity gain, which is a full-scale click.
+  gain.gain.value = 0.0001
   gain.gain.setValueAtTime(0.0001, when)
   gain.gain.exponentialRampToValueAtTime(peak, when + 0.005)
   gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.03, dur))

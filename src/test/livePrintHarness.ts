@@ -141,7 +141,12 @@ async function record(engine: AudioEngine, ctx: AudioContext, trackId: string, s
   silent.gain.value = 0
   node.connect(silent)
   silent.connect(ctx.destination)
-  if (!engine.probeInstrument(trackId, node)) throw new Error(`no strip for ${trackId}`)
+  const split = ctx.createChannelSplitter(2)
+  const merge = ctx.createChannelMerger(2)
+  if (!engine.probeInstrument(trackId, split)) throw new Error(`no strip for ${trackId}`)
+  split.connect(merge, 0, 0)
+  split.connect(merge, 1, 1)
+  merge.connect(node)
   const dumped = new Promise<Float32Array[]>((resolve) => {
     node.port.onmessage = (event: MessageEvent<{ left: Float32Array; right: Float32Array }>) => {
       resolve([event.data.left, event.data.right])
@@ -195,14 +200,17 @@ function score(name: string, rate: number, live: ArrayLike<number>, bounce: Arra
 
 function bestLag(live: ArrayLike<number>, bounce: ArrayLike<number>, _rate: number) {
   const guess = Math.max(0, onset(live, 1e-4) - onset(bounce, 1e-4))
-  const from = Math.max(0, guess - 256)
+  // Lock the lag on the attack. A full-buffer search on a bass or a kick
+  // walks onto the next cycle of the tone and reports a false residual.
+  const from = Math.max(0, guess - 32)
   const to = Math.min(Math.max(0, live.length - 8), guess + 32)
+  const probe = Math.min(bounce.length, 4096)
   let best = guess
   let bestEnergy = Number.POSITIVE_INFINITY
   for (let lag = from; lag <= to; lag++) {
     let energy = 0
-    const end = Math.min(bounce.length, live.length - lag)
-    for (let i = 0; i < end; i += 2) {
+    const end = Math.min(probe, live.length - lag)
+    for (let i = 0; i < end; i++) {
       const delta = (live[lag + i] || 0) - (bounce[i] || 0)
       energy += delta * delta
     }
@@ -218,6 +226,7 @@ function onset(data: ArrayLike<number>, floor = 1e-4) {
   for (let i = 0; i < data.length; i++) if (Math.abs(data[i] || 0) > floor) return i
   return 0
 }
+
 
 function midi(id: string, name: string, startBeat: number, durationBeats: number, notes: Track['midiClips'][number]['notes']): Track['midiClips'][number] {
   return { id, name, startBeat, durationBeats, notes }

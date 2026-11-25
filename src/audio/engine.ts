@@ -2087,6 +2087,8 @@ export class AudioEngine {
     try {
       await this.resume()
       if (ticket !== this.commandEpoch || !this.ctx) return
+      await this.rackHost.whenReady()
+      if (ticket !== this.commandEpoch || !this.ctx) return
       await this.warmUpcomingLibrary(Math.max(0, fromSample), 2.5)
       if (ticket !== this.commandEpoch || !this.ctx) return
       const startAt = this.ctx.currentTime + 0.05
@@ -3167,8 +3169,10 @@ export class AudioEngine {
     this.nextMetroSample = this.project ? clickAtOrAfter(this.project, fromSample) : fromSample
     this.ensureScheduler()
     if (!this.raf) this.raf = requestAnimationFrame(() => this.tick())
-    this.scheduleAhead()
+    // Post the transport clock before any note, so the worklet's first block of
+    // the note already sits on the song beat instead of the device uptime.
     this.applyMixerAutomation()
+    this.scheduleAhead()
   }
 
   /**

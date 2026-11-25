@@ -199,6 +199,12 @@ export class RackRuntime {
     const audioCables = cyclic ? [] : rack.cables.filter((cable) => cable.toPort === 'audio' || cable.toPort === 'audio2')
     const modCables = rack.cables.filter((cable) => cable.toPort !== 'audio' && cable.toPort !== 'audio2')
     const beatSamples = Math.max(1, (60 / Math.max(1, tempo)) * this.sampleRate)
+    // The live worklet has been rendering silence since the device opened, so its
+    // sample clock is seconds ahead of the song. LFOs read that clock. Snap it
+    // back to the transport beat so a note at beat 0 has the same modulation
+    // phase live and in the bounce. A normal block is far inside this window.
+    const locked = Math.round(beat * beatSamples)
+    if (Math.abs(locked - this.sampleTime) > this.sampleRate) this.sampleTime = locked
     const wiring = rack.devices.map((device) => audioCables.filter((cable) => cable.to === device.id))
     const widened = rack.devices.some((device) => device.kind === 'knock')
     const moving = modCables.length > 0 || (lanes?.some((lane) => lane.points.length) ?? false)

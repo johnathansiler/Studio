@@ -25,6 +25,8 @@ export class CueRackVoice {
   private originTime = 0
   private originBeat = 0
   private smooth = new Map<string, Record<string, number>>()
+  /** Sample index of the next block. Held across quanta so a jittered currentTime cannot move a note-off. */
+  private cursor = Number.NaN
 
   constructor(readonly sampleRate: number) {
     this.runtime = new RackRuntime(sampleRate)
@@ -73,26 +75,33 @@ export class CueRackVoice {
       right?.fill(0)
       return
     }
+    const expected = Math.round(now * this.sampleRate)
+    // The first quantum anchors the grid. After that the cursor advances by the
+    // samples actually written. Re-reading currentTime every block lets a
+    // fraction of a sample move a note-off at 44.1 kHz while the attack stays put.
+    if (!Number.isFinite(this.cursor) || Math.abs(expected - this.cursor) > frames + 1) this.cursor = expected
+    const blockStart = this.cursor
     let rendered = 0
     while (rendered < frames) {
-      const at = now + rendered / this.sampleRate
-      const atSample = Math.round(at * this.sampleRate)
+      const atSample = blockStart + rendered
       while (this.pending.length && Math.round(this.pending[0].time * this.sampleRate) <= atSample) {
         const note = this.pending.shift()!
         this.runtime.note(note.pitch, note.vel, rack.polyphony, !!note.slide)
       }
       let until = frames
       if (this.pending.length) {
-        const next = Math.round(this.pending[0].time * this.sampleRate) - Math.round(now * this.sampleRate)
+        const next = Math.round(this.pending[0].time * this.sampleRate) - blockStart
         if (next > rendered) until = Math.min(frames, next)
       }
       const span = Math.max(1, Math.min(frames - rendered, until - rendered))
+      const at = (blockStart + rendered) / this.sampleRate
       const beat = this.originBeat + (at - this.originTime) * (this.tempo / 60)
       const block = this.runtime.render(this.glideRack(rack, span), span, this.tempo, this.quality, this.buffers, this.lanes, beat)
       left.set(block[0], rendered)
       if (right !== left) right.set(block[1], rendered)
       rendered += span
     }
+    this.cursor = blockStart + frames
   }
 
   pull(frames: number, quantum = 128) {
