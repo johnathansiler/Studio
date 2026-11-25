@@ -1,20 +1,14 @@
 /**
  * Render a MIDI clip, a Beat Machine pattern, or a whole track to audio.
- * The instrument print is the offline arrangement path (the same block renderer
- * the rack worklet uses). Track inserts are optional. The master bus is not.
+ * The print is what playback hears: the rack worklet, the transport drums, or the sampler.
+ * Track inserts are optional. The master bus is not.
  */
 
-import { graphPlugins, renderArrangeInputs, type ArrangePrint } from './arrangeSources'
+import { renderHeard } from './heardPrint'
 import { BASS808_RELEASE_SEC } from './bass808/voice'
-import { tuneBlockScale } from './plugins/autoTune'
-import { reportedLatency } from './core/latency'
-import { prepareChainPool, type ChainSlot } from './plugins/chain'
-import { prepareAccurate } from './automationRender'
-import { renderInserts } from './renderChain'
 import { patternHitTrack } from '../model/channelRack'
-import { projectSampleBeat, beatSpanSamples } from '../model/tempoMap'
-import { makeTrack, uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type Track } from '../model/types'
-import type { Processor } from './plugins/types'
+import { beatSpanSamples } from '../model/tempoMap'
+import { makeTrack, uid, type AudioAsset, type AudioClip, type Project, type Track } from '../model/types'
 
 /** -90 dBFS. Samples quieter than this are trimmed from the rendered tail. */
 export const SILENCE_DB = -90
@@ -162,36 +156,22 @@ export async function renderClipToAudio(request: RenderRequest): Promise<Rendere
   const source = project.tracks.find((track) => track.id === plan.sourceTrackId)
   if (!source) throw new RenderEmpty()
   const includeEffects = request.includeEffects
-  const latency = includeEffects ? insertLatency(source, rate) : 0
   const tail = releaseTailSamples(source, rate, includeEffects)
-  const length = Math.max(1, plan.musical + tail + latency)
+  const length = Math.max(1, plan.musical + tail)
   request.shouldCancel?.()
   request.onProgress?.(0.08)
-  const isolated = isolate(project, request.target, plan.sourceTrackId)
-  let painted = 0
-  const print: ArrangePrint = {
-    shouldCancel: request.shouldCancel,
-    tick: request.onProgress
-      ? async (ratio) => {
-        request.shouldCancel?.()
-        request.onProgress?.(0.1 + Math.max(0, Math.min(1, ratio)) * 0.62)
-        const now = Date.now()
-        if (now - painted < 48) return
-        painted = now
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      }
-      : undefined,
-  }
-  const inputs = await renderArrangeInputs(isolated, request.assets, plan.startSample, length, plan.startSample + length, print)
+  let channels: Float32Array<ArrayBufferLike>[] = await renderHeard({
+    project,
+    assets: request.assets,
+    target: request.target,
+    source,
+    origin: plan.startSample,
+    length,
+    includeEffects,
+    onProgress: request.onProgress,
+  })
   request.shouldCancel?.()
-  request.onProgress?.(0.78)
-  let channels: Float32Array<ArrayBufferLike>[] = sumPrinted(inputs, length)
-  if (includeEffects) {
-    channels = await applyInserts(source, channels, project, plan.startSample, rate)
-    request.onProgress?.(0.9)
-  }
-  const drop = Math.min(latency, Math.max(0, channels[0].length - 1))
-  if (drop > 0) channels = channels.map((channel) => channel.slice(drop))
+  request.onProgress?.(0.9)
   const musical = Math.min(plan.musical, channels[0].length)
   channels = trimTail(channels, musical)
   if (request.normalize) channels = normalizePeak(channels)
@@ -329,114 +309,6 @@ function planWindow(project: Project, target: RenderTarget): WindowPlan {
   return { sourceTrackId: track.id, name: track.name || 'Track', startSample: start, musical: Math.max(1, Math.round(end - start)) }
 }
 
-function isolate(project: Project, target: RenderTarget, sourceTrackId: string) {
-  const copy = structuredClone(project) as Project
-  for (const track of copy.tracks) {
-    track.clips = []
-    track.sends = []
-    track.mute = false
-    track.solo = false
-  }
-  if (target.kind === 'midi') {
-    for (const track of copy.tracks) {
-      if (track.id !== target.trackId) track.midiClips = []
-      else track.midiClips = track.midiClips.filter((clip) => clip.id === target.clipId).map((clip) => ({ ...clip, muted: false, slotOnly: false, scene: undefined }))
-    }
-    copy.patternClips = []
-  } else if (target.kind === 'pattern') {
-    for (const track of copy.tracks) track.midiClips = []
-    copy.patternClips = (copy.patternClips ?? [])
-      .filter((clip) => clip.id === target.clipId)
-      .map((clip) => ({ ...clip, muted: false, suppressed: false, scene: null, trackId: clip.trackId || sourceTrackId }))
-  } else {
-    for (const track of copy.tracks) {
-      if (track.id !== target.trackId) track.midiClips = []
-      else track.midiClips = track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => ({ ...clip, muted: false }))
-    }
-    copy.patternClips = (copy.patternClips ?? [])
-      .filter((clip) => clip.trackId === target.trackId && clip.scene == null && !clip.suppressed)
-      .map((clip) => ({ ...clip, muted: false }))
-  }
-  return copy
-}
-
-function sumPrinted(buffers: Map<string, Float32Array[]>, length: number) {
-  const left = new Float32Array(length)
-  const right = new Float32Array(length)
-  for (const pair of buffers.values()) {
-    const a = pair[0]
-    const b = pair[1] ?? a
-    for (let i = 0; i < length; i++) {
-      left[i] += a?.[i] || 0
-      right[i] += b?.[i] || 0
-    }
-  }
-  return [left, right]
-}
-
-function insertLatency(track: Track, sampleRate: number) {
-  let total = 0
-  for (const plugin of effectPlugins(track)) {
-    total += reportedLatency(plugin.pluginId, plugin.params, sampleRate, true, 0, false)
-  }
-  return total
-}
-
-function effectPlugins(track: Track): PluginInstance[] {
-  return graphPlugins(track).filter((plugin) => plugin.enabled && plugin.wet > 0)
-}
-
-async function applyInserts(track: Track, input: Float32Array<ArrayBufferLike>[], project: Project, startSample: number, sampleRate: number) {
-  const plugins = effectPlugins(track)
-  if (!plugins.length) return input
-  const { createProcessor } = await import('./plugins/createAll')
-  const scale = tuneBlockScale(project.scale)
-  const startBeat = projectSampleBeat(project, startSample)
-  const automation = project.automation
-    .filter((lane) => !lane.trackId || lane.trackId === track.id)
-    .map((lane) => ({ ...lane, points: lane.points.map((point) => ({ ...point, beat: point.beat - startBeat })) }))
-  const slots: ChainSlot[] = plugins.map((plugin) => ({
-    id: plugin.id,
-    pluginId: plugin.pluginId,
-    enabled: true,
-    wet: plugin.wet,
-    params: { ...plugin.params },
-    failed: false,
-    sidechain: plugin.sidechain || '',
-    processor: createProcessor(plugin.pluginId, sampleRate) ?? passthrough(),
-  }))
-  const pool = prepareChainPool(Math.max(4, slots.length + 1), 2, 128)
-  const scratch = prepareAccurate(Math.max(4, slots.length + 1), 128)
-  return renderInserts(slots, input, {
-    sampleRate,
-    tempo: project.tempo,
-    tempoMap: project.tempoMap,
-    automation,
-    scaleRoot: scale.scaleRoot,
-    scaleIntervals: scale.scaleIntervals,
-    scaleCents: scale.scaleCents,
-    quality: 'full',
-    offline: true,
-  }, () => null, pool, scratch)
-}
-
-function passthrough(): Processor {
-  return {
-    latencySamples: 0,
-    reset() {},
-    process(input, output) {
-      const count = output[0]?.length ?? 0
-      for (let channel = 0; channel < output.length; channel++) {
-        const src = input[Math.min(channel, input.length - 1)]
-        const dest = output[channel]
-        if (!dest) continue
-        if (src && src !== dest) dest.set(src.subarray(0, count))
-      }
-    },
-  }
-}
-
-/** Drop the tail once it falls below -90 dBFS. The clip body stays, so the start does not move. */
 export function trimTail(channels: Float32Array<ArrayBufferLike>[], keep: number, floor = SILENCE_AMP) {
   const length = channels[0]?.length ?? 0
   const body = Math.max(1, Math.min(length, keep))

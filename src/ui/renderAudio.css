@@ -50,6 +50,54 @@
   border-color: transparent;
 }
 
+/* 844×390 landscape: the sheet is about 46dvh. One row keeps Render on screen. */
+@media (max-height: 420px) {
+  .arrange-sheet:has(.render-audio-sheet) > .bottom-sheet-body {
+    overflow: hidden;
+  }
+
+  .render-audio-sheet {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 6px;
+    padding: 0 0 2px;
+  }
+
+  .render-audio-sheet .render-switches,
+  .render-audio-sheet .render-places {
+    flex-direction: row;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .render-audio-sheet .render-switches button,
+  .render-audio-sheet .render-places button,
+  .render-audio-sheet .render-go,
+  .render-audio-sheet .render-progress {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+  }
+
+  .render-audio-sheet .render-go,
+  .render-audio-sheet .render-progress {
+    flex: 0 0 108px;
+  }
+
+  .render-audio-sheet button {
+    font-size: 12px;
+    padding: 4px 6px;
+  }
+
+  .render-audio-sheet .render-switches button span {
+    display: block;
+    font-weight: 650;
+  }
+}
+
 .render-progress {
   position: relative;
   height: 44px;

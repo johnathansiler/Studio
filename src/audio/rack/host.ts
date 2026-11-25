@@ -3,6 +3,7 @@ import { loadWorklet } from '../workletReady'
 import type { Project } from '../../model/types'
 import type { StripNodes } from '../strips'
 import { RackRuntime, type SampleBuffer } from './dsp'
+import { CueRackVoice } from './voice'
 import { rackLanesFor } from '../../model/automation'
 import type { RackAutomation, RackState } from '../../model/rack'
 
@@ -10,6 +11,7 @@ interface Live {
   worklet: AudioWorkletNode | null
   script: ScriptProcessorNode | null
   runtime: RackRuntime
+  voice: CueRackVoice | null
   gain: GainNode
   rack: RackState | null
   tempo: number
@@ -42,8 +44,15 @@ export class RackHost {
     if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
   }
 
+  private gate: Promise<boolean> = Promise.resolve(false)
+
+  /** Resolves once the rack worklet (or its script fallback) is attached. */
+  whenReady() {
+    return this.gate
+  }
+
   sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, buffers: Map<string, SampleBuffer>) {
-    void this.ensure(ctx).then((ok) => {
+    this.gate = this.ensure(ctx).then((ok) => {
       this.workletOk = ok
       for (const track of project.tracks) {
         if (track.type !== 'midi' || !track.rack) continue
@@ -63,7 +72,9 @@ export class RackHost {
       }
       this.clockProject = project
       this.broadcast()
+      return ok
     })
+    return this.gate
   }
 
   /** Anchor instrument lanes to the audio clock so playback is sample-accurate. */
@@ -82,13 +93,15 @@ export class RackHost {
       live.originTime = this.originTime
       live.originBeat = this.originBeat
       live.tempo = project.tempo
-      live.worklet?.port.postMessage({
-        type: 'clock',
+      const clock = {
+        type: 'clock' as const,
         originTime: this.originTime,
         originBeat: this.originBeat,
         tempo: project.tempo,
         lanes: live.lanes,
-      })
+      }
+      live.worklet?.port.postMessage(clock)
+      live.voice?.onMessage(clock)
     }
   }
 
@@ -101,10 +114,7 @@ export class RackHost {
       return
     }
     if (live.worklet) live.worklet.port.postMessage({ type: 'note', pitch, vel, time, slide })
-    else {
-      live.notes.push({ pitch, vel, time, slide })
-      live.notes.sort((a, b) => a.time - b.time)
-    }
+    else live.voice?.onMessage({ type: 'note', pitch, vel, time, slide })
   }
 
   /** Drop queued events for one pitch and release it. */
@@ -121,14 +131,13 @@ export class RackHost {
       live.worklet.port.postMessage({ type: 'drop', pitch: midi })
       return
     }
-    live.notes = live.notes.filter((note) => note.pitch !== midi)
-    live.notes.push({ pitch: midi, vel: 0, time, slide: false })
-    live.notes.sort((a, b) => a.time - b.time)
+    live.voice?.onMessage({ type: 'note', pitch: midi, vel: 0, time, slide: false })
   }
 
   allOff() {
     for (const live of this.lives.values()) {
       live.worklet?.port.postMessage({ type: 'off' })
+      live.voice?.onMessage({ type: 'off' })
       live.runtime.allOff()
     }
   }
@@ -158,7 +167,8 @@ export class RackHost {
     const gain = ctx.createGain()
     gain.connect(strip.input)
     const runtime = new RackRuntime(ctx.sampleRate)
-    const live: Live = { worklet: null, script: null, runtime, gain, rack: null, tempo: 120, buffers: new Map(), notes: [], lanes: [], originTime: 0, originBeat: 0, sig: '', bufferSig: '' }
+    const voice = new CueRackVoice(ctx.sampleRate)
+    const live: Live = { worklet: null, script: null, runtime, voice, gain, rack: null, tempo: 120, buffers: new Map(), notes: [], lanes: [], originTime: 0, originBeat: 0, sig: '', bufferSig: '' }
     if (this.workletOk) {
       const node = new AudioWorkletNode(ctx, 'cueharbor-rack', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
       node.port.onmessage = (event: MessageEvent<{ type?: string; value?: number }>) => {
@@ -173,18 +183,11 @@ export class RackHost {
       try {
         const script = ctx.createScriptProcessor(256, 0, 2)
         script.onaudioprocess = (event) => {
-          const rack = live.rack
-          if (!rack) return
           const when = event.playbackTime || ctx.currentTime
-          while (live.notes.length && live.notes[0].time <= when) {
-            const item = live.notes.shift()!
-            runtime.note(item.pitch, item.vel, rack.polyphony, !!item.slide)
-          }
           const started = performance.now()
-          const beat = live.originBeat + (when - live.originTime) * (live.tempo / 60)
-          const rendered = runtime.render(rack, event.outputBuffer.length, live.tempo, this.quality, live.buffers, live.lanes, beat)
-          event.outputBuffer.getChannelData(0).set(rendered[0])
-          event.outputBuffer.getChannelData(1).set(rendered[1])
+          const left = event.outputBuffer.getChannelData(0)
+          const right = event.outputBuffer.getChannelData(1)
+          voice.process([left, right], when)
           const budget = (event.outputBuffer.length / ctx.sampleRate) * 1000
           this.cpu = this.cpu * 0.8 + (budget > 0 ? (performance.now() - started) / budget : 0) * 0.2
           if (this.phone && this.cpu > 0.7) this.quality = 'eco'
@@ -204,7 +207,6 @@ export class RackHost {
     live.rack = rack
     live.tempo = tempo
     live.buffers = buffers
-    if (!live.worklet) return
     const bufferSig = [...buffers.keys()].sort().join('|')
     const sig = `${tempo}:${this.quality}:${rack.polyphony}:${rack.devices.map((device) => `${device.id}:${device.kind}:${JSON.stringify(device.params)}`).join(';')}:${rack.cables?.length ?? 0}`
     const buffersChanged = bufferSig !== live.bufferSig
@@ -218,7 +220,9 @@ export class RackHost {
         data: buffer.channels[0]?.slice(0, 48000 * 8) ?? new Float32Array(0),
       }))
       : []
-    live.worklet.port.postMessage({ type: 'state', rack, tempo, quality: this.quality, buffers: packed })
+    const state = { type: 'state' as const, rack, tempo, quality: this.quality, buffers: packed }
+    live.worklet?.port.postMessage(state)
+    live.voice?.onMessage(state)
   }
 
   private drop(id: string) {

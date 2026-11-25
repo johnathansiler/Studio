@@ -147,6 +147,10 @@ class InsertProcessor extends AudioWorkletProcessor {
       this.parallelPrimed = false
       return
     }
+    if (data.type === 'arm') {
+      this.port.postMessage({ type: 'armed' })
+      return
+    }
     if (data.type === 'state') {
       const msg = data as unknown as StateMsg & { wasmDsp?: boolean }
       const epoch = ++this.stateEpoch
@@ -224,6 +228,7 @@ class InsertProcessor extends AudioWorkletProcessor {
     this.originTime = msg.originTime || 0
     this.originSample = msg.originSample || 0
     this.ensureProcs()
+    this.port.postMessage({ type: 'ready' })
   }
 
   private ensureProcs() {

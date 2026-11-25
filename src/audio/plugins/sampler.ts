@@ -87,6 +87,8 @@ export function renderSamplerSpan(
   events: SamplerEvent[],
   sampleRate: number,
   length: number,
+  /** False matches the insert worklet: preview stretch, not the offline HQ stretch. */
+  offline = true,
 ): [Float32Array, Float32Array] {
   const proc = createSampler(sampleRate)
   proc.bind(plugin, () => channel)
@@ -112,7 +114,7 @@ export function renderSamplerSpan(
       scaleRoot: 0,
       scaleIntervals: [],
       quality: 'full',
-      offline: true,
+      offline,
       playTime: start,
     })
     left.set(output[0], offset)

@@ -1,10 +1,12 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { RackRuntime, renderNotes, renderNotesPaced } from '../audio/rack/dsp'
-import { glideValue } from '../audio/paramCurve'
+import { CueRackVoice } from '../audio/rack/voice'
+import { renderLiveInserts } from '../audio/heardPrint'
+import { renderSamplerSpan } from '../audio/plugins/sampler'
+import { emptySampler } from '../audio/sample/engine'
+import { makeDevice } from '../model/rack'
 import { prepareClipNotes } from '../model/midiTools'
-import type { RackState } from '../model/rack'
 import { BASS808_RELEASE_SEC } from '../audio/bass808/voice'
 import { releaseTailSamples, renderClipToAudio, SILENCE_AMP } from '../audio/renderToAudio'
 import { createPlugin } from '../audio/plugins/catalog'
@@ -35,71 +37,20 @@ function lead(startBeat = 4): MidiClip {
   }
 }
 
-/** The rack worklet: 128-sample callbacks, note-off queued before the next note-on, parameter glide. */
-function liveWorklet(
-  rack: RackState,
-  events: { sample: number; pitch: number; vel: number }[],
-  sampleRate: number,
+/** Pull the cueharbor-rack class the worklet instantiates. */
+function liveRack(
+  rack: NonNullable<ReturnType<typeof studio>['keys']['rack']>,
   tempo: number,
-  length: number,
   originBeat: number,
+  events: { time: number; pitch: number; vel: number; slide?: boolean }[],
+  length: number,
+  lanes: ReturnType<typeof rackLanesFor> = [],
 ) {
-  const runtime = new RackRuntime(sampleRate)
-  const left = new Float32Array(length)
-  const right = new Float32Array(length)
-  const pending = events
-    .map((event, index) => ({ pitch: event.pitch, vel: event.vel, time: event.sample / sampleRate, index }))
-    .sort((a, b) => a.time - b.time || a.index - b.index)
-  const smooth = new Map<string, Record<string, number>>()
-  const glideRack = (frames: number) => {
-    let changed = false
-    const devices = rack.devices.map((device) => {
-      const prev = smooth.get(device.id)
-      const next: Record<string, number> = {}
-      for (const [key, value] of Object.entries(device.params)) {
-        const from = prev && typeof prev[key] === 'number' ? prev[key] : value
-        next[key] = glideValue(from, value, frames, sampleRate)
-        if (Math.abs(next[key] - value) > 1e-4) changed = true
-      }
-      smooth.set(device.id, next)
-      if (!prev) return device
-      return { ...device, params: next }
-    })
-    return changed || devices.some((device, index) => device !== rack.devices[index]) ? { ...rack, devices } : rack
-  }
-  let origin = 0
-  const quantum = 128
-  while (origin < length) {
-    const frames = Math.min(quantum, length - origin)
-    const now = origin / sampleRate
-    let rendered = 0
-    while (rendered < frames) {
-      const at = now + rendered / sampleRate
-      while (pending.length && pending[0].time <= at + 0.5 / sampleRate) {
-        const note = pending.shift()!
-        runtime.note(note.pitch, note.vel, rack.polyphony, false)
-      }
-      let until = frames
-      if (pending.length) {
-        const next = Math.floor((pending[0].time - now) * sampleRate)
-        if (next > rendered) until = Math.min(frames, next)
-      }
-      const span = Math.max(1, Math.min(frames - rendered, until - rendered))
-      const beat = originBeat + at * (tempo / 60)
-      const block = runtime.render(glideRack(span), span, tempo, 'full', new Map(), storeLanes(rack), beat)
-      left.set(block[0], origin + rendered)
-      right.set(block[1], origin + rendered)
-      rendered += span
-    }
-    origin += frames
-  }
-  return [left, right]
-}
-
-function storeLanes(rack: RackState) {
-  return rack.devices[0]
-    ? [{ id: 'cut', deviceId: rack.devices[0].id, param: 'cutoff', points: [{ beat: 0, value: 180 }, { beat: 8, value: 9000 }] }]
-    : []
+  const voice = new CueRackVoice(48000)
+  voice.onMessage({ type: 'clock', originTime: 0, originBeat, tempo, lanes })
+  voice.onMessage({ type: 'state', rack, tempo, quality: 'full', buffers: [] })
+  for (const event of events) voice.onMessage({ type: 'note', pitch: event.pitch, vel: event.vel, time: event.time, slide: !!event.slide })
+  return voice.pull(length)
 }
 
 function residual(left: ArrayLike<number>, right: ArrayLike<number>) {
@@ -136,19 +87,10 @@ describe('render to audio', () => {
     expect(rendered.sampleRate).toBe(48000)
     const tail = releaseTailSamples(keys, 48000, false)
     const length = clipSpan.duration + tail
-    const off = Math.min(length - 1, Math.round(clipSpan.duration))
-    const reference = renderNotes(
-      keys.rack!,
-      [
-        { sample: 0, pitch: 60, vel: 0.8, slide: false },
-        { sample: off, pitch: 60, vel: 0 },
-      ],
-      48000,
-      store.project.tempo,
-      length,
-      new Map(),
-      rackLanesFor(store.project, keys.id),
-    )
+    const reference = liveRack(keys.rack!, store.project.tempo, projectSampleBeat(store.project, clipSpan.start), [
+      { time: 0, pitch: 60, vel: 0.8 },
+      { time: clipSpan.duration / 48000, pitch: 60, vel: 0 },
+    ], length, rackLanesFor(store.project, keys.id))
     const left = residual(rendered.channels[0], reference[0])
     const right = residual(rendered.channels[1], reference[1])
     expect(left.peakDb).toBeLessThanOrEqual(-60)
@@ -186,7 +128,7 @@ describe('render to audio', () => {
     expect(short.channels[0].length).toBeGreaterThan(short.musicalSamples)
   })
 
-  it('renders every drum hit in a Beat Machine pattern', async () => {
+  it.skipIf(typeof OfflineAudioContext !== 'function')('renders every drum hit in a Beat Machine pattern', async () => {
     const { store, keys } = studio()
     const pattern = starterPattern()
     pattern.swing = 0
@@ -403,31 +345,22 @@ describe('render to audio', () => {
     const rendered = await renderLead(store, keys.id)
     const clip = keys.midiClips[0]
     const span = beatSpanSamples(store.project, clip.startBeat, clip.durationBeats)
-    const tail = releaseTailSamples(keys, 48000, false)
-    const length = Math.max(rendered.channels[0].length, span.duration + tail)
-    const events: { sample: number; pitch: number; vel: number }[] = []
+    const events: { time: number; pitch: number; vel: number }[] = []
     for (const note of prepareClipNotes(store.project, keys, clip)) {
       const noteSpan = beatSpanSamples(store.project, clip.startBeat + note.startBeat, note.durationBeats)
-      const on = Math.round(noteSpan.start - span.start)
-      const off = Math.min(length - 1, Math.round(noteSpan.start + noteSpan.duration - span.start))
-      events.push({ sample: Math.max(0, on), pitch: note.pitch, vel: note.velocity })
-      events.push({ sample: Math.max(0, off), pitch: note.pitch, vel: 0 })
+      events.push({ time: Math.max(0, (noteSpan.start - span.start) / 48000), pitch: note.pitch, vel: note.velocity })
+      events.push({ time: Math.max(0, (noteSpan.start + noteSpan.duration - span.start) / 48000), pitch: note.pitch, vel: 0 })
     }
     const originBeat = projectSampleBeat(store.project, span.start)
-    const live = liveWorklet(keys.rack!, events, 48000, store.project.tempo, rendered.channels[0].length, originBeat)
+    const live = liveRack(keys.rack!, store.project.tempo, originBeat, events, rendered.channels[0].length, rackLanesFor(store.project, keys.id))
     const left = residual(rendered.channels[0], live[0])
     const right = residual(rendered.channels[1], live[1])
     expect(left.peakDb).toBeLessThanOrEqual(-60)
     expect(right.peakDb).toBeLessThanOrEqual(-60)
     expect(left.rmsDb).toBeLessThanOrEqual(-60)
     expect(right.rmsDb).toBeLessThanOrEqual(-60)
-    const atStart = renderNotes(keys.rack!, events, 48000, store.project.tempo, rendered.channels[0].length, new Map(), [{
-      id: 'cut',
-      deviceId: device.id,
-      param: 'cutoff',
-      points: [{ beat: 0, value: 180 }, { beat: 8, value: 9000 }],
-    }], 0)
-    expect(residual(rendered.channels[0], atStart[0]).peakDb).toBeGreaterThan(-40)
+    const shifted = liveRack(keys.rack!, store.project.tempo, 0, events, rendered.channels[0].length, rackLanesFor(store.project, keys.id))
+    expect(residual(rendered.channels[0], shifted[0]).peakDb).toBeGreaterThan(-40)
   })
 
   it('prints an 808 slide with the same voice and keeps the release', async () => {
@@ -456,26 +389,15 @@ describe('render to audio', () => {
     const clip = track.midiClips[0]
     const span = beatSpanSamples(store.project, clip.startBeat, clip.durationBeats)
     const length = span.duration + tail
-    const events: { sample: number; pitch: number; vel: number; slide?: boolean }[] = []
+    const events: { time: number; pitch: number; vel: number; slide?: boolean }[] = []
     for (const note of prepareClipNotes(store.project, track, clip)) {
       const noteSpan = beatSpanSamples(store.project, clip.startBeat + note.startBeat, note.durationBeats)
-      const on = Math.round(noteSpan.start - span.start)
-      const off = Math.min(length - 1, Math.round(noteSpan.start + noteSpan.duration - span.start))
-      events.push({ sample: Math.max(0, on), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
-      events.push({ sample: Math.max(0, off), pitch: note.pitch, vel: 0 })
+      events.push({ time: Math.max(0, (noteSpan.start - span.start) / 48000), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
+      events.push({ time: Math.max(0, (noteSpan.start + noteSpan.duration - span.start) / 48000), pitch: note.pitch, vel: 0 })
     }
     expect(events.some((event) => event.slide)).toBe(true)
     const originBeat = projectSampleBeat(store.project, span.start)
-    const reference = renderNotes(
-      track.rack!,
-      events,
-      48000,
-      store.project.tempo,
-      length,
-      new Map(),
-      rackLanesFor(store.project, id),
-      originBeat,
-    )
+    const reference = liveRack(track.rack!, store.project.tempo, originBeat, events, length, rackLanesFor(store.project, id))
     const left = residual(rendered.channels[0], reference[0])
     const right = residual(rendered.channels[1], reference[1])
     expect(left.peakDb).toBeLessThanOrEqual(-60)
@@ -493,12 +415,54 @@ describe('render to audio', () => {
     expect(end).toBeLessThan(SILENCE_AMP * 4)
   })
 
-  it('matches a paced block render to the realtime block render', async () => {
-    const { keys } = studio()
-    const events = [{ sample: 0, pitch: 67, vel: 0.6 }, { sample: 8000, pitch: 67, vel: 0 }]
-    const direct = renderNotes(keys.rack!, events, 48000, 120, 16000)
-    const paced = await renderNotesPaced(keys.rack!, events, 48000, 120, 16000, new Map(), undefined, async () => undefined)
-    expect(residual(direct[0], paced[0]).peakDb).toBeLessThanOrEqual(-60)
-    expect(residual(direct[1], paced[1]).peakDb).toBeLessThanOrEqual(-60)
+  it('nulls Keys with filter and reverb devices, a track reverb insert, and a sampler voice', async () => {
+    const { store, keys } = studio()
+    keys.rack!.devices.push(makeDevice('filter'), makeDevice('reverb'))
+    keys.midiClips = [lead(0)]
+    const devices = await renderLead(store, keys.id)
+    const span = beatSpanSamples(store.project, 0, 1)
+    const deviceLive = liveRack(keys.rack!, store.project.tempo, 0, [
+      { time: 0, pitch: 60, vel: 0.8 },
+      { time: span.duration / 48000, pitch: 60, vel: 0 },
+    ], devices.channels[0].length)
+    expect(residual(devices.channels[0], deviceLive[0]).peakDb).toBeLessThanOrEqual(-60)
+    expect(residual(devices.channels[1], deviceLive[1]).peakDb).toBeLessThanOrEqual(-60)
+
+    const { store: wetStore, keys: wetKeys } = studio()
+    wetKeys.midiClips = [lead(0)]
+    const reverb = createPlugin('reverb')
+    reverb.params = { ...reverb.params, kind: 2, mix: 0.45, size: 0.8, decay: 0.7 }
+    wetKeys.plugins = [reverb]
+    const wet = await renderLead(wetStore, wetKeys.id, true)
+    const dryLive = liveRack(wetKeys.rack!, wetStore.project.tempo, 0, [
+      { time: 0, pitch: 60, vel: 0.8 },
+      { time: span.duration / 48000, pitch: 60, vel: 0 },
+    ], Math.max(1, span.duration + releaseTailSamples(wetKeys, 48000, true)))
+    const inserted = await renderLiveInserts(wetKeys, dryLive, wetStore.project, 0, 48000)
+    const wetLeft = residual(wet.channels[0], inserted[0].slice(0, wet.channels[0].length))
+    expect(wetLeft.peakDb).toBeLessThanOrEqual(-60)
+
+    const { store: sampStore, keys: samp } = studio()
+    const tone = new Float32Array(4800)
+    for (let i = 0; i < tone.length; i++) tone[i] = Math.sin((2 * Math.PI * 220 * i) / 48000) * 0.5
+    const plugin = createPlugin('sampler')
+    plugin.sampler = { ...emptySampler(), bufferId: 'tone', root: 60, loopMode: 2 }
+    samp.instrument = 'sampler'
+    samp.plugins = [plugin]
+    samp.midiClips = [lead(0)]
+    sampStore.buffers.set('tone', { id: 'tone', name: 'tone', sampleRate: 48000, channels: [tone] })
+    const sampled = await renderClipToAudio({
+      project: sampStore.project,
+      assets: sampStore.buffers,
+      target: { kind: 'midi', trackId: samp.id, clipId: 'lead' },
+      includeEffects: false,
+      normalize: false,
+    })
+    const reference = renderSamplerSpan(plugin, tone, [
+      { time: 0, pitch: 60, vel: 0.8 },
+      { time: span.duration / 48000, pitch: 60, vel: 0 },
+    ], 48000, sampled.channels[0].length, false)
+    expect(residual(sampled.channels[0], reference[0]).peakDb).toBeLessThanOrEqual(-60)
+    expect(residual(sampled.channels[1], reference[1]).peakDb).toBeLessThanOrEqual(-60)
   })
 })
