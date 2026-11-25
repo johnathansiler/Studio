@@ -78,25 +78,35 @@ function memoryObjects(seed?: Record<string, unknown>, options?: { conflictOnce?
       const bytes = objects.get(key)
       return bytes ? { status: 200, bytes, etag: etags.get(key) ?? null } : { status: 404, bytes: null, etag: null }
     },
-    async put(key, bytes) {
-      calls.push(`put ${key}`)
+    async put(key, bytes, _contentType, conditions) {
+      const match = conditions?.ifMatch ? ` if-match ${conditions.ifMatch}` : ''
+      const none = conditions?.ifNoneMatch ? ` if-none-match ${conditions.ifNoneMatch}` : ''
+      if (conflictArmed && key === 'catalog/catalog.json.gz') {
+        conflictArmed = false
+        calls.push(`put ${key} conflict`)
+        const current = JSON.parse(gunzipSync(objects.get(key)!).toString('utf8')) as { entries: unknown[]; count: number; version: number }
+        current.entries.push(wire('audio/bass/racer.wav', { size: 8 }))
+        current.count = current.entries.length
+        current.version = 9
+        objects.set(key, gzipSync(Buffer.from(JSON.stringify(current))))
+        etags.set(key, mint())
+        throw new Error('catalog-conflict')
+      }
+      if (conditions?.ifMatch && etags.get(key) !== conditions.ifMatch) {
+        calls.push(`put ${key}${match}${none}`)
+        throw new Error('catalog-conflict')
+      }
+      if (conditions?.ifNoneMatch === '*' && etags.has(key)) {
+        calls.push(`put ${key}${match}${none}`)
+        throw new Error('catalog-conflict')
+      }
+      calls.push(`put ${key}${match}${none}`)
       objects.set(key, bytes.slice())
       etags.set(key, mint())
     },
     async copy(from, to, conditions) {
       const match = conditions?.ifMatch ? ` if-match ${conditions.ifMatch}` : ''
       const none = conditions?.ifNoneMatch ? ` if-none-match ${conditions.ifNoneMatch}` : ''
-      if (conflictArmed && to === 'catalog/catalog.json.gz') {
-        conflictArmed = false
-        calls.push(`copy ${from} ${to} conflict`)
-        const current = JSON.parse(gunzipSync(objects.get(to)!).toString('utf8')) as { entries: unknown[]; count: number; version: number }
-        current.entries.push(wire('audio/bass/racer.wav', { size: 8 }))
-        current.count = current.entries.length
-        current.version = 9
-        objects.set(to, gzipSync(Buffer.from(JSON.stringify(current))))
-        etags.set(to, mint())
-        throw new Error('catalog-conflict')
-      }
       calls.push(`copy ${from} ${to}${match}${none}`)
       if (conditions?.ifMatch && etags.get(to) !== conditions.ifMatch) throw new Error('catalog-conflict')
       if (conditions?.ifNoneMatch === '*' && etags.has(to)) throw new Error('catalog-conflict')
@@ -394,7 +404,7 @@ describe('library catalog append', () => {
       'get catalog/catalog.json.gz',
       `put ${tempKey}`,
       `copy ${tempKey} ${backupKey}`,
-      `copy ${tempKey} catalog/catalog.json.gz if-match "1"`,
+      'put catalog/catalog.json.gz if-match "1"',
     ])
   })
 
@@ -449,6 +459,29 @@ describe('library catalog append', () => {
     expect(readCatalog(store.objects.get('catalog/catalog.json.gz')!).entries).toHaveLength(1)
   })
 
+  it('leaves the live catalog untouched when the read has no etag', async () => {
+    const store = memoryObjects(existing)
+    const before = Buffer.from(store.objects.get('catalog/catalog.json.gz')!)
+    store.api.get = async (key) => {
+      store.calls.push(`get ${key}`)
+      const bytes = store.objects.get(key)
+      return bytes ? { status: 200, bytes, etag: null } : { status: 404, bytes: null, etag: null }
+    }
+    const api = createLibraryApi({ env: () => env, objects: store.api })
+    const result = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/new.wav', { size: 64 })] },
+      now: Date.parse('2026-11-24T21:14:00.000Z'),
+    })
+    expect(result.status).toBe(503)
+    expect(Buffer.from(store.objects.get('catalog/catalog.json.gz')!).equals(before)).toBe(true)
+    expect(readCatalog(before).entries.map((entry) => entry.key)).toEqual(['Drums/kick.wav', 'Bass/old.wav'])
+    expect(store.calls.some((call) => call.startsWith('put'))).toBe(false)
+  })
+
   it('dedupes by key and leaves the stored row untouched', async () => {
     const store = memoryObjects(existing)
     const api = createLibraryApi({ env: () => env, objects: store.api })
@@ -478,7 +511,8 @@ describe('library catalog append', () => {
     expect(document.entries).toHaveLength(3)
     expect(document.entries[0]).toMatchObject({ key: 'Drums/kick.wav', extra: 'stay' })
     expect(document.entries[2]).toMatchObject({ key: 'audio/bass/new.wav', size: 64, pack: 'Uploads' })
-    expect(store.calls.filter((call) => call.startsWith('put'))).toHaveLength(1)
+    expect(store.calls.filter((call) => call.startsWith('put catalog/tmp/'))).toHaveLength(1)
+    expect(store.calls.filter((call) => call.startsWith('put catalog/catalog.json.gz'))).toHaveLength(1)
   })
 
   it('refuses a catalog row that escapes the audio prefix and does not write', async () => {
@@ -512,6 +546,8 @@ describe('phone wav upload', () => {
         return new Response(JSON.stringify({ urls: body.keys.map((item) => ({ key: item.key, url: `https://signed.example/${encodeURIComponent(item.key)}`, exists: false })) }), { status: 200 })
       }
       if (url.startsWith('https://signed.example/')) {
+        expect(new Headers(init?.headers).get('content-type')).toBe('audio/wav')
+        expect(new Headers(init?.headers).get('content-length')).toBe(String((init?.body as ArrayBuffer).byteLength))
         expect(new Headers(init?.headers).get('if-none-match')).toBe('*')
         puts.push({ url, bytes: init?.body as ArrayBuffer })
         return new Response(null, { status: 200 })
@@ -700,6 +736,18 @@ describe('bass shelves for uploaded loops and one-shots', () => {
       recentKeys: [],
     })
     expect(shotShelf.chips.find((chip) => chip.id === 'bass')).toMatchObject({ label: 'Bass', count: 1 })
+    const shotBass = buildFastRows({
+      entries: shots,
+      mode: 'drum',
+      category: 'bass',
+      sub: '',
+      genre: '',
+      sort: 'name',
+      collapsed: new Set(),
+      favoriteKeys: [],
+      recentKeys: [],
+    })
+    expect(shotBass.rows.flatMap((row) => row.entry ? [row.entry.key] : [])).toEqual(['audio/bass/Hit.wav'])
     const drums = shots.filter((entry) => {
       const drum = classifyDrum(entry)
       return !!drum && drum.id !== 'bass'

@@ -6,7 +6,7 @@
  * The library passphrase is never written to a log.
  * Credentials stay in the process environment.
  */
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { AwsClient } from 'aws4fetch'
 import { layersForNotes, type InstrumentQuery, type LibraryInstrument } from '../src/library/group.ts'
@@ -130,7 +130,7 @@ const LIBRARY_PUT_TYPE = 'audio/wav'
 /** Catalog bytes only. Audio objects are not read here except for a HEAD used to skip an existing upload. */
 export interface LibraryObjects {
   get(key: string): Promise<LibraryObjectBody>
-  put(key: string, bytes: Uint8Array, contentType: string): Promise<void>
+  put(key: string, bytes: Uint8Array, contentType: string, conditions?: LibraryWriteConditions): Promise<void>
   copy(from: string, to: string, conditions?: LibraryWriteConditions): Promise<void>
   head?(key: string): Promise<boolean>
 }
@@ -170,8 +170,12 @@ function r2Objects(readEnv: () => LibraryEnv): LibraryObjects {
       if (!response.ok) return { status: response.status, bytes: null, etag: null }
       return { status: 200, bytes, etag }
     },
-    async put(key, bytes, contentType) {
-      const response = await call('PUT', key, { body: bytes, contentType })
+    async put(key, bytes, contentType, conditions) {
+      const response = await call('PUT', key, { body: bytes, contentType, conditions })
+      if (response.status === 412) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new Error(CATALOG_CONFLICT)
+      }
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined)
         throw new Error('Could not write the library catalog.')
@@ -451,12 +455,15 @@ async function appendCatalog(
     if (!merged.changed) return { status: 200, body: { ready: true, version, generatedAt, count, added: 0, skipped: merged.skipped } }
     try {
       const gzip = gzipSync(Buffer.from(JSON.stringify(merged.document)))
-      const stamp = `${new Date(now).toISOString().replace(/[:.]/g, '-')}-${nextSeq()}`
+      const stamp = `${new Date(now).toISOString().replace(/[:.]/g, '-')}-${nextSeq()}-${randomBytes(4).toString('hex')}`
       const tempKey = `catalog/tmp/catalog-${stamp}.json.gz`
       const backupKey = `catalog/backups/catalog-${stamp}.json.gz`
       await objects.put(tempKey, gzip, 'application/gzip')
       await objects.copy(tempKey, backupKey)
-      await objects.copy(tempKey, LIBRARY_CATALOG_KEY, loaded.etag ? { ifMatch: loaded.etag } : { ifNoneMatch: '*' })
+      // CopyObject on R2 does not apply If-Match to the destination (that header is
+      // cf-copy-destination-if-match, and it is still beta). PutObject does, and a
+      // mismatched ETag comes back as 412 so the retry keeps the other writer's rows.
+      await objects.put(LIBRARY_CATALOG_KEY, gzip, 'application/gzip', loaded.etag ? { ifMatch: loaded.etag } : { ifNoneMatch: '*' })
       return { status: 200, body: { ready: true, version, generatedAt, count, added: merged.added, skipped: merged.skipped } }
     } catch (error) {
       if (catalogConflict(error) && attempt < 3) continue

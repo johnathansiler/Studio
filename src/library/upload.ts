@@ -391,7 +391,11 @@ async function putWav(url: string, bytes: ArrayBuffer, fetchImpl: typeof fetch) 
   const response = await fetchImpl(url, {
     method: 'PUT',
     redirect: 'error',
-    headers: { 'content-type': LIBRARY_PUT_CONTENT_TYPE, 'if-none-match': '*' },
+    headers: {
+      'content-type': LIBRARY_PUT_CONTENT_TYPE,
+      'content-length': String(bytes.byteLength),
+      'if-none-match': '*',
+    },
     body: bytes,
   })
   return response.ok
