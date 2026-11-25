@@ -73,7 +73,7 @@ import { claimComputerKey } from './model/keyboardPlay'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
 import { ARRANGE_SHEET_EVENT, sheetHistoryPop } from './ui/arrangePanel'
-import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
+import { closeAllOverlays, onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble } from './ui/Hint'
 import {
@@ -1979,15 +1979,9 @@ async function importDropped(files: FileList) {
   function openStepSequencer(trackId: string) {
     setSurface('studio')
     setPhonePane('edit')
-    setMenuOpen(false)
-    setPianoOpen(false)
+    dismissForInstrument()
     store.closePiano()
     store.closePads()
-    store.clearKeyboardReturn()
-    if (store.keyboardMidi) {
-      store.setKeyboardMidi(false)
-      notifyKeyboard(false)
-    }
     store.openSteps(trackId)
   }
 
@@ -2004,6 +1998,7 @@ async function importDropped(files: FileList) {
     if (choice !== 'steps') store.closeSteps()
     if (choice !== 'pads') store.closePads()
     if (choice === 'bass808') {
+      dismissForInstrument()
       store.showBass(id)
       return
     }
@@ -2019,14 +2014,8 @@ async function importDropped(files: FileList) {
   function openBeatMachine(trackId: string) {
     setSurface('studio')
     setPhonePane('edit')
-    setMenuOpen(false)
-    setPianoOpen(false)
+    dismissForInstrument()
     store.selectTrack(trackId)
-    store.clearKeyboardReturn()
-    if (store.keyboardMidi) {
-      store.setKeyboardMidi(false)
-      notifyKeyboard(false)
-    }
     store.showPads(trackId)
   }
 
@@ -2039,11 +2028,26 @@ async function importDropped(files: FileList) {
     notifyKeyboard(true)
   }
 
+  function dismissForInstrument() {
+    setMenuOpen(false)
+    setPianoOpen(false)
+    setSoundsOpen(false)
+    setKeysLandscape(false)
+    document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+    store.releaseDockForInstrument()
+    notifyKeyboard(false)
+    closeAllOverlays()
+  }
+
   function openInstrument(trackId: string) {
     const track = store.project.tracks.find((item) => item.id === trackId)
     if (!track) return
     const face = instrumentFace(track)
-    setPianoOpen(false)
+    if (!face) {
+      openKeyboard(trackId)
+      return
+    }
+    dismissForInstrument()
     if (face === 'bass') {
       store.showBass(trackId)
       return

@@ -178,8 +178,43 @@ describe('built app on a phone', () => {
         await page.screenshot({ path: `/opt/cursor/artifacts/bass-play-${width}.png` })
         await page.locator('.bass-close').click()
         await page.locator('[data-bass808="open"]').waitFor({ state: 'hidden' })
+        await page.locator('[data-track-name="Keys"]').click()
+        await page.locator('[data-keyboard-dock="open"]').waitFor()
         await page.locator('[data-track-name="808 Bass 1"]').click()
         await page.locator('[data-bass808="open"]').waitFor()
+        await page.locator('[data-keyboard-dock="open"]').waitFor({ state: 'detached' })
+        await page.getByRole('tab', { name: 'Tone', exact: true }).click()
+        const room = await page.evaluate(() => {
+          const plugin = document.querySelector('[data-bass808="open"]') as HTMLElement
+          const tone = document.querySelector('.bass-tone') as HTMLElement
+          const slot = document.querySelector('.tool-slot') as HTMLElement
+          const sample = document.querySelector('.bass-sample') as HTMLElement
+          const knobs = document.querySelector('.bass-knobs') as HTMLElement
+          const pluginBox = plugin.getBoundingClientRect()
+          const sampleBox = sample.getBoundingClientRect()
+          const knobBox = knobs.getBoundingClientRect()
+          const slotBox = slot.getBoundingClientRect()
+          return {
+            dock: document.querySelectorAll('[data-keyboard-dock="open"]').length,
+            height: pluginBox.height,
+            pluginBottom: pluginBox.bottom,
+            slotTop: slotBox.top,
+            toneClip: tone.scrollHeight - tone.clientHeight,
+            sampleTop: sampleBox.top,
+            sampleBottom: sampleBox.bottom,
+            pluginTop: pluginBox.top,
+            knobHeight: knobBox.height,
+            knobBottom: knobBox.bottom,
+          }
+        })
+        expect(room.dock, `keyboard dock closed at ${width}`).toBe(0)
+        expect(room.height, `808 keeps its height at ${width}`).toBeGreaterThan(400)
+        expect(room.pluginBottom, `808 reaches the dock at ${width}`).toBeGreaterThanOrEqual(room.slotTop - 4)
+        expect(room.toneClip, `tone clips after the dock closes at ${width}`).toBe(0)
+        expect(room.knobHeight, `knobs visible at ${width}`).toBeGreaterThan(20)
+        expect(room.knobBottom, `knobs inside the plugin at ${width}`).toBeLessThanOrEqual(room.pluginBottom + 1)
+        expect(room.sampleTop, `808 shot inside the plugin at ${width}`).toBeGreaterThanOrEqual(room.pluginTop)
+        expect(room.sampleBottom, `808 shot inside the plugin at ${width}`).toBeLessThanOrEqual(room.pluginBottom + 1)
         await page.screenshot({ path: `/opt/cursor/artifacts/bass-reopen-${width}.png` })
         await page.locator('.bass-close').click()
 

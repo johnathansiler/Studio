@@ -428,6 +428,19 @@ export class ProjectStore {
     if (back) this.showPads(back)
   }
 
+  /** Instrument sheets have their own keys. Drop the dock without bringing Beat Machine back. */
+  releaseDockForInstrument() {
+    const open = this.keyboardMidi || this.keyboardReturnId != null
+    this.keyboardReturnId = null
+    if (!this.keyboardMidi) {
+      if (open) this.emit()
+      return
+    }
+    this.keyboardMidi = false
+    writeKeyboardEnabled(false)
+    this.emit()
+  }
+
   /** Closing the keyboard should leave the panels as they are. */
   clearKeyboardReturn() {
     this.keyboardReturnId = null
@@ -435,6 +448,7 @@ export class ProjectStore {
 
   /** Open the Beat Machine without toggling it shut when it is already open. */
   showPads(trackId: string) {
+    this.releaseDockForInstrument()
     const track = this.track(trackId)
     if (!track || track.type !== 'midi') return
     if (track.instrument !== 'pads') {
@@ -1138,6 +1152,7 @@ export class ProjectStore {
 
   /** Open the 808 Bass panel. Installing the instrument opens it again. */
   showBass(trackId: string) {
+    this.releaseDockForInstrument()
     const track = this.track(trackId)
     if (!track || track.type !== 'midi') return
     if (track.instrument !== 'bass808' || !bassDevice(track)) {
@@ -1828,6 +1843,7 @@ export class ProjectStore {
 
   /** Open Scaler and leave it open. A second tap on the track must not shut it. */
   showScaler(trackId: string) {
+    this.releaseDockForInstrument()
     const track = this.track(trackId)
     if (!track || track.type !== 'midi') return
     if (!trackHasScaler(track)) {
@@ -6461,6 +6477,7 @@ export class ProjectStore {
 
   /** Open the instrument panel for a track. Does not toggle it shut. */
   showRack(trackId: string) {
+    this.releaseDockForInstrument()
     this.scalerTrackId = null
     this.padsTrackId = null
     this.patchTrackId = null
@@ -6474,6 +6491,7 @@ export class ProjectStore {
 
   /** Open the synth patch and leave it open. A sampled instrument opens the rack instead. */
   showPatch(trackId: string) {
+    this.releaseDockForInstrument()
     const track = this.track(trackId)
     if (!track || track.type !== 'midi') return
     if (isSampledInstrument(track)) {
@@ -6757,6 +6775,7 @@ export class ProjectStore {
 
   /** Open the Step Sequencer for a track. The small keyboard stays closed. */
   openSteps(trackId: string) {
+    this.releaseDockForInstrument()
     const track = this.track(trackId)
     const plugin = track?.plugins.find((item) => item.pluginId === 'steps')
     if (!track || track.type !== 'midi' || !plugin?.steps) return
