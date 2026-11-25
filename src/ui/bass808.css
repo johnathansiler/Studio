@@ -177,6 +177,27 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   color: #102117;
 }
 
+.bass-key-shift {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.bass-key-shift span {
+  min-width: 2.4ch;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted, #8aa094);
+}
+.bass-key-shift .key-step {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  color: var(--muted, #8aa094);
+  background: transparent;
+  border-color: transparent;
+}
 .bass-keys {
   position: relative;
   display: flex;
@@ -185,6 +206,7 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   gap: 2px;
   touch-action: none;
   flex: 0 0 auto;
+  transition: transform 150ms ease;
 }
 
 .bass-keys button {

@@ -15,6 +15,17 @@
   z-index: var(--view-tabs-z);
 }
 
+/* Instrument plugins fill up to the arrange ruler. Transport, loop, and playhead stay free. */
+body:has(.shell) [data-bass808='open'][data-screen-overlay],
+body:has(.shell) [data-screen-overlay].inst-panel,
+body:has(.shell) [data-screen-overlay].patch-sheet,
+body:has(.shell) [data-screen-overlay].scaler-panel,
+body:has(.shell) [data-pads='plugin'][data-screen-overlay],
+body:has(.shell) [data-step-sequencer='open'][data-screen-overlay] {
+  top: var(--plugin-clear-top, calc(var(--phone-chrome-top, 0px) + 96px)) !important;
+  bottom: var(--phone-chrome-bottom, 0px) !important;
+}
+
 [data-screen-overlay] {
   position: fixed !important;
   z-index: var(--overlay-z) !important;
@@ -200,6 +211,43 @@ body:has(.shell.phone) [data-screen-overlay].guide-sheet {
   font-size: 13px;
   font-weight: 680;
 }
+.piano-roll-btn,
+.key-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1a2420;
+  color: #8d9a90;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 1px rgba(0, 0, 0, 0.35);
+  flex: 0 0 40px;
+}
+.piano-roll-btn { color: #c5d4c8; }
+.key-nudge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.key-nudge > button {
+  min-width: 40px;
+  min-height: 40px;
+  height: 40px;
+}
+.key-nudge > span {
+  min-width: 2.6ch;
+  text-align: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+.kit-keys { transition: transform 150ms ease; }
+
 .plugin-transport > button.on,
 .plugin-transport > button[aria-pressed='true'] {
   background: #8a3030;

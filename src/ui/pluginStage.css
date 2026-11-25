@@ -8,9 +8,11 @@
 
 .shell[data-plugin="steps"] .workspace > .dock-slot,
 .shell[data-plugin="pads"] .workspace > .dock-slot,
-.shell[data-plugin="bass"] .workspace > .dock-slot {
+.shell[data-plugin="bass"] .workspace > .dock-slot,
+.shell[data-plugin="scaler"] .workspace > .dock-slot {
   position: absolute;
-  inset: 0;
+  /* Leave the ruler, loop handles, and playhead strip above the plugin. */
+  inset: var(--plugin-dock-top, var(--ruler-stack, 64px)) 0 0 0;
   z-index: 8;
   width: auto;
   max-width: none;
@@ -31,8 +33,9 @@
 
 .shell[data-plugin="steps"] .workspace > .main-pane,
 .shell[data-plugin="pads"] .workspace > .main-pane,
-.shell[data-plugin="bass"] .workspace > .main-pane {
-  pointer-events: none;
+.shell[data-plugin="bass"] .workspace > .main-pane,
+.shell[data-plugin="scaler"] .workspace > .main-pane {
+  pointer-events: auto;
 }
 
 .shell[data-plugin="steps"] .workspace > .dock-slot > .step-sequencer,

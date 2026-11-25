@@ -52,21 +52,28 @@
   max-height: var(--phone-sheet-h, min(var(--sheet-h, 58%), 62dvh, calc(100% - 36px)));
 }
 
-/* Browser and Plugins take the shared sheet height. Short sheets still hug their content. */
-.shell.phone .arrange-stage > .playlist-browser.bottom-sheet,
+/* Plugins keep a shared sheet height. The browser rises to just under the transport. */
 .shell.phone .arrange-stage > .plugins-drawer.bottom-sheet {
   flex: 0 0 var(--phone-sheet-h, 46dvh) !important;
   height: var(--phone-sheet-h, 46dvh) !important;
   max-height: var(--phone-sheet-h, 46dvh) !important;
   min-height: 0 !important;
 }
-
-/* Landscape is short. Give the list a real viewport and keep the sheet above the dock. */
-.shell.phone.land .arrange-stage > .playlist-browser.bottom-sheet {
-  flex: 0 0 auto !important;
-  height: min(200px, calc(100% - 24px)) !important;
-  max-height: calc(100% - 24px) !important;
+.shell.phone .arrange-stage > .playlist-browser.bottom-sheet {
+  flex: 0 0 var(--phone-sheet-room, var(--phone-sheet-h, 70dvh)) !important;
+  height: var(--phone-sheet-room, var(--phone-sheet-h, 70dvh)) !important;
+  max-height: var(--phone-sheet-room, var(--phone-sheet-h, 70dvh)) !important;
   min-height: 0 !important;
+}
+
+/* A short landscape phone has little room under the transport. */
+@media (max-height: 520px) {
+  .shell.phone.land .arrange-stage > .playlist-browser.bottom-sheet {
+    flex: 0 0 auto !important;
+    height: min(200px, calc(100% - 24px)) !important;
+    max-height: calc(100% - 24px) !important;
+    min-height: 0 !important;
+  }
 }
 
 .shell.phone .arrange-stage.browser-bottom.plugins-bottom > .bottom-sheet {

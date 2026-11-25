@@ -1,4 +1,5 @@
 import { keyboardStart } from '../model/keyboardPlay'
+import { isBlackKey, noteName } from '../model/keyShift'
 
 const NATURALS = [
   { step: 0, name: 'C' },
@@ -29,24 +30,39 @@ export interface MiniPad {
 }
 
 /** One octave, C through B: seven tall naturals and five round sharps. */
-export function miniPads(octave: number): { naturals: MiniPad[]; sharps: MiniPad[] } {
-  const start = keyboardStart(octave)
-  return {
-    naturals: NATURALS.map((note, column) => ({
-      pitch: start + note.step,
-      step: note.step,
-      name: note.name,
-      kind: 'natural' as const,
-      column,
-    })),
-    sharps: SHARPS.map((note) => ({
-      pitch: start + note.step,
-      step: note.step,
-      name: note.name,
-      kind: 'sharp' as const,
-      column: note.column,
-    })),
+export function miniPads(octave: number, semitone = 0): { naturals: MiniPad[]; sharps: MiniPad[] } {
+  const start = Math.max(0, Math.min(116, keyboardStart(octave) + Math.round(semitone || 0)))
+  if (!semitone) {
+    return {
+      naturals: NATURALS.map((note, column) => ({
+        pitch: start + note.step,
+        step: note.step,
+        name: note.name,
+        kind: 'natural' as const,
+        column,
+      })),
+      sharps: SHARPS.map((note) => ({
+        pitch: start + note.step,
+        step: note.step,
+        name: note.name,
+        kind: 'sharp' as const,
+        column: note.column,
+      })),
+    }
   }
+  const naturals: MiniPad[] = []
+  const sharps: MiniPad[] = []
+  let column = 0
+  for (let step = 0; step < 12; step++) {
+    const pitch = start + step
+    if (pitch > 127) break
+    if (isBlackKey(pitch)) sharps.push({ pitch, step, name: noteName(pitch).replace(/\d+$/, ''), kind: 'sharp', column: Math.max(0, column - 1) })
+    else {
+      naturals.push({ pitch, step, name: noteName(pitch).replace(/\d+$/, ''), kind: 'natural', column })
+      column += 1
+    }
+  }
+  return { naturals, sharps }
 }
 
 export function padLabel(pad: MiniPad, octaveLabel: string) {

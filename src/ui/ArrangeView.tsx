@@ -255,6 +255,7 @@ export function ArrangeView({
   onOpenPiano,
   onOpenSteps,
   onOpenKeyboard,
+  onOpenInstrument,
   onImportInstrument,
   onPerform,
   onOpenBeatMachine,
@@ -278,6 +279,8 @@ export function ArrangeView({
   onOpenPiano: (trackId: string, clipId?: string) => void
   onOpenSteps?: (trackId: string) => void
   onOpenKeyboard?: (trackId: string) => void
+  /** Header and clip taps open this track's instrument plugin. */
+  onOpenInstrument?: (trackId: string) => void
   onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onOpenBeatMachine?: (trackId: string) => void
@@ -935,17 +938,21 @@ export function ArrangeView({
     })
     if (action === 'edit') {
       lastClipTap.current = { id: '', at: 0 }
-      openClipEditor(kind, trackId, clipId)
+      const surface = editorForGesture('tap-clip', track?.type ?? '', track)
+      if (surface === 'piano') openClipEditor(kind, trackId, clipId)
+      else revealTrack(trackId, 'tap-clip', clipId)
       return
     }
     lastClipTap.current = { id: clipId, at: now }
+    if (action === 'select' && (kind === 'midi' || kind === 'pattern')) revealTrack(trackId, 'select-track', clipId)
   }
 
-  function revealTrack(trackId: string, gesture: 'select-track' | 'tap-clip', clipId?: string) {
+  function revealTrack(trackId: string, gesture: 'select-track' | 'tap-clip' | 'edit-notes', clipId?: string) {
     const track = project.tracks.find((item) => item.id === trackId)
     const surface = editorForGesture(gesture, track?.type ?? '', track)
     if (surface === 'pads') onOpenBeatMachine?.(trackId)
     else if (surface === 'steps') onOpenSteps?.(trackId)
+    else if (surface === 'bass' || surface === 'patch' || surface === 'rack' || surface === 'scaler') onOpenInstrument?.(trackId)
     else if (surface === 'keyboard') onOpenKeyboard?.(trackId)
     else if (surface === 'piano') onOpenPiano(trackId, clipId)
   }
@@ -1558,9 +1565,7 @@ export function ArrangeView({
                       event.stopPropagation()
                       lastClipTap.current = { id: '', at: 0 }
                       store.selectClip(track.id, clip.id, true, false)
-                      const surface = editorForGesture('tap-clip', track.type, track)
-                      if (surface === 'steps') onOpenSteps?.(track.id)
-                      else onOpenPiano(track.id, clip.id)
+                      revealTrack(track.id, 'tap-clip', clip.id)
                     }}
                   >
                     <em>{clip.name}</em>

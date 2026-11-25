@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
+import { PianoRollButton } from './PianoRollButton'
 import type { AudioEngine } from '../audio/engine'
 import { interactiveAudioContext } from '../audio/micTap'
 import { detectRoot } from '../audio/sample/engine'
@@ -45,12 +46,14 @@ export function PatchSheet({
   engine,
   trackId,
   initialSounds,
+  onPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   trackId: string
   /** Tests pass downloaded samples so the Load menu renders without the network. */
   initialSounds?: SoundEntry[]
+  onPiano?: () => void
 }) {
   const track = store.track(trackId)
   const patch = track?.omniPatch
@@ -120,6 +123,7 @@ export function PatchSheet({
           {patch.enabled ? 'On' : 'Off'}
         </button>
         <button type="button" className="text-btn" title={controlHelp('name')} onClick={() => store.saveOmniPatch(trackId)}>Save</button>
+        {onPiano && <PianoRollButton onClick={onPiano} />}
         <select
           aria-label="Load patch"
           title="Load one downloaded sample onto a sampler layer, or a patch saved in this project. Analog, wavetable, and FM layers stay as they are."

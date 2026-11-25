@@ -25,7 +25,7 @@ import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
-import { editorForGesture, releaseKeyboardForPiano } from './model/editorOpen'
+import { editorForGesture, instrumentFace, releaseKeyboardForPiano } from './model/editorOpen'
 import { shouldCloseOnscreenPiano } from './model/onscreenPiano'
 import { armedRecordPlan, playPress, playStartsCapture, recordPress, startPress, stopPress } from './model/transport'
 import { keepLandscapeAfterClose } from './ui/keyboardStage'
@@ -2039,6 +2039,40 @@ async function importDropped(files: FileList) {
     notifyKeyboard(true)
   }
 
+  function openInstrument(trackId: string) {
+    const track = store.project.tracks.find((item) => item.id === trackId)
+    if (!track) return
+    const face = instrumentFace(track)
+    setPianoOpen(false)
+    if (face === 'bass') {
+      store.showBass(trackId)
+      return
+    }
+    if (face === 'pads') {
+      openBeatMachine(trackId)
+      return
+    }
+    if (face === 'steps') {
+      openStepSequencer(trackId)
+      return
+    }
+    if (face === 'scaler') {
+      setSurface('studio')
+      setPhonePane('edit')
+      store.showScaler(trackId)
+      return
+    }
+    if (face === 'rack') {
+      store.showRack(trackId)
+      return
+    }
+    if (face === 'patch') {
+      store.showPatch(trackId)
+      return
+    }
+    openKeyboard(trackId)
+  }
+
   function openKeyboard(trackId: string) {
     const track = store.project.tracks.find((item) => item.id === trackId)
     if (!track) return
@@ -2393,6 +2427,7 @@ async function importDropped(files: FileList) {
                   onOpenPiano={openPiano}
                   onOpenSteps={openStepSequencer}
                   onOpenKeyboard={openKeyboard}
+                  onOpenInstrument={openInstrument}
                   onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}
                   onOpenBeatMachine={openBeatMachine}
@@ -2456,7 +2491,7 @@ async function importDropped(files: FileList) {
             title="Drag to resize the editor."
           />
           {surface === 'studio' && panel === 'scaler' && store.scalerTrackId && (
-            <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
+            <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} onPiano={() => openPiano(store.scalerTrackId!)} />
           )}
           {surface === 'studio' && panel === 'steps' && store.stepTrackId && (
             <Suspense fallback={<PendingPane className="step-sequencer" label="Step sequencer" />}>
@@ -2470,6 +2505,7 @@ async function importDropped(files: FileList) {
                 engine={engine}
                 trackId={store.bassTrackId}
                 onClose={() => store.closeBass()}
+                onPiano={() => openPiano(store.bassTrackId!)}
                 onRecord={() => { engine.unlock(); void record() }}
                 onStop={() => { void stop() }}
                 onPlay={() => { engine.unlock(); void play() }}
@@ -2486,13 +2522,14 @@ async function importDropped(files: FileList) {
               onStop={() => { void stop() }}
               onPlay={() => { engine.unlock(); void play() }}
               onEdit={(clipId) => openPiano(store.padsTrackId!, clipId)}
+              onPiano={() => openPiano(store.padsTrackId!)}
               onKeyboard={openBeatKeyboard}
             />
             </Suspense>
           )}
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
             <Suspense fallback={<PendingPane className="rack" label="Instrument" />}>
-              <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
+              <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} onPiano={() => openPiano(store.rackTrackId!)} />
             </Suspense>
           )}
           {surface === 'studio' && panel === 'piano' && (
@@ -2509,7 +2546,7 @@ async function importDropped(files: FileList) {
       )}
       {store.patchTrackId && (
         <Suspense fallback={<SheetFallback label="Patch" onClose={() => store.openPatch(store.patchTrackId!)} />}>
-          <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />
+          <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} onPiano={() => openPiano(store.patchTrackId!)} />
         </Suspense>
       )}
       {store.quantizeOpen && (

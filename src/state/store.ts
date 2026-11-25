@@ -1826,6 +1826,25 @@ export class ProjectStore {
     this.emit()
   }
 
+  /** Open Scaler and leave it open. A second tap on the track must not shut it. */
+  showScaler(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (!trackHasScaler(track)) {
+      this.setTrackInstrument(trackId, 'scaler')
+      return
+    }
+    this.rackTrackId = null
+    this.patchTrackId = null
+    this.padsTrackId = null
+    this.bassTrackId = null
+    this.stepTrackId = null
+    this.pluginFocus = null
+    if (this.scalerTrackId === trackId) return
+    this.scalerTrackId = trackId
+    this.emit()
+  }
+
   closeScaler() {
     if (!this.scalerTrackId) return
     this.scalerTrackId = null
@@ -6445,8 +6464,37 @@ export class ProjectStore {
     this.scalerTrackId = null
     this.padsTrackId = null
     this.patchTrackId = null
+    this.bassTrackId = null
+    this.stepTrackId = null
+    this.pluginFocus = null
     this.rackTrackId = trackId
     this.rackFlip = false
+    this.emit()
+  }
+
+  /** Open the synth patch and leave it open. A sampled instrument opens the rack instead. */
+  showPatch(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (isSampledInstrument(track)) {
+      this.showRack(trackId)
+      return
+    }
+    this.scalerTrackId = null
+    this.padsTrackId = null
+    this.bassTrackId = null
+    this.stepTrackId = null
+    this.rackTrackId = null
+    this.pluginFocus = null
+    const opening = this.patchTrackId !== trackId
+    this.patchTrackId = trackId
+    if (opening && !track.omniPatch) {
+      this.mutate(() => {
+        const live = this.track(trackId)
+        if (live?.type === 'midi' && !live.omniPatch) live.omniPatch = emptyOmni(live.name)
+      })
+      return
+    }
     this.emit()
   }
 

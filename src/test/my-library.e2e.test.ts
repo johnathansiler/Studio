@@ -455,8 +455,22 @@ describe('my library on a phone', () => {
       await page.locator('[data-loop-chip="bass"]').waitFor()
       expect(await page.locator('[data-loop-chip="bass"]').innerText()).toMatch(/Bass\s+2/)
       await page.locator('[data-loop-chip="bass"]').click()
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.getByRole('button', { name: 'Near tempo', exact: true }).click()
+      await page.locator('.loop-filter-sheet').waitFor({ state: 'hidden' })
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.getByRole('button', { name: 'In C', exact: true }).click()
+      await page.locator('.loop-filter-sheet').waitFor({ state: 'hidden' })
+      const bassRow = page.locator('[data-library-key="audio/bass/Sub_120_C.wav"]')
+      await bassRow.waitFor()
+      const seen = await bassRow.evaluate((node) => {
+        const box = node.getBoundingClientRect()
+        const sheet = document.querySelector('.loop-filter-sheet, .library-filter-sheet')
+        const sheetBox = sheet instanceof HTMLElement && sheet.getClientRects().length ? sheet.getBoundingClientRect() : null
+        const covered = !!sheetBox && box.top < sheetBox.bottom && box.bottom > sheetBox.top && box.left < sheetBox.right && box.right > sheetBox.left
+        return box.height > 20 && box.top >= 0 && box.top < window.innerHeight && !covered
+      })
+      expect(seen).toBe(true)
       await expect.poll(async () => page.locator('[data-library-key="audio/bass/Sub_120_C.wav"]').count()).toBe(1)
       await expect.poll(async () => page.locator('[data-library-key="audio/bass/Sub_80_Am.wav"]').count()).toBe(0)
       await page.locator('[data-loop-chip="all"]').click()

@@ -33,8 +33,9 @@ export function keyboardHome(code: string, key: string): number | null {
   return LETTER_NOTES[letter] ?? null
 }
 
-export function keyboardPitch(home: number, octave: number): number {
-  return Math.max(0, Math.min(127, home + octave * 12))
+export function keyboardPitch(home: number, octave: number, semitone = 0): number {
+  const step = Number.isFinite(semitone) ? Math.round(semitone) : 0
+  return Math.max(0, Math.min(127, home + octave * 12 + step))
 }
 
 /** Z lowers the octave. X raises it. Anything else is not an octave key. */

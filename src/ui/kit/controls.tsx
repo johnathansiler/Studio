@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { isBlackKey } from '../../model/keyShift'
 import { attachGlissando } from '../glissando'
+import { KeyNudge, rememberSwipe, useKeySlide, useKeyStart } from '../keyNudge'
 import { controlLaw } from '../../model/mixLaw'
 import { attachControlGesture, dragValue, type GestureChange, type GestureElement, type GestureReadout } from '../gestures'
 import type { FaceTheme } from '../faces/themes'
@@ -289,21 +291,27 @@ export function octaveName(note: number) {
 
 export function Keyboard({
   compact = false,
+  instrument = 'keys',
   onDown,
   onUp,
 }: {
   compact?: boolean
+  /** Remembers the semitone window separately for each instrument. */
+  instrument?: string
   /** Velocity follows pointer pressure. A mouse press uses 0.85. */
   onDown?: (note: number, velocity?: number) => void
   onUp?: (note: number) => void
 }) {
   const octaves = compact ? 2 : 3
   const base = compact ? 48 : 36
-  const [shift, setShift] = useState(0)
-  const start = Math.max(0, Math.min(96, base + shift * 12))
-  const whites = keyboardNotes(octaves, start)
-  const top = whites[whites.length - 1]
+  const span = octaves * 12 + 1
+  const { start, move } = useKeyStart(instrument, base, span)
+  const slide = useKeySlide(start)
+  const aligned = start % 12 === 0
+  const whites = aligned ? keyboardNotes(octaves, start) : shiftedWhites(start, octaves)
+  const top = whites[whites.length - 1] ?? start
   const root = useRef<HTMLDivElement>(null)
+  const drag = useRef({ x: 0, y: 0 })
   const downRef = useRef(onDown)
   const upRef = useRef(onUp)
   downRef.current = onDown
@@ -322,14 +330,21 @@ export function Keyboard({
   }, [start])
   return (
     <div className={`kit-keyboard${compact ? ' compact' : ''}`}>
-      <div className="kit-octave">
-        <button type="button" aria-label="Octave down" title="Lower the keyboard by one octave." disabled={start <= 0} onClick={() => setShift((value) => Math.max(-3, value - 1))}>−</button>
-        <span>{octaveName(start)}</span>
-        <button type="button" aria-label="Octave up" title="Raise the keyboard by one octave." disabled={start >= 96} onClick={() => setShift((value) => Math.min(4, value + 1))}>+</button>
-      </div>
-      <div ref={root} className={`kit-keys${compact ? ' compact' : ''}`} role="group" aria-label="Keyboard">
+      <KeyNudge low={start} span={span} octaveLabels onStep={move} />
+      <div
+        ref={root}
+        className={`kit-keys${compact ? ' compact' : ''}`}
+        role="group"
+        aria-label="Keyboard"
+        style={slide}
+        onPointerDown={(event) => { drag.current = { x: event.clientX, y: event.clientY } }}
+        onPointerUp={(event) => {
+          const steps = rememberSwipe(event.clientX - drag.current.x, event.clientY - drag.current.y, 32)
+          if (steps) move(steps)
+        }}
+      >
         {whites.map((note) => {
-          const black = blackAfter(note)
+          const black = aligned ? blackAfter(note) : (isBlackKey(note + 1) && note + 1 < top ? note + 1 : null)
           const showBlack = black != null && black < top
           return (
             <div className="slot" key={note}>
@@ -355,6 +370,17 @@ export function Keyboard({
       </div>
     </div>
   )
+}
+
+function shiftedWhites(start: number, octaves: number) {
+  const want = octaves * 7 + 1
+  const whites: number[] = []
+  let note = start
+  while (whites.length < want && note <= 127) {
+    if (!isBlackKey(note)) whites.push(note)
+    note += 1
+  }
+  return whites
 }
 
 export function Shell({

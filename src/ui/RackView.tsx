@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Keyboard, Knob } from './kit/controls'
+import { PianoRollButton } from './PianoRollButton'
 import type { AudioEngine } from '../audio/engine'
 import { LibraryPanel } from './LibraryPanel'
 import { SamplerFace } from './SamplerFace'
@@ -13,7 +14,7 @@ import './instrument.css'
 import { useScreenOverlay } from './screenOverlay'
 import { PluginTransport } from './pluginTransport'
 
-export function RackView({ store, engine, trackId, onOpenKnock }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void }) {
+export function RackView({ store, engine, trackId, onOpenKnock, onPiano }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void; onPiano?: () => void }) {
   const rackState = selectRack(store, trackId)
   const track = rackState.track
   const rack = rackState.rack
@@ -51,6 +52,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
             ))}
           </div>
         )}
+        {onPiano && <PianoRollButton onClick={onPiano} />}
         <button type="button" className="bevel inst-close overlay-close" aria-label="Close the instrument panel." title="Close the instrument panel." onClick={() => store.openRack(track.id)}>Close</button>
       </header>
       {sampled ? (

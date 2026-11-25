@@ -106,4 +106,25 @@ export function syncPhoneSheetFrame(root?: ParentNode | null) {
   target.style.setProperty('--phone-chrome-bottom', `${Math.round(bottomInset)}px`)
   target.style.setProperty('--phone-sheet-room', `${Math.round(room)}px`)
   target.style.setProperty('--phone-sheet-h', `${Math.round(Math.max(96, height))}px`)
+  syncPluginClearance(shell)
+}
+
+/** Plugin sheets stop under the arrange ruler so transport, loop, and playhead stay usable. */
+export function syncPluginClearance(shell: Element) {
+  const target = document.documentElement
+  const transport = shell.querySelector('.transport')?.getBoundingClientRect()
+  const arrange = shell.querySelector('.arrange')
+  const workspace = shell.querySelector('.workspace')?.getBoundingClientRect()
+  let stack = 64
+  if (arrange instanceof HTMLElement) {
+    const raw = getComputedStyle(arrange).getPropertyValue('--ruler-stack')
+    const parsed = parseFloat(raw)
+    if (Number.isFinite(parsed) && parsed > 8) stack = parsed
+  }
+  const transportBottom = transport && transport.height > 8 ? transport.bottom : 0
+  const arrangeTop = arrange?.getBoundingClientRect().top ?? transportBottom
+  const clear = Math.max(transportBottom, arrangeTop) + stack
+  const dockTop = workspace ? Math.max(0, clear - workspace.top) : stack
+  target.style.setProperty('--plugin-clear-top', `${Math.round(clear)}px`)
+  target.style.setProperty('--plugin-dock-top', `${Math.round(dockTop)}px`)
 }
