@@ -50,6 +50,30 @@ export function startTransportHit(opts: {
   resident: AudioBuffer | null
   hold?: (end: number, nodes: AudioNode[]) => void
 }) {
+  // A snare is noise plus a tone. Both layers are one hit, so the voice list
+  // keeps a single entry that stops every node together.
+  const kept: AudioNode[] = []
+  let until = opts.when
+  const keep = opts.hold
+    ? (end: number, nodes: AudioNode[]) => {
+        if (end > until) until = end
+        kept.push(...nodes)
+      }
+    : undefined
+  playTransportHit({ ...opts, hold: keep })
+  if (opts.hold && kept.length) opts.hold(until, kept)
+}
+
+function playTransportHit(opts: {
+  ctx: BaseAudioContext
+  destination: AudioNode
+  hit: RenderedHit
+  when: number
+  dur: number
+  noise: AudioBuffer
+  resident: AudioBuffer | null
+  hold?: (end: number, nodes: AudioNode[]) => void
+}) {
   const { ctx, destination, hit, when, noise, resident, hold } = opts
   const dur = opts.dur
   if (hit.kind === 'kick') {

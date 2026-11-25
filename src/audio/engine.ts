@@ -3571,13 +3571,19 @@ export class AudioEngine {
         this.nextLoopSample = ((this.playOriginSample % patternLoop) + patternLoop) % patternLoop
       }
       this.realignCursor('pattern', patternLoop)
+      // One cycle ahead, and never past the transport horizon. A second copy of
+      // a 16-step kit inside the 3 s window is what pushed the voice list over
+      // its cap; the 40 ms wake refills the cycle as it plays.
+      const cycleSec = patternLoop / this.sampleRate
+      const patternHorizon = Math.min(horizon, (this.ctx?.currentTime ?? horizon) + cycleSec)
       let passes = 0
-      while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && passes < MAX_SCHEDULE_PASSES) {
+      while (this.nextLoopCtx != null && this.nextLoopCtx < patternHorizon && passes < MAX_SCHEDULE_PASSES) {
         if (this.nextLoopSample >= patternLoop) {
           this.nextLoopSample = 0
           continue
         }
-        const samples = this.horizonSamples(patternLoop - this.nextLoopSample)
+        const room = Math.max(0, Math.floor((patternHorizon - this.nextLoopCtx) * this.sampleRate))
+        const samples = this.horizonSamples(Math.min(patternLoop - this.nextLoopSample, room))
         if (!(samples > 0)) break
         const started = this.nextLoopSample
         this.scheduleWindow(this.nextLoopCtx, started, started + samples)
