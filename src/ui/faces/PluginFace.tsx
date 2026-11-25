@@ -62,7 +62,7 @@ export function PluginFace({
       {family === 'mod' && <ModStage pluginId={pluginId} values={values} />}
       {family === 'inst' && pluginId !== 'looper' && <InstStage pluginId={pluginId} />}
       {family === 'util' && <UtilStage pluginId={pluginId} values={values} vu={vu} />}
-      {keyboard && <Keyboard compact={compact} onDown={(note) => onNote?.(note, true)} onUp={(note) => onNote?.(note, false)} />}
+      {keyboard && <Keyboard compact={compact} instrument={pluginId} onDown={(note) => onNote?.(note, true)} onUp={(note) => onNote?.(note, false)} />}
       {children}
       {showParams && (
         <div className={`kit-body${compact && !open ? ' shut' : ''}`}>

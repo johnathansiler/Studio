@@ -248,6 +248,7 @@ describe('fast browse chrome', () => {
       onJump: () => undefined,
       onStep: () => undefined,
       onToggleStuck: () => undefined,
+      filterOpen: true,
     }))
     expect(loopsHtml).toContain('Drums 1')
     expect(loopsHtml).toContain('Bass 1')

@@ -1,7 +1,8 @@
 import { showsOpenBeatMachine } from '../instruments/pads/identity'
 
 export type EditorGesture = 'select-track' | 'tap-clip' | 'edit-notes'
-export type EditorSurface = 'keyboard' | 'piano' | 'pads' | 'steps' | 'none'
+export type EditorSurface = 'keyboard' | 'piano' | 'pads' | 'steps' | 'bass' | 'patch' | 'rack' | 'scaler' | 'none'
+export type InstrumentFace = 'pads' | 'steps' | 'bass' | 'patch' | 'rack' | 'scaler'
 
 export function hasStepSequencer(track?: { plugins?: { pluginId: string }[] } | null): boolean {
   return !!track?.plugins?.some((plugin) => plugin.pluginId === 'steps')
@@ -13,20 +14,31 @@ export interface GestureTrack {
 }
 
 /**
- * A track header opens the one-octave keyboard. A Beat Machine header opens its pad panel.
- * A Step Sequencer header or any of its clips opens the sequencer, not the piano roll.
- * Tapping another MIDI clip, including a clip on a Beat Machine track, opens the piano roll.
- * Edit Notes opens the piano roll. Audio clips have no notes, so a tap leaves the editors alone.
+ * The plugin that belongs on this MIDI track.
+ * A bare Keys track (no instrument chosen yet) opens the patch. Audio has none.
+ */
+export function instrumentFace(track?: GestureTrack | null): InstrumentFace | null {
+  if (!track) return null
+  if (hasStepSequencer(track)) return 'steps'
+  if (track.instrument === '808' || showsOpenBeatMachine({ type: 'midi', instrument: track.instrument, plugins: track.plugins })) return 'pads'
+  const plugins = track.plugins ?? []
+  if (track.instrument === 'bass808' || plugins.some((plugin) => plugin.pluginId === 'bass808')) return 'bass'
+  if (track.instrument === 'scaler' || plugins.some((plugin) => plugin.pluginId === 'scaler')) return 'scaler'
+  if (track.instrument === 'sampler' || track.instrument === 'library' || plugins.some((plugin) => plugin.pluginId === 'sampler')) return 'rack'
+  if (track.instrument === 'none' || track.instrument == null) return null
+  if (track.instrument === 'synth' || plugins.some((plugin) => plugin.pluginId === 'synth')) return 'patch'
+  return null
+}
+
+/**
+ * Tapping a track header or clip opens that track's instrument plugin.
+ * Edit Notes is the only gesture that opens the piano roll.
+ * A Step Sequencer track opens the sequencer. Audio has nothing to open.
  */
 export function editorForGesture(gesture: EditorGesture, trackType: string, track?: GestureTrack | null): EditorSurface {
-  if (trackType === 'midi' && track && hasStepSequencer(track)) return 'steps'
-  if (gesture === 'edit-notes' || gesture === 'tap-clip') return trackType === 'midi' ? 'piano' : 'none'
-  if (trackType === 'midi' && gesture === 'select-track') {
-    if (track && showsOpenBeatMachine({ type: 'midi', instrument: track.instrument, plugins: track.plugins })) return 'pads'
-    if (track && hasStepSequencer(track)) return 'steps'
-    return 'keyboard'
-  }
-  return 'none'
+  if (trackType !== 'midi') return 'none'
+  if (gesture === 'edit-notes') return hasStepSequencer(track) ? 'steps' : 'piano'
+  return instrumentFace(track) ?? (gesture === 'tap-clip' ? 'piano' : 'keyboard')
 }
 
 /** The one-octave keyboard and the piano roll never share the screen. */

@@ -126,8 +126,7 @@ describe('phone reach, dock, loop handle, and fader', () => {
       expect(remove).toBeUndefined()
       expect(songLoop?.icon).toBe(true)
       expect(count?.text).toMatch(/1 bar/)
-      expect(copy?.icon).toBe(true)
-      expect(copy?.text).not.toContain('Duplicate')
+      expect(copy, 'Duplicate stays hidden until a clip is selected').toBeUndefined()
       await page.screenshot({ path: '/opt/cursor/artifacts/dock-after-phone.png', clip: { x: 0, y: 640, width: 390, height: 204 } })
 
       const three = await page.evaluate(() => {

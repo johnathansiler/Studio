@@ -18,7 +18,9 @@ import { playScalerLive } from '../instruments/scaler/live'
 import { beatHitForTrack, beatKeyAt, beatOctaveHasPads, beatPageLabel, isBeatMachineInstrument, type BeatHit } from '../model/beatKeys'
 import { typingTarget } from '../state/history'
 import type { ProjectStore } from '../state/store'
-import { octaveName } from './kit/controls'
+import { noteName } from '../model/keyShift'
+import { rememberSwipe, useKeySlide, useKeyStart } from './keyNudge'
+import { PianoRollButton } from './PianoRollButton'
 import { notifyKeyboard } from './keyboardStage'
 import { useScreenOverlay } from './screenOverlay'
 import { miniPads, padGridColumn, padLabel } from './miniKeys'
@@ -143,6 +145,9 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
   const route = noteTarget(store.project.tracks, store.selectedTrackId)
   const editor = store.midiEditor()
   const octave = editor.octave
+  const host = route.kind === 'instrument' ? store.track(route.trackId) : null
+  const instrument = host?.instrument || 'keys'
+  const keyWindow = useKeyStart(instrument, 48, 12)
   const [lit, setLit] = useState<number[]>([])
   const held = useRef(new Map<string, number[]>())
   const armed = useRef<ArmedKey[]>([])
@@ -150,12 +155,17 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
   const recording = useRef(engine.status === 'recording')
   const shiftRef = useRef<(delta: -1 | 1) => void>(() => undefined)
   const octaveRef = useRef(octave)
+  const startRef = useRef(keyWindow.start)
   const pressRef = useRef<(token: string, pitch: number, velocity: number, eventMs: number) => void>(() => undefined)
   const releaseRef = useRef<(token: string, eventMs: number) => void>(() => undefined)
+  const swipe = useRef({ x: 0, y: 0 })
+  const beatRef = useRef(false)
   octaveRef.current = octave
+  startRef.current = keyWindow.start
 
   function shift(delta: -1 | 1) {
-    store.setMidiEditor({ octave: octave + delta })
+    if (host && isBeatMachineInstrument(host.instrument)) store.setMidiEditor({ octave: octave + delta })
+    else keyWindow.move(delta * 12)
   }
   shiftRef.current = shift
 
@@ -264,7 +274,10 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
       if (claim === 'note') {
         const home = keyboardHome(event.code, event.key)
         if (home == null) return
-        pressRef.current(event.code || event.key, keyboardPitch(home, octaveRef.current), 0.85, event.timeStamp)
+        const shifted = beatRef.current
+          ? keyboardPitch(home, octaveRef.current)
+          : keyboardPitch(home, 0, startRef.current - 48)
+        pressRef.current(event.code || event.key, shifted, 0.85, event.timeStamp)
       }
     }
     const onUp = (event: KeyboardEvent) => {
@@ -285,13 +298,20 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
     }
   }, [store, engine, store.keyboardMidi])
 
+  const beatKit = host && isBeatMachineInstrument(host.instrument) ? host.padKit : null
+  beatRef.current = !!beatKit
+  const low = beatKit ? keyboardStart(octave) : keyWindow.start
+  const slide = useKeySlide(low)
+
+  function nudge(delta: number) {
+    keyWindow.move(delta)
+  }
+
   if (!store.keyboardMidi) return null
-  const beatTrack = route.kind === 'instrument' ? store.track(route.trackId) : null
-  const beatKit = beatTrack && isBeatMachineInstrument(beatTrack.instrument) ? beatTrack.padKit : null
-  const pads = miniPads(octave)
-  const name = beatKit ? beatPageLabel(beatKit, octave) : octaveName(keyboardStart(octave))
-  const atBottom = beatKit ? !beatOctaveHasPads(beatKit, octave - 1) : octave <= -4
-  const atTop = beatKit ? !beatOctaveHasPads(beatKit, octave + 1) : octave >= 5
+  const pads = beatKit ? miniPads(octave) : miniPads(0, low - 48)
+  const name = beatKit ? beatPageLabel(beatKit, octave) : noteName(low)
+  const atBottom = beatKit ? !beatOctaveHasPads(beatKit, octave - 1) : low <= 0
+  const atTop = beatKit ? !beatOctaveHasPads(beatKit, octave + 1) : low >= 116
   const caption = (step: number, fallback: string) => {
     if (!beatKit) return fallback
     return beatKeyAt(beatKit, octave, step)?.name ?? ''
@@ -301,13 +321,26 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
       <div className="keyboard-face">
       <div className="keyboard-octave" role="group" aria-label="Octave">
         <button type="button" disabled={atBottom} onClick={() => shift(-1)}>Octave Down</button>
+        {!beatKit && <button type="button" className="key-step" aria-label="Semitone down" title="Lower the keyboard by one key." disabled={low <= 0} onClick={() => nudge(-1)}>&lt;</button>}
         <span aria-live="polite">{name}</span>
+        {!beatKit && <button type="button" className="key-step" aria-label="Semitone up" title="Raise the keyboard by one key." disabled={low >= 116} onClick={() => nudge(1)}>&gt;</button>}
         <button type="button" disabled={atTop} onClick={() => shift(1)}>Octave Up</button>
-        <button type="button" className="keyboard-edit" onClick={() => onEditNotes?.()}>Edit Notes</button>
+        <PianoRollButton className="keyboard-edit" onClick={() => onEditNotes?.()} />
         <button type="button" className="keyboard-close overlay-close" onClick={() => { store.setKeyboardMidi(false); notifyKeyboard(false) }}>Close</button>
       </div>
       {route.kind === 'silent' && <p className="keyboard-hint" role="status">{INSTRUMENT_HINT}</p>}
-      <div className="mini-board" role="group" aria-label={beatKit ? 'Beat machine pads' : 'Piano keyboard'}>
+      <div
+        className="mini-board"
+        role="group"
+        aria-label={beatKit ? 'Beat machine pads' : 'Piano keyboard'}
+        style={slide}
+        onPointerDown={(event) => { swipe.current = { x: event.clientX, y: event.clientY } }}
+        onPointerUp={(event) => {
+          if (beatKit) return
+          const steps = rememberSwipe(event.clientX - swipe.current.x, event.clientY - swipe.current.y, 36)
+          if (steps) nudge(steps)
+        }}
+      >
         {[...pads.sharps, ...pads.naturals].map((pad) => {
           const label = caption(pad.step, pad.name)
           const heard = beatKit ? beatKeyAt(beatKit, octave, pad.step) : null

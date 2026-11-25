@@ -82,7 +82,7 @@ export function SamplerFace({ store, engine, trackId }: { store: ProjectStore; e
           <LibraryLoop store={store} trackId={track.id} program={program} />
         ) : null}
       </div>
-      <Keyboard compact onDown={(note, velocity) => play(note, velocity)} onUp={(note) => engine.releaseRack(track.id, note)} />
+      <Keyboard compact instrument={track.instrument === 'library' ? 'library' : 'sampler'} onDown={(note, velocity) => play(note, velocity)} onUp={(note) => engine.releaseRack(track.id, note)} />
     </section>
   )
 }

@@ -1,16 +1,22 @@
-/* Step Sequencer and Beat Machine fill the area under the transport and above the edit bar. */
+/* Instrument plugins fill from just under the arrange ruler to the phone dock.
+   The transport, loop handles, and playhead strip stay in the main pane. */
 
 .shell[data-plugin="steps"] .workspace,
 .shell[data-plugin="pads"] .workspace,
-.shell[data-plugin="bass"] .workspace {
+.shell[data-plugin="bass"] .workspace,
+.shell[data-plugin="scaler"] .workspace,
+.shell[data-plugin="rack"] .workspace {
   position: relative;
 }
 
 .shell[data-plugin="steps"] .workspace > .dock-slot,
 .shell[data-plugin="pads"] .workspace > .dock-slot,
-.shell[data-plugin="bass"] .workspace > .dock-slot {
+.shell[data-plugin="bass"] .workspace > .dock-slot,
+.shell[data-plugin="scaler"] .workspace > .dock-slot,
+.shell[data-plugin="rack"] .workspace > .dock-slot {
   position: absolute;
-  inset: 0;
+  /* Leave the ruler, loop handles, and playhead strip above the plugin. */
+  inset: var(--plugin-dock-top, var(--ruler-stack, 64px)) 0 0 0;
   z-index: 8;
   width: auto;
   max-width: none;
@@ -21,26 +27,44 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  pointer-events: none;
+}
+
+.shell[data-plugin="steps"] .workspace > .dock-slot > *,
+.shell[data-plugin="pads"] .workspace > .dock-slot > *,
+.shell[data-plugin="bass"] .workspace > .dock-slot > *,
+.shell[data-plugin="scaler"] .workspace > .dock-slot > *,
+.shell[data-plugin="rack"] .workspace > .dock-slot > * {
+  pointer-events: auto;
 }
 
 .shell[data-plugin="steps"] .workspace > .dock-slot > .dock-resize,
 .shell[data-plugin="pads"] .workspace > .dock-slot > .dock-resize,
-.shell[data-plugin="bass"] .workspace > .dock-slot > .dock-resize {
+.shell[data-plugin="bass"] .workspace > .dock-slot > .dock-resize,
+.shell[data-plugin="scaler"] .workspace > .dock-slot > .dock-resize,
+.shell[data-plugin="rack"] .workspace > .dock-slot > .dock-resize {
   display: none;
 }
 
 .shell[data-plugin="steps"] .workspace > .main-pane,
 .shell[data-plugin="pads"] .workspace > .main-pane,
-.shell[data-plugin="bass"] .workspace > .main-pane {
-  pointer-events: none;
+.shell[data-plugin="bass"] .workspace > .main-pane,
+.shell[data-plugin="scaler"] .workspace > .main-pane,
+.shell[data-plugin="rack"] .workspace > .main-pane {
+  pointer-events: auto;
+  flex: 1 1 auto;
+  max-height: none;
 }
 
 .shell[data-plugin="steps"] .workspace > .dock-slot > .step-sequencer,
 .shell[data-plugin="pads"] .workspace > .dock-slot > .mpc,
-.shell[data-plugin="bass"] .workspace > .dock-slot > .bass808 {
+.shell[data-plugin="bass"] .workspace > .dock-slot > .bass808,
+.shell[data-plugin="scaler"] .workspace > .dock-slot > .scaler-panel,
+.shell[data-plugin="rack"] .workspace > .dock-slot > .rack {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .shell[data-plugin="pads"] .mpc > .hw-body {

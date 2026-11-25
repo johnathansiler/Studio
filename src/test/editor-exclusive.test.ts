@@ -37,7 +37,8 @@ describe('keyboard and piano roll stay exclusive', () => {
     expect(editorForGesture('select-track', 'midi')).toBe('keyboard')
     expect(editorForGesture('select-track', 'midi', { instrument: 'pads' })).toBe('pads')
     expect(editorForGesture('tap-clip', 'midi')).toBe('piano')
-    expect(editorForGesture('tap-clip', 'midi', { instrument: 'pads' })).toBe('piano')
+    expect(editorForGesture('tap-clip', 'midi', { instrument: 'pads' })).toBe('pads')
+    expect(editorForGesture('select-track', 'midi', { instrument: 'bass808' })).toBe('bass')
     expect(editorForGesture('edit-notes', 'midi')).toBe('piano')
     expect(editorForGesture('tap-clip', 'audio')).toBe('none')
   })
@@ -364,6 +365,8 @@ describe('editors, close, and header meters in the app', () => {
           return hook.store.selectedMidiClipId
         })
         await page.locator(`[data-clip="${beatClip}"]`).dblclick()
+        await page.locator('[data-pads="plugin"]').waitFor()
+        await page.getByRole('button', { name: 'Piano Roll', exact: true }).click()
         await page.locator('[data-editor="piano"]').waitFor()
         expect(await page.locator('[data-pads="plugin"]').count(), label).toBe(0)
         expect(await page.locator('[data-keyboard-dock="open"]').count(), label).toBe(0)

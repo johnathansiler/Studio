@@ -345,6 +345,7 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
       {sampler && (plugin.params.keys >= 0.5 ? (
         <Keyboard
           compact={phone}
+          instrument={trackId === 'master' ? 'sampler' : (store.track(trackId)?.instrument || 'sampler')}
           onDown={(note, velocity) => {
             setBurst(velocity ?? 0.85)
             engine.previewSample(plugin.id, note, velocity)

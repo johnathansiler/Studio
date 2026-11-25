@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { useProjectVersion } from './playbackUi'
+import { PianoRollButton } from './PianoRollButton'
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import { applyPadKitSamples, ensureDefaultKit } from '../instruments/pads/load'
@@ -75,6 +76,7 @@ export function PadsPanel({
   onStop,
   onPlay,
   onEdit,
+  onPiano,
   onKeyboard,
   chopStartsOpen = false,
   vintageStartsOpen = false,
@@ -86,6 +88,7 @@ export function PadsPanel({
   onStop?: () => void
   onPlay?: () => void
   onEdit: (clipId: string) => void
+  onPiano?: () => void
   onKeyboard?: () => void
   /** First paint only, so a static render can show the chop editor. */
   chopStartsOpen?: boolean
@@ -548,6 +551,7 @@ export function PadsPanel({
           >
             Keyboard
           </button>
+          {onPiano && <PianoRollButton onClick={onPiano} />}
           <button
             type="button"
             className="mpc-close"

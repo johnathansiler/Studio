@@ -869,7 +869,7 @@ export function MyLibrary({
           <div className="library-sticky">
           <div className="sound-filters library-search">
             <input aria-label="Search my library" placeholder="Search" value={text} onChange={(event) => setText(event.target.value)} />
-            <button
+            {fastMode !== 'loop' && <button
               type="button"
               className={`sound-filter library-filter-btn${activeCount ? ' on' : ''}`}
               aria-expanded={filtersOpen}
@@ -880,7 +880,7 @@ export function MyLibrary({
             >
               <FilterIcon />
               {activeCount > 0 && <span className="filter-badge">{activeCount}</span>}
-            </button>
+            </button>}
             <button type="button" className="sound-filter library-lock-btn" onClick={lock}>Lock</button>
           </div>
           {variant === 'library' && (
@@ -980,7 +980,7 @@ export function MyLibrary({
                 </div>
               )}
           </div>}
-          {(active.length > 0 || quick) && (
+          {fastMode !== 'loop' && (active.length > 0 || quick) && (
             <div className="library-active-bar" role="group" aria-label="Active filters">
               {quick && (
                 <button type="button" className="library-active-chip" aria-label={`Clear ${quick === 'recent' ? 'Recent' : 'Favorites'}`} onClick={() => {
@@ -1094,7 +1094,7 @@ export function MyLibrary({
             {counted === 0 && <p className="sound-status">Nothing matches.</p>}
             {fastModel && fastModel.rows.length > 0 && (
               <div className="fast-list" style={{ height: fastModel.total, position: 'relative', width: '100%', maxWidth: '100%' }}>
-                <div style={{ position: 'absolute', top: fastModel.offsets[range.start] ?? 0, left: 0, right: 28, maxWidth: '100%' }}>
+                <div style={{ position: 'absolute', top: fastModel.offsets[range.start] ?? 0, left: 0, right: 48, maxWidth: '100%' }}>
                   {fastShown.map((row) => row.kind === 'head' ? (
                     <button
                       key={row.id}
@@ -1388,6 +1388,7 @@ export function FastShelf({
   onJump,
   onStep,
   onToggleStuck,
+  filterOpen = false,
 }: {
   mode: 'drum' | 'loop'
   model: ReturnType<typeof buildFastRows>
@@ -1412,17 +1413,107 @@ export function FastShelf({
   onJump: (id: string) => void
   onStep: (dir: number) => void
   onToggleStuck: () => void
+  /** Tests open the key and tempo sheet on the first paint. */
+  filterOpen?: boolean
 }) {
+  const [open, setOpen] = useState(filterOpen)
+  void tempoCenter
+  void onTempo
   const focus = model.rows.find((row) => row.kind === 'sound')
+  if (mode === 'loop') {
+    const active = [
+      genre ? model.genres.find((chip) => chip.id === genre)?.label : '',
+      inKey ? `In ${songKey}` : '',
+      compatible ? 'Compatible' : '',
+      nearTempo ? 'Near tempo' : '',
+      sort !== 'name' ? (sort === 'bpm' ? 'BPM' : 'Key') : '',
+    ].filter(Boolean)
+    function choose(run: () => void) {
+      run()
+      setOpen(false)
+    }
+    function clearFilters() {
+      if (category) onCategory('')
+      if (genre) onGenre(genre)
+      if (nearTempo) onNearTempo()
+      if (inKey) onInKey()
+      if (compatible) onCompatible()
+      if (sort !== 'name') onSort('name')
+      setOpen(false)
+    }
+    return (
+      <div className="fast-shelf loop-shelf" data-fast-shelf="loop" data-loop-filter={open ? 'open' : 'closed'}>
+        <div className="loop-bar">
+          <div className="library-chip-scroll fast-chips" role="group" aria-label="Loop categories">
+            {model.chips.map((chip) => (
+              <button
+                key={chip.id || 'all'}
+                type="button"
+                data-loop-chip={chip.id || 'all'}
+                className={`filter-choice${category === chip.id ? ' on' : ''}`}
+                aria-pressed={category === chip.id}
+                onClick={() => { setOpen(false); onCategory(chip.id) }}
+              >
+                {chip.label} {chip.count}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className={`loop-filter-pill${open || active.length ? ' on' : ''}`}
+            aria-expanded={open}
+            aria-haspopup="dialog"
+            aria-label="Filter"
+            onClick={() => setOpen((value) => !value)}
+          >
+            Filter
+          </button>
+        </div>
+        {active.length > 0 && (
+          <div className="loop-active" role="group" aria-label="Active filters">
+            <span>{active.join(' · ')}</span>
+            <button type="button" className="loop-clear" onClick={clearFilters}>Clear</button>
+          </div>
+        )}
+        {open && (
+          <div className="loop-filter-sheet" role="dialog" aria-label="Filter">
+            {model.genres.length > 0 && (
+              <div className="library-chip-scroll fast-chips" role="group" aria-label="Genres">
+                <button type="button" className={`filter-choice${!genre ? ' on' : ''}`} aria-pressed={!genre} onClick={() => choose(() => { if (genre) onGenre(genre) })}>Any genre</button>
+                {model.genres.map((chip) => (
+                  <button key={chip.id} type="button" data-genre-chip={chip.id} className={`filter-choice${genre === chip.id ? ' on' : ''}`} aria-pressed={genre === chip.id} onClick={() => choose(() => onGenre(chip.id))}>{chip.label}</button>
+                ))}
+              </div>
+            )}
+            <p className="filter-label">Key</p>
+            <div className="library-chip-scroll fast-chips" role="group" aria-label="Key">
+              <button type="button" className={`filter-choice${!inKey && !compatible ? ' on' : ''}`} aria-pressed={!inKey && !compatible} onClick={() => choose(() => { if (inKey) onInKey(); if (compatible) onCompatible() })}>Any key</button>
+              <button type="button" className={`filter-choice${inKey ? ' on' : ''}`} aria-pressed={inKey} onClick={() => choose(onInKey)}>In {songKey}</button>
+              <button type="button" className={`filter-choice${compatible ? ' on' : ''}`} aria-pressed={compatible} onClick={() => choose(onCompatible)}>Compatible</button>
+            </div>
+            <p className="filter-label">BPM</p>
+            <div className="library-chip-scroll fast-chips" role="group" aria-label="BPM">
+              <button type="button" className={`filter-choice${!nearTempo ? ' on' : ''}`} aria-pressed={!nearTempo} onClick={() => choose(() => { if (nearTempo) onNearTempo() })}>Any tempo</button>
+              <button type="button" className={`filter-choice${nearTempo ? ' on' : ''}`} aria-pressed={nearTempo} onClick={() => choose(onNearTempo)}>Near tempo</button>
+            </div>
+            <div className="library-chip-scroll fast-chips loop-sort" role="group" aria-label="Sort">
+              {(['name', 'bpm', 'key'] as const).map((id) => (
+                <button key={id} type="button" className={`filter-choice quiet${sort === id ? ' on' : ''}`} aria-pressed={sort === id} onClick={() => choose(() => onSort(id))}>{id === 'bpm' ? 'BPM' : id === 'key' ? 'Key' : 'Name'}</button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="fast-shelf" data-fast-shelf={mode}>
-      <div className="library-chip-scroll fast-chips" role="group" aria-label={mode === 'drum' ? 'Drum categories' : 'Loop categories'}>
+      <div className="library-chip-scroll fast-chips" role="group" aria-label="Drum categories">
         {model.chips.map((chip) => (
           <button
             key={chip.id || 'all'}
             type="button"
-            data-drum-chip={mode === 'drum' ? chip.id || 'all' : undefined}
-            data-loop-chip={mode === 'loop' ? chip.id || 'all' : undefined}
+            data-drum-chip={chip.id || 'all'}
             className={`filter-choice${category === chip.id ? ' on' : ''}`}
             aria-pressed={category === chip.id}
             onClick={() => onCategory(chip.id)}
@@ -1437,28 +1528,6 @@ export function FastShelf({
             <button key={chip.id || 'all-sub'} type="button" className={`filter-choice${sub === chip.id ? ' on' : ''}`} aria-pressed={sub === chip.id} onClick={() => onSub(chip.id as DrumSub | '')}>{chip.label} {chip.count}</button>
           ))}
         </div>
-      )}
-      {mode === 'loop' && (
-        <>
-          {model.genres.length > 0 && (
-            <div className="library-chip-scroll fast-chips" role="group" aria-label="Genres">
-              {model.genres.map((chip) => (
-                <button key={chip.id} type="button" data-genre-chip={chip.id} className={`filter-choice${genre === chip.id ? ' on' : ''}`} aria-pressed={genre === chip.id} onClick={() => onGenre(chip.id)}>{chip.label} {chip.count}</button>
-              ))}
-            </div>
-          )}
-          <div className="fast-tools" role="group" aria-label="Loop tempo, key, and sort">
-            <button type="button" className={`filter-choice${nearTempo ? ' on' : ''}`} aria-pressed={nearTempo} onClick={onNearTempo}>Near tempo</button>
-            <label className="fast-tempo">Tempo
-              <input aria-label="Tempo window" type="range" min={60} max={200} step={1} value={Math.min(200, Math.max(60, tempoCenter))} onChange={(event) => onTempo(Number(event.target.value))} />
-            </label>
-            <button type="button" className={`filter-choice${inKey ? ' on' : ''}`} aria-pressed={inKey} onClick={onInKey}>In {songKey}</button>
-            <button type="button" className={`filter-choice${compatible ? ' on' : ''}`} aria-pressed={compatible} onClick={onCompatible}>Compatible</button>
-            {(['name', 'bpm', 'key'] as const).map((id) => (
-              <button key={id} type="button" className={`filter-choice${sort === id ? ' on' : ''}`} aria-pressed={sort === id} onClick={() => onSort(id)}>{id === 'bpm' ? 'BPM' : id === 'key' ? 'Key' : 'Name'}</button>
-            ))}
-          </div>
-        </>
       )}
       {stuck && (
         <button type="button" className="fast-section fast-stuck" onClick={onToggleStuck}>{stuck}</button>

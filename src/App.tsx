@@ -25,7 +25,7 @@ import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
-import { editorForGesture, releaseKeyboardForPiano } from './model/editorOpen'
+import { editorForGesture, instrumentFace, releaseKeyboardForPiano } from './model/editorOpen'
 import { shouldCloseOnscreenPiano } from './model/onscreenPiano'
 import { armedRecordPlan, playPress, playStartsCapture, recordPress, startPress, stopPress } from './model/transport'
 import { keepLandscapeAfterClose } from './ui/keyboardStage'
@@ -73,7 +73,7 @@ import { claimComputerKey } from './model/keyboardPlay'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
 import { ARRANGE_SHEET_EVENT, sheetHistoryPop } from './ui/arrangePanel'
-import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
+import { closeAllOverlays, onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble } from './ui/Hint'
 import {
@@ -1979,15 +1979,9 @@ async function importDropped(files: FileList) {
   function openStepSequencer(trackId: string) {
     setSurface('studio')
     setPhonePane('edit')
-    setMenuOpen(false)
-    setPianoOpen(false)
+    dismissForInstrument()
     store.closePiano()
     store.closePads()
-    store.clearKeyboardReturn()
-    if (store.keyboardMidi) {
-      store.setKeyboardMidi(false)
-      notifyKeyboard(false)
-    }
     store.openSteps(trackId)
   }
 
@@ -2004,6 +1998,7 @@ async function importDropped(files: FileList) {
     if (choice !== 'steps') store.closeSteps()
     if (choice !== 'pads') store.closePads()
     if (choice === 'bass808') {
+      dismissForInstrument()
       store.showBass(id)
       return
     }
@@ -2019,14 +2014,8 @@ async function importDropped(files: FileList) {
   function openBeatMachine(trackId: string) {
     setSurface('studio')
     setPhonePane('edit')
-    setMenuOpen(false)
-    setPianoOpen(false)
+    dismissForInstrument()
     store.selectTrack(trackId)
-    store.clearKeyboardReturn()
-    if (store.keyboardMidi) {
-      store.setKeyboardMidi(false)
-      notifyKeyboard(false)
-    }
     store.showPads(trackId)
   }
 
@@ -2037,6 +2026,55 @@ async function importDropped(files: FileList) {
     setPianoOpen(false)
     store.openKeyboardForPads(trackId)
     notifyKeyboard(true)
+  }
+
+  function dismissForInstrument() {
+    setMenuOpen(false)
+    setPianoOpen(false)
+    setSoundsOpen(false)
+    setKeysLandscape(false)
+    document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+    store.releaseDockForInstrument()
+    notifyKeyboard(false)
+    closeAllOverlays()
+  }
+
+  function openInstrument(trackId: string) {
+    const track = store.project.tracks.find((item) => item.id === trackId)
+    if (!track) return
+    const face = instrumentFace(track)
+    if (!face) {
+      openKeyboard(trackId)
+      return
+    }
+    dismissForInstrument()
+    if (face === 'bass') {
+      store.showBass(trackId)
+      return
+    }
+    if (face === 'pads') {
+      openBeatMachine(trackId)
+      return
+    }
+    if (face === 'steps') {
+      openStepSequencer(trackId)
+      return
+    }
+    if (face === 'scaler') {
+      setSurface('studio')
+      setPhonePane('edit')
+      store.showScaler(trackId)
+      return
+    }
+    if (face === 'rack') {
+      store.showRack(trackId)
+      return
+    }
+    if (face === 'patch') {
+      store.showPatch(trackId)
+      return
+    }
+    openKeyboard(trackId)
   }
 
   function openKeyboard(trackId: string) {
@@ -2164,7 +2202,7 @@ async function importDropped(files: FileList) {
       data-collab="closed"
       data-dock={dockShown ? 'open' : 'closed'}
       data-editor={dockShown ? panel : 'none'}
-      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps' || panel === 'bass') ? panel : 'none'}
+      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps' || panel === 'bass' || panel === 'rack') ? panel : 'none'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
       }}
@@ -2393,6 +2431,7 @@ async function importDropped(files: FileList) {
                   onOpenPiano={openPiano}
                   onOpenSteps={openStepSequencer}
                   onOpenKeyboard={openKeyboard}
+                  onOpenInstrument={openInstrument}
                   onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}
                   onOpenBeatMachine={openBeatMachine}
@@ -2456,7 +2495,7 @@ async function importDropped(files: FileList) {
             title="Drag to resize the editor."
           />
           {surface === 'studio' && panel === 'scaler' && store.scalerTrackId && (
-            <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
+            <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} onPiano={() => openPiano(store.scalerTrackId!)} />
           )}
           {surface === 'studio' && panel === 'steps' && store.stepTrackId && (
             <Suspense fallback={<PendingPane className="step-sequencer" label="Step sequencer" />}>
@@ -2470,6 +2509,7 @@ async function importDropped(files: FileList) {
                 engine={engine}
                 trackId={store.bassTrackId}
                 onClose={() => store.closeBass()}
+                onPiano={() => openPiano(store.bassTrackId!)}
                 onRecord={() => { engine.unlock(); void record() }}
                 onStop={() => { void stop() }}
                 onPlay={() => { engine.unlock(); void play() }}
@@ -2486,13 +2526,14 @@ async function importDropped(files: FileList) {
               onStop={() => { void stop() }}
               onPlay={() => { engine.unlock(); void play() }}
               onEdit={(clipId) => openPiano(store.padsTrackId!, clipId)}
+              onPiano={() => openPiano(store.padsTrackId!)}
               onKeyboard={openBeatKeyboard}
             />
             </Suspense>
           )}
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
             <Suspense fallback={<PendingPane className="rack" label="Instrument" />}>
-              <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
+              <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} onPiano={() => openPiano(store.rackTrackId!)} />
             </Suspense>
           )}
           {surface === 'studio' && panel === 'piano' && (
@@ -2509,7 +2550,7 @@ async function importDropped(files: FileList) {
       )}
       {store.patchTrackId && (
         <Suspense fallback={<SheetFallback label="Patch" onClose={() => store.openPatch(store.patchTrackId!)} />}>
-          <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />
+          <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} onPiano={() => openPiano(store.patchTrackId!)} />
         </Suspense>
       )}
       {store.quantizeOpen && (

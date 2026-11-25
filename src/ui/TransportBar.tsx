@@ -606,11 +606,11 @@ export function TransportBar({
     const at = typeof engine.currentTimelineSample === 'function' ? engine.currentTimelineSample() : engine.positionSamples
     onSeek(shiftBars(project, at, bars))
   }
-  const extras = (
+  const extras = editTarget.kind === 'clip' ? (
     <div className="transport-extras" role="group" aria-label="Duplicate">
       {duplicateButton}
     </div>
-  )
+  ) : null
   const contextualDelete = !phone && editTarget.kind === 'track' && deleteHost
     ? createPortal(deleteButton, deleteHost)
     : null
@@ -676,7 +676,7 @@ export function TransportBar({
           </button>
         </div>
       ) : null}
-      {extrasHost ? createPortal(extras, extrasHost) : extras}
+      {extras ? (extrasHost ? createPortal(extras, extrasHost) : extras) : null}
       {contextualDelete}
       {trackDelete ? createPortal(
         <DeleteTrackConfirm

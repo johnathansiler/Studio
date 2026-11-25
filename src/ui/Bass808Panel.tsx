@@ -6,7 +6,10 @@ import { bassDevice } from '../audio/bass808/track'
 import { activeDevicePreset, DEVICE_PARAMS, FACTORY_PRESETS } from '../model/rack'
 import { samplesToBeats } from '../model/time'
 import type { ProjectStore } from '../state/store'
+import { isBlackKey, noteName } from '../model/keyShift'
 import { Knob } from './kit/controls'
+import { rememberSwipe, useKeySlide, useKeyStart } from './keyNudge'
+import { PianoRollButton } from './PianoRollButton'
 import './bass808.css'
 
 const NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
@@ -25,6 +28,7 @@ export function Bass808Panel({
   onRecord,
   onStop,
   onPlay,
+  onPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -33,6 +37,7 @@ export function Bass808Panel({
   onRecord: () => void
   onStop: () => void
   onPlay: () => void
+  onPiano?: () => void
 }) {
   const [, setTick] = useState(0)
   const [tab, setTab] = useState<'tone' | 'play'>('tone')
@@ -50,7 +55,9 @@ export function Bass808Panel({
   const lowNote = noteLabel(pads[0] ?? 36)
   const highNote = noteLabel(pads[pads.length - 1] ?? 48)
   const rootPc = ((scale?.root ?? 0) % 12 + 12) % 12
-  const wide = typeof window !== 'undefined' && window.innerWidth >= 720
+  const keys = useKeyStart('bass808', 36, 13)
+  const keySlide = useKeySlide(keys.start, 32)
+  const keyDrag = useRef({ x: 0, y: 0 })
   const zone = device?.zones[0]
   const loadedShot = BASS808_SHOTS.find((item) => item.name === (zone ? store.buffers.get(zone.bufferId)?.name : ''))?.id ?? ''
   useEffect(() => { setShot(loadedShot) }, [loadedShot])
@@ -113,9 +120,10 @@ export function Bass808Panel({
   const knobs = KNOBS.map((id) => specs.find((item) => item.id === id)).filter((item): item is NonNullable<typeof item> => !!item)
 
   return (
-    <div className="bass808" data-bass808="open" data-screen-overlay="" data-tab={wide ? 'both' : tab} role="dialog" aria-label="808 Bass">
+    <div className="bass808" data-bass808="open" data-screen-overlay="" data-tab={tab} role="dialog" aria-label="808 Bass">
       <header className="bass808-bar">
         <h2>808 Bass</h2>
+        {onPiano && <PianoRollButton onClick={onPiano} />}
         <button type="button" className="bass-quiet bass-close" onClick={onClose}>Close</button>
       </header>
       <div className="plugin-transport" data-plugin-transport="open" aria-label="Transport">
@@ -192,16 +200,8 @@ export function Bass808Panel({
           </label>
         </section>
         <section className="bass-play" aria-label="Play">
-          <button
-            type="button"
-            className="bass-quiet"
-            onClick={() => store.insertBassPattern(track.id, 0)}
-          >
-            Drill/Trap pattern
-          </button>
           <div className="bass-board">
-          <p className="bass-range">{lowNote} – {highNote}</p>
-          <div className="bass-pads" role="group" aria-label={`Bass pads ${lowNote} to ${highNote}`}>
+          <div className="bass-pads" role="group" aria-label={`Bass pads ${lowNote} – ${highNote}`}>
             {pads.map((pitch, index) => (
               <button
                 key={`${index}-${pitch}`}
@@ -228,8 +228,31 @@ export function Bass808Panel({
             ))}
           </div>
           </div>
-          <div className="bass-keys" aria-label="Keys">
-            {Array.from({ length: 13 }, (_, index) => 36 + index).filter((pitch) => ![1, 3, 6, 8, 10].includes(pitch % 12)).map((pitch) => (
+          <div className="bass-key-shift">
+            <button
+              type="button"
+              className="bass-quiet"
+              onClick={() => store.insertBassPattern(track.id, 0)}
+            >
+              Drill/Trap pattern
+            </button>
+            <button type="button" className="bass-quiet key-step" aria-label="Semitone down" title="Lower the keys by one step." disabled={keys.start <= 0} onClick={() => keys.move(-1)}>&lt;</button>
+            <span aria-live="polite">{noteName(keys.start)}</span>
+            <button type="button" className="bass-quiet key-step" aria-label="Semitone up" title="Raise the keys by one step." disabled={keys.start >= 115} onClick={() => keys.move(1)}>&gt;</button>
+            <button type="button" className="bass-quiet" aria-label="Octave down" disabled={keys.start <= 0} onClick={() => keys.move(-12)}>−8va</button>
+            <button type="button" className="bass-quiet" aria-label="Octave up" disabled={keys.start >= 115} onClick={() => keys.move(12)}>+8va</button>
+          </div>
+          <div
+            className="bass-keys"
+            aria-label="Keys"
+            style={keySlide}
+            onPointerDown={(event) => { keyDrag.current = { x: event.clientX, y: event.clientY } }}
+            onPointerUp={(event) => {
+              const steps = rememberSwipe(event.clientX - keyDrag.current.x, event.clientY - keyDrag.current.y, 28)
+              if (steps) keys.move(steps)
+            }}
+          >
+            {Array.from({ length: 13 }, (_, index) => keys.start + index).filter((pitch) => !isBlackKey(pitch)).map((pitch) => (
               <button
                 key={pitch}
                 type="button"
@@ -252,15 +275,15 @@ export function Bass808Panel({
                 {pitch % 12 === 0 ? noteLabel(pitch) : ''}
               </button>
             ))}
-            {Array.from({ length: 13 }, (_, index) => 36 + index).filter((pitch) => [1, 3, 6, 8, 10].includes(pitch % 12)).map((pitch) => {
-              const whiteBefore = [0, 2, 4, 5, 7, 9, 11, 12].filter((pc) => pc < (pitch - 36)).length
+            {Array.from({ length: 13 }, (_, index) => keys.start + index).filter((pitch) => isBlackKey(pitch)).map((pitch) => {
+              const whitesBefore = Array.from({ length: pitch - keys.start }, (_, index) => keys.start + index).filter((item) => !isBlackKey(item)).length
               return (
                 <button
                   key={pitch}
                   type="button"
                   className="black"
                   aria-label={`Key ${noteLabel(pitch)}`}
-                  style={{ left: `calc(${whiteBefore} * 12.5% - 20px)` }}
+                  style={{ left: `calc(${whitesBefore} * 12.5% - 20px)` }}
                   onPointerDown={(event) => {
                     event.preventDefault()
                     down(pitch)

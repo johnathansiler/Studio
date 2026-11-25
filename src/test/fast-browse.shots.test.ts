@@ -168,7 +168,7 @@ describe('fast browse screenshots', () => {
         expect(await page.locator('[data-lane="loops"]').count()).toBe(1)
         await paint(`<aside class="playlist-browser bottom-sheet"><div class="bottom-sheet-body">${library('loop')}</div></aside>`, 'library-loops')
         expect(await page.locator('[data-loop-chip="bass"]').count()).toBe(1)
-        expect(await page.getByRole('button', { name: 'Near tempo' }).count()).toBe(1)
+        expect(await page.getByRole('button', { name: 'Filter', exact: true }).count()).toBe(1)
         await paint(`<div style="height:100%">${padBrowser}</div>`, 'pad-browser')
         expect(await page.locator('[data-pad-browser="open"]').count()).toBe(1)
         expect(await page.getByRole('button', { name: 'Browser', exact: true }).count()).toBeGreaterThan(0)

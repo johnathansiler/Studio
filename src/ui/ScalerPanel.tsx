@@ -14,6 +14,7 @@ import { allProgressions, allScales, GENRE_INFO, getScale, harmonize, loadScaleC
 import type { TheoryProgression } from '../theory/types'
 import { moduleView } from './lazyViews'
 import { LazyGenerate } from './sheetFallback'
+import { PianoRollButton } from './PianoRollButton'
 
 const loadGenerate = moduleView(() => import('./GeneratePop'), 'GeneratePanel')
 import { scalerPatch } from '../presets/apply'
@@ -71,7 +72,7 @@ const VOICE_GROUPS: { id: VoiceGroup; voicing?: VoicingId; label: string }[] = [
 interface Slot { symbol: string; roman: string; notes: ScalerNote[] }
 interface Section { id: string; name: string; slots: (Slot | null)[] }
 
-export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; engine: AudioEngine; trackId: string }) {
+export function ScalerPanel({ store, engine, trackId, onPiano }: { store: ProjectStore; engine: AudioEngine; trackId: string; onPiano?: () => void }) {
   const form = useFormFactor()
   const [rec, setRec] = useState(false)
   const [pad, setPad] = useState(0)
@@ -429,6 +430,7 @@ const scaleList = allScales()
         {!portrait && <span className="scaler-meta">Bar {barNumber} Beat {beatNumber} · {signature} · {Math.round(store.project.tempo)} bpm</span>}
         <div className="scaler-transport" role="group" aria-label="Transport">
           {!(form === 'phone' && !land) && <button type="button" className="btn-quiet" title="Previous chord set." onClick={() => setSong((value) => cycle(value, -1, Math.max(1, sets.length)))}>Previous</button>}
+          {onPiano && <PianoRollButton onClick={onPiano} />}
           <button type="button" className="btn-secondary" title="Play the chord set." onClick={() => playLine(setChords)}>Play</button>
           <button type="button" className={rec || engine.status === 'recording' ? 'on' : ''} aria-pressed={rec} title="Record each pad as MIDI on this track." onClick={() => setRec((value) => !value)}>Record</button>
           {!(form === 'phone' && !land) && <button type="button" className={loop ? 'on' : ''} aria-pressed={loop} title="Preview the line twice." onClick={() => setLoop((value) => !value)}>Loop</button>}

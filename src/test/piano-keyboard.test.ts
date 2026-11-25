@@ -324,7 +324,7 @@ describe('phone keyboard orientation', () => {
         const face = document.querySelector('.keyboard-face') as HTMLElement
         const down = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Octave Down')!
         const close = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Close')!
-        const edit = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Edit Notes')!
+        const edit = document.querySelector('[aria-label="Piano Roll"]') as HTMLElement
         return {
           shellWide: shell.offsetWidth > shell.offsetHeight,
           containsDock: shell.contains(dockNode),

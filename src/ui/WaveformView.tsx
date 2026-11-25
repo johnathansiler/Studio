@@ -333,7 +333,7 @@ export function WaveformView({
   )
   if (chrome === 'above' || chrome === 'below') {
     return (
-      <div className="wave-editor">
+      <div className="wave-frame">
         {chrome === 'above' && bar}
         {body}
         {chrome === 'below' && bar}

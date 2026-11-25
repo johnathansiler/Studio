@@ -732,6 +732,70 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   max-width: 100%;
 }
 
+.loop-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.loop-bar .fast-chips {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.loop-filter-pill,
+.loop-clear {
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #18211c;
+  color: #8d9a90;
+  font-size: 13px;
+  font-weight: 650;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+.loop-filter-pill.on {
+  color: #e7f6ec;
+  border-color: rgba(115, 196, 143, 0.4);
+}
+.loop-active {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+}
+.loop-active span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #c5d4c8;
+  font-size: 13px;
+}
+.loop-filter-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(42%, 280px);
+  overflow: auto;
+  padding: 2px 0 4px;
+}
+.loop-filter-sheet .filter-choice,
+.loop-sort .filter-choice {
+  min-height: 40px;
+}
+.loop-sort .filter-choice {
+  background: transparent;
+  color: #8d9a90;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
 .fast-chips {
   display: flex;
   flex-flow: row nowrap;
@@ -846,7 +910,7 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .fast-jump {
   position: sticky;
   top: var(--library-sticky-h, 0px);
-  width: 28px;
+  width: 44px;
   height: min(46vh, 420px);
   margin-left: auto;
   display: flex;
@@ -858,8 +922,10 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 }
 
 .fast-jump button {
-  width: 26px;
-  min-height: 22px;
+  width: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  height: 40px;
   padding: 0;
   border: 0;
   border-radius: 6px;
@@ -1031,13 +1097,36 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .playlist-browser.bottom-sheet .my-library.sound-panel {
   overflow: visible;
 }
+.playlist-browser.bottom-sheet > .bottom-sheet-body:has(.my-library) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.playlist-browser.bottom-sheet .my-library.sound-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
 .playlist-browser.bottom-sheet .my-library .library-sticky {
-  position: sticky;
-  top: 0;
-  z-index: 6;
+  position: static;
+  flex: 0 1 auto;
+  z-index: 1;
+  max-height: 58%;
+  overflow: auto;
   background-color: #141c18;
   padding: 4px 0 8px;
-  box-shadow: 0 12px 0 #141c18;
+  box-shadow: none;
+}
+.playlist-browser.bottom-sheet .my-library .sound-list {
+  flex: 1 1 auto;
+  min-height: 148px;
+  height: auto;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .playlist-browser.bottom-sheet .my-library .library-search {
   position: static;
