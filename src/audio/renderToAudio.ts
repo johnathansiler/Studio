@@ -5,6 +5,7 @@
  */
 
 import { graphPlugins, renderArrangeInputs, type ArrangePrint } from './arrangeSources'
+import { BASS808_RELEASE_SEC } from './bass808/voice'
 import { tuneBlockScale } from './plugins/autoTune'
 import { reportedLatency } from './core/latency'
 import { prepareChainPool, type ChainSlot } from './plugins/chain'
@@ -134,6 +135,9 @@ export function releaseTailSamples(track: Track, sampleRate: number, includeEffe
     }
   }
   if (track.instrument === 'pads' || track.instrument === 'drum-machine' || track.instrument === '808') seconds = Math.max(seconds, 0.45)
+  if (track.instrument === 'bass808' || track.rack?.devices.some((device) => device.kind === 'bass808')) {
+    seconds = Math.max(seconds, BASS808_RELEASE_SEC * 10.36)
+  }
   return Math.round(Math.min(8, Math.max(0.02, seconds)) * sampleRate)
 }
 

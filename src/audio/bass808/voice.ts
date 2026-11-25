@@ -63,6 +63,9 @@ export function createBassState(): Bass808State {
   }
 }
 
+/** Amplitude release time constant. Render-to-audio keeps this long enough to reach silence. */
+export const BASS808_RELEASE_SEC = 0.09
+
 export function glideLength(glideMs: number, sampleRate: number) {
   if (!(glideMs > 0) || !(sampleRate > 0)) return 0
   return Math.max(0, Math.round((glideMs / 1000) * sampleRate))
@@ -198,7 +201,7 @@ export function bassStep(
   }
   const sustain = Math.max(0, Math.min(1, num(params, 'sustain', 0.4)))
   const decay = Math.max(1, (num(params, 'decay', 500) / 1000) * sr)
-  const release = Math.max(1, 0.09 * sr)
+  const release = Math.max(1, BASS808_RELEASE_SEC * sr)
   const attack = Math.max(1, 0.0015 * sr)
   if (!state.released) {
     if (state.env < 0.999) state.env += (1 - state.env) * (1 - Math.exp(-1 / attack))
