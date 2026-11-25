@@ -15,7 +15,8 @@ import { pathToFileURL } from 'node:url'
 
 const MAX_BYTES = 60 * 1024 * 1024
 const SIGN_BATCH = 50
-const APPEND_BATCH = 400
+/** Small appends. The server writes a sidecar and does not rewrite the base catalog. */
+const APPEND_BATCH = 50
 
 export function formatCounts(counts) {
   return `uploaded ${counts.uploaded}\nskipped ${counts.skipped}\nadded ${counts.added}\nfailed ${counts.failed}\n`

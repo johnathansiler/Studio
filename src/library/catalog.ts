@@ -2,14 +2,18 @@ import type { LibraryDocument, LibraryEntry } from './types'
 import { buildLibraryIndex, libraryTitle, type LibraryIndex } from './search'
 
 export const LIBRARY_CATALOG_KEY = 'catalog/catalog.json.gz'
+/** Appended rows. Same object key the server writes. The base gzip stays immutable. */
+export const LIBRARY_ADDITIONS_KEY = 'catalog/catalog-additions.json'
 
 export interface CachedCatalog {
   version: number
   generatedAt: string
   count: number
-  /** SHA-256 of the gzip bytes. A matching hash means the version is unchanged. */
+  /** SHA-256 of the gzip, mixed with the additions bytes when a sidecar is present. */
   sha256?: string
   gzip: ArrayBuffer
+  /** Sidecar JSON. Absent when the library has no appended rows. */
+  additions?: ArrayBuffer
 }
 
 export interface CatalogCache {
@@ -27,7 +31,16 @@ export async function gunzipText(bytes: ArrayBuffer) {
   return new Response(stream).text()
 }
 
-export function parseLibraryCatalog(input: unknown): { document: LibraryDocument; words: string[][] } | null {
+/** Rows from a sidecar document `{ entries: [...] }` or from a bare array. */
+export function catalogAdditionRows(additions: unknown): unknown[] {
+  if (additions == null) return []
+  if (Array.isArray(additions)) return additions
+  if (typeof additions !== 'object') return []
+  const entries = (additions as { entries?: unknown }).entries
+  return Array.isArray(entries) ? entries : []
+}
+
+export function parseLibraryCatalog(input: unknown, additions?: unknown): { document: LibraryDocument; words: string[][] } | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null
   const raw = input as Record<string, unknown>
   if (!Array.isArray(raw.entries)) return null
@@ -40,17 +53,35 @@ export function parseLibraryCatalog(input: unknown): { document: LibraryDocument
   }
   const entries: LibraryEntry[] = []
   const words: string[][] = []
+  const index = new Map<string, number>()
   for (const item of raw.entries) {
     const parsed = parseEntry(item, share)
     if (!parsed) continue
+    if (!index.has(parsed.entry.key)) index.set(parsed.entry.key, entries.length)
     entries.push(parsed.entry)
     words.push(parsed.words)
   }
+  for (const item of catalogAdditionRows(additions)) {
+    const parsed = parseEntry(item, share)
+    if (!parsed) continue
+    const at = index.get(parsed.entry.key)
+    if (at == null) {
+      index.set(parsed.entry.key, entries.length)
+      entries.push(parsed.entry)
+      words.push(parsed.words)
+    } else {
+      entries[at] = parsed.entry
+      words[at] = parsed.words
+    }
+  }
+  const count = additions == null
+    ? (typeof raw.count === 'number' && Number.isFinite(raw.count) ? raw.count : entries.length)
+    : entries.length
   return {
     document: {
       version: typeof raw.version === 'number' && Number.isFinite(raw.version) ? raw.version : 0,
       generatedAt: typeof raw.generated_at === 'string' ? raw.generated_at : '',
-      count: typeof raw.count === 'number' && Number.isFinite(raw.count) ? raw.count : entries.length,
+      count,
       pending: typeof raw.pending === 'string' ? raw.pending : '',
       entries,
     },
@@ -146,13 +177,22 @@ function openDb() {
 
 /** Fields stored in IndexedDB. The hash is what the next open compares. */
 export function catalogCacheFields(doc: CachedCatalog) {
-  return {
+  const row: {
+    version: number
+    generatedAt: string
+    count: number
+    sha256: string
+    gzip: ArrayBuffer
+    additions?: ArrayBuffer
+  } = {
     version: doc.version,
     generatedAt: doc.generatedAt,
     count: doc.count,
     sha256: typeof doc.sha256 === 'string' ? doc.sha256 : '',
     gzip: doc.gzip.slice(0),
   }
+  if (doc.additions && doc.additions.byteLength) row.additions = doc.additions.slice(0)
+  return row
 }
 
 export function idbCatalogCache(): CatalogCache {
@@ -164,13 +204,14 @@ export function idbCatalogCache(): CatalogCache {
         return await new Promise((resolve, reject) => {
           const request = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(DB_KEY)
           request.onsuccess = () => {
-            const row = request.result as { version?: number; generatedAt?: string; count?: number; sha256?: string; gzip?: unknown } | undefined
+            const row = request.result as { version?: number; generatedAt?: string; count?: number; sha256?: string; gzip?: unknown; additions?: unknown } | undefined
             const gzip = row ? storedCatalogBytes(row.gzip) : null
             if (!row || !gzip || typeof row.version !== 'number' || typeof row.generatedAt !== 'string' || typeof row.count !== 'number') {
               resolve(null)
               return
             }
-            resolve({ version: row.version, generatedAt: row.generatedAt, count: row.count, sha256: typeof row.sha256 === 'string' && row.sha256 ? row.sha256 : undefined, gzip })
+            const additions = storedCatalogBytes(row.additions) ?? undefined
+            resolve({ version: row.version, generatedAt: row.generatedAt, count: row.count, sha256: typeof row.sha256 === 'string' && row.sha256 ? row.sha256 : undefined, gzip, additions })
           }
           request.onerror = () => reject(request.error)
         })
@@ -195,10 +236,11 @@ export function memoryCatalogCache(slot: { current: CachedCatalog | null } = { c
   return {
     async read() {
       const hit = slot.current
-      return hit ? { ...hit, gzip: hit.gzip.slice(0) } : null
+      if (!hit) return null
+      return { ...hit, gzip: hit.gzip.slice(0), additions: hit.additions ? hit.additions.slice(0) : undefined }
     },
     async write(doc) {
-      slot.current = { ...doc, gzip: doc.gzip.slice(0) }
+      slot.current = { ...doc, gzip: doc.gzip.slice(0), additions: doc.additions ? doc.additions.slice(0) : undefined }
     },
   }
 }

@@ -1,4 +1,4 @@
-import { LIBRARY_CATALOG_KEY, gunzipText, idbCatalogCache, indexParsedCatalog, parseLibraryCatalog, type CachedCatalog, type CatalogCache } from './catalog'
+import { LIBRARY_ADDITIONS_KEY, LIBRARY_CATALOG_KEY, gunzipText, idbCatalogCache, indexParsedCatalog, parseLibraryCatalog, type CachedCatalog, type CatalogCache } from './catalog'
 import { LibraryAuthError, readLibraryAccessKey, signLibraryKeys } from './access'
 import type { LibraryDocument } from './types'
 import type { LibraryIndex } from './search'
@@ -150,7 +150,8 @@ export interface LoadedCatalog {
 
 /**
  * Unlock first. A wrong passphrase never reveals a cached catalog.
- * A matching file hash skips parsing the download again. The gzip is stored. Presigned URLs are not.
+ * The base gzip and the additions sidecar are signed together and merged (additions win).
+ * A matching file hash skips parsing the download again. The gzip and sidecar are stored. Presigned URLs are not.
  */
 export async function loadLibraryCatalog(fetchImpl: typeof fetch = fetch, cache = libraryCatalogCache(), onCached?: (loaded: LoadedCatalog) => void): Promise<LoadedCatalog> {
   const cached = await cache.read().catch(() => null)
@@ -158,7 +159,7 @@ export async function loadLibraryCatalog(fetchImpl: typeof fetch = fetch, cache 
   if (!accessKey) throw new Error('Unlock My Library on this device first.')
   let signed: Awaited<ReturnType<typeof signLibraryKeys>>
   try {
-    signed = await signLibraryKeys([LIBRARY_CATALOG_KEY], accessKey, fetchImpl)
+    signed = await signLibraryKeys([LIBRARY_CATALOG_KEY, LIBRARY_ADDITIONS_KEY], accessKey, fetchImpl)
   } catch (error) {
     if (error instanceof LibraryAuthError) throw error
     const offline = await parsedCache(cached)
@@ -176,13 +177,15 @@ export async function loadLibraryCatalog(fetchImpl: typeof fetch = fetch, cache 
     const response = await fetchImpl(url)
     if (!response.ok) throw new Error('Could not download the library catalog.')
     const gzip = await response.arrayBuffer()
-    const hash = await sha256Hex(gzip)
+    const additionsUrl = signed.urls.find((item) => item.key === LIBRARY_ADDITIONS_KEY)?.url
+    const additions = additionsUrl ? await fetchAdditions(additionsUrl, fetchImpl) : null
+    const hash = await catalogHash(gzip, additions)
     if (warmed && cached?.sha256 && cached.sha256 === hash) {
       return { ...warmed, fromCache: true }
     }
-    const parsed = await parseGzip(gzip)
+    const parsed = await parseGzip(gzip, additions)
     const meta = { version: parsed.document.version, generatedAt: parsed.document.generatedAt, count: parsed.document.count }
-    const stored: CachedCatalog = { ...meta, sha256: hash, gzip: gzip.slice(0) }
+    const stored: CachedCatalog = { ...meta, sha256: hash, gzip: gzip.slice(0), additions: additions?.slice(0) }
     try { await cache.write(stored) } catch { /* the list still shows */ }
     const loaded: LoadedCatalog = { document: parsed.document, index: indexParsed(parsed), fromCache: false }
     hotCatalog = { sha256: hash, loaded }
@@ -198,7 +201,7 @@ async function parsedCache(cached: CachedCatalog | null): Promise<LoadedCatalog 
   if (!cached?.gzip) return null
   if (cached.sha256 && hotCatalog?.sha256 === cached.sha256) return hotCatalog.loaded
   try {
-    const parsed = await parseGzip(cached.gzip)
+    const parsed = await parseGzip(cached.gzip, cached.additions ?? null)
     const loaded: LoadedCatalog = { document: parsed.document, index: indexParsed(parsed), fromCache: true }
     if (cached.sha256) hotCatalog = { sha256: cached.sha256, loaded }
     return loaded
@@ -212,9 +215,26 @@ async function sha256Hex(bytes: ArrayBuffer) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function parseGzip(bytes: ArrayBuffer) {
+/** Gzip hash when there is no sidecar, so an unchanged base catalog still matches its cache. */
+async function catalogHash(gzip: ArrayBuffer, additions: ArrayBuffer | null) {
+  const gzipHash = await sha256Hex(gzip)
+  if (!additions || !additions.byteLength) return gzipHash
+  const addHash = await sha256Hex(additions)
+  const mixed = new TextEncoder().encode(`${gzipHash}:${addHash}`)
+  return sha256Hex(mixed.buffer)
+}
+
+async function fetchAdditions(url: string, fetchImpl: typeof fetch) {
+  const response = await fetchImpl(url)
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error('Could not download the library catalog.')
+  return response.arrayBuffer()
+}
+
+async function parseGzip(bytes: ArrayBuffer, additions?: ArrayBuffer | null) {
   const text = await gunzipText(bytes)
-  const parsed = parseLibraryCatalog(JSON.parse(text) as unknown)
+  const extra = additions && additions.byteLength ? JSON.parse(new TextDecoder().decode(additions)) as unknown : undefined
+  const parsed = parseLibraryCatalog(JSON.parse(text) as unknown, extra)
   if (!parsed) throw new Error('The library catalog could not be read.')
   return parsed
 }

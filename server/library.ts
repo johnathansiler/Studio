@@ -2,18 +2,21 @@
  * Owner-only presign for the private R2 library.
  * Audio bytes are not streamed through this process. The phone fetches a signed GET,
  * or uploads a WAV with a signed PUT under the audio prefix.
- * Catalog updates download catalog/catalog.json.gz, append rows, and write the gzip back.
+ * The big catalog/catalog.json.gz object stays immutable. Appended rows live in the
+ * small catalog/catalog-additions.json sidecar. Readers merge the two; additions win.
+ * catalog-append reads and writes only that sidecar.
  * The library passphrase is never written to a log.
  * Credentials stay in the process environment.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { gunzipSync, gzipSync } from 'node:zlib'
 import { AwsClient } from 'aws4fetch'
 import { layersForNotes, type InstrumentQuery, type LibraryInstrument } from '../src/library/group.ts'
 import { LIBRARY_UPLOAD_MAX_KEYS, libraryAudioKey, libraryUploadSize, mergeCatalogEntries } from '../src/library/upload.ts'
 
 export const LIBRARY_EXPIRES_SEC = 15 * 60
 export const LIBRARY_CATALOG_KEY = 'catalog/catalog.json.gz'
+/** Appended rows only. The base catalog gzip is never rewritten by an append. */
+export const LIBRARY_ADDITIONS_KEY = 'catalog/catalog-additions.json'
 export const LIBRARY_NOT_READY = 'My Library is not set up on this server.'
 
 const FAIL_WINDOW_MS = 10 * 60 * 1000
@@ -418,14 +421,15 @@ function catalogConflict(error: unknown) {
   return error instanceof Error && error.message === CATALOG_CONFLICT
 }
 
-async function readCatalog(objects: LibraryObjects): Promise<{ ok: true; document: unknown; etag: string | null } | { ok: false; result: LibraryResult }> {
+const EMPTY_ADDITIONS = { version: 0, generated_at: '', count: 0, entries: [] as unknown[] }
+
+/** Sidecar only. The base catalog object is not read or written here. */
+async function readAdditions(objects: LibraryObjects): Promise<{ ok: true; document: unknown; etag: string | null } | { ok: false; result: LibraryResult }> {
   try {
-    const loaded = await objects.get(LIBRARY_CATALOG_KEY)
-    if (loaded.status === 404) {
-      return { ok: true, document: { version: 0, generated_at: '', count: 0, pending: '', entries: [] }, etag: null }
-    }
+    const loaded = await objects.get(LIBRARY_ADDITIONS_KEY)
+    if (loaded.status === 404) return { ok: true, document: { ...EMPTY_ADDITIONS, entries: [] }, etag: null }
     if (loaded.status !== 200 || !loaded.bytes || !loaded.etag) return { ok: false, result: { status: 503, body: { error: 'Could not update the library catalog.' } } }
-    const current = JSON.parse(gunzipSync(loaded.bytes).toString('utf8')) as unknown
+    const current = JSON.parse(Buffer.from(loaded.bytes).toString('utf8')) as unknown
     const parsed = current && typeof current === 'object' && !Array.isArray(current) ? current as { entries?: unknown } : null
     if (!parsed || !Array.isArray(parsed.entries)) return { ok: false, result: { status: 503, body: { error: 'Could not update the library catalog.' } } }
     return { ok: true, document: current, etag: loaded.etag }
@@ -441,7 +445,7 @@ async function appendCatalog(
   nextSeq: () => number,
 ): Promise<LibraryResult> {
   for (let attempt = 0; attempt < 4; attempt++) {
-    const loaded = await readCatalog(objects)
+    const loaded = await readAdditions(objects)
     if (!loaded.ok) return loaded.result
     const merged = mergeCatalogEntries(loaded.document, listed, now)
     if (!merged.ok) return { status: 400, body: { error: 'Those catalog entries cannot be added.' } }
@@ -454,16 +458,16 @@ async function appendCatalog(
     if (count < previous) return { status: 503, body: { error: 'Could not update the library catalog.' } }
     if (!merged.changed) return { status: 200, body: { ready: true, version, generatedAt, count, added: 0, skipped: merged.skipped } }
     try {
-      const gzip = gzipSync(Buffer.from(JSON.stringify(merged.document)))
+      const body = Buffer.from(JSON.stringify(merged.document))
       const stamp = `${new Date(now).toISOString().replace(/[:.]/g, '-')}-${nextSeq()}-${randomBytes(4).toString('hex')}`
-      const tempKey = `catalog/tmp/catalog-${stamp}.json.gz`
-      const backupKey = `catalog/backups/catalog-${stamp}.json.gz`
-      await objects.put(tempKey, gzip, 'application/gzip')
+      const tempKey = `catalog/tmp/additions-${stamp}.json`
+      const backupKey = `catalog/backups/additions-${stamp}.json`
+      await objects.put(tempKey, body, 'application/json')
       await objects.copy(tempKey, backupKey)
       // CopyObject on R2 does not apply If-Match to the destination (that header is
       // cf-copy-destination-if-match, and it is still beta). PutObject does, and a
       // mismatched ETag comes back as 412 so the retry keeps the other writer's rows.
-      await objects.put(LIBRARY_CATALOG_KEY, gzip, 'application/gzip', loaded.etag ? { ifMatch: loaded.etag } : { ifNoneMatch: '*' })
+      await objects.put(LIBRARY_ADDITIONS_KEY, body, 'application/json', loaded.etag ? { ifMatch: loaded.etag } : { ifNoneMatch: '*' })
       return { status: 200, body: { ready: true, version, generatedAt, count, added: merged.added, skipped: merged.skipped } }
     } catch (error) {
       if (catalogConflict(error) && attempt < 3) continue
