@@ -24,7 +24,10 @@
   padding: 0 12px;
 }
 .players-readout { margin: 0; color: var(--muted); font-size: 13px; }
+.players-tone { display: flex; gap: 8px; align-items: flex-end; }
 .players-style, .players-region { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.players-tone .players-style { flex: 1 1 auto; min-width: 0; }
+.players-tone .players-style select { flex: 1; min-width: 0; }
 .players-style select, .players-region input {
   min-height: 44px;
   background: var(--panel);
@@ -59,6 +62,9 @@
 .players-fill { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
 .players-fill input { width: 100%; min-height: 44px; }
 .players-parts, .players-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.players-attack { flex: 0 0 auto; }
+.players-attack .kit-knob { width: 56px; max-width: 56px; }
+.players-attack .kit-knob button { width: 44px; height: 44px; }
 .players-parts button.on, .players-actions button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .players-dock.embedded,
 .shell .players-dock.embedded,

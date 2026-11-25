@@ -4,11 +4,13 @@ import { cachedAnalyses, subscribeAnalysis } from '../analysis/cache'
 import type { AnalysisResult } from '../analysis/types'
 import type { AudioEngine } from '../audio/engine'
 import { STYLES } from '../generators/styles'
+import { builtinAttackSec } from '../audio/liveStage'
 import { projectSampleBeat } from '../model/tempoMap'
-import { buildSession } from '../players'
+import { BASS_PLAYER_ATTACK_MS, buildSession } from '../players'
 import { selectPlayers } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { TipButton } from './Hint'
+import { Knob } from './kit/controls'
 import './players.css'
 
 const STYLE = 'The drummer, bass, and keys all play in this style.'
@@ -18,6 +20,7 @@ const FOLLOW = 'Use the intro, verse, and chorus from Analyze. The middle of the
 const REGION = 'Bars the drummer and the players write. Bar 1 is the start of the song.'
 const DRUMS = 'Write a drum part on the Drums track. It plays the built-in kit, and you can edit every hit.'
 const BASS = 'Write a bass line that follows the chords.'
+const ATTACK = 'How fast each bass note fades in. Double-tap the knob to reset. Zero still ramps a little so the note does not click.'
 const KEYS = 'Write a keys part that follows the chords.'
 const HEAR = 'Listen to the drummer before writing.'
 const WRITE = 'Put the parts on the tracks as MIDI you can edit.'
@@ -45,7 +48,19 @@ export function PlayersSheet({ store, engine, onClose, embedded = false }: { sto
       velocity: note.velocity,
       drum: part.role === 'drums',
       cents: note.fine ?? 0,
-    })))
+    })), part.role === 'bass' ? builtinAttackSec(settings.bassAttack) : undefined)
+  }
+  const setAttack = (value: number) => {
+    store.setPlayers({ bassAttack: value }, true)
+    const tone = bassToneDevice(store)
+    if (!tone) return
+    const rolling = engine.status === 'playing' || engine.status === 'recording'
+    store.setAutomated(
+      { trackId: tone.trackId, target: 'instrument', param: 'attack', deviceId: tone.deviceId, min: 0, max: 2000 },
+      value,
+      rolling,
+      engine.currentTimelineSample(),
+    )
   }
   const setPad = (complexity: number, loudness: number) => store.setPlayers({ complexity, loudness }, true)
   const followLine = follow.source === 'track'
@@ -66,6 +81,7 @@ export function PlayersSheet({ store, engine, onClose, embedded = false }: { sto
       )}
       <p className="players-readout">{settings.followSections ? sections : 'One region, with a fill at the end.'}</p>
       <p className="players-readout">{followLine}</p>
+      <div className="players-tone">
       <label className="players-style">
         Style
         <select
@@ -77,6 +93,24 @@ export function PlayersSheet({ store, engine, onClose, embedded = false }: { sto
           {STYLES.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
         </select>
       </label>
+      <div
+        className="players-attack"
+        title={ATTACK}
+        onPointerDown={() => store.beginAutomationTouch()}
+        onPointerUp={() => store.endAutomationTouch()}
+        onPointerCancel={() => store.endAutomationTouch()}
+      >
+        <Knob
+          label="Attack"
+          min={0}
+          max={2000}
+          value={settings.bassAttack}
+          fallback={BASS_PLAYER_ATTACK_MS}
+          unit="ms"
+          onChange={setAttack}
+        />
+      </div>
+      </div>
       <div
         className="players-pad"
         role="group"
@@ -157,6 +191,12 @@ export function PlayersSheet({ store, engine, onClose, embedded = false }: { sto
       </div>
     </aside>
   )
+}
+
+function bassToneDevice(store: ProjectStore) {
+  const track = store.project.tracks.find((item) => item.type === 'midi' && (item.name === 'Bass' || item.midiClips.some((clip) => clip.name.endsWith('bass player'))))
+  const device = track?.rack?.devices.find((item) => item.kind === 'sub' || item.kind === 'fm' || item.kind === 'wave')
+  return track && device ? { trackId: track.id, deviceId: device.id } : null
 }
 
 function movePad(event: { currentTarget: HTMLDivElement; clientX: number; clientY: number }, setPad: (complexity: number, loudness: number) => void) {

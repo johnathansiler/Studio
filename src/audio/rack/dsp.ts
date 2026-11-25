@@ -83,7 +83,7 @@ function midiHz(note: number) {
 
 function env(value: number, released: boolean, attackMs: number, decayMs: number, sustain: number, releaseMs: number, sr: number) {
   if (!released) {
-    const attack = Math.max(1, (attackMs / 1000) * sr)
+    const attack = Math.max(0.001 * sr, (attackMs / 1000) * sr)
     if (value < 0.999) return Math.min(1, value + 1 / attack)
     const decay = Math.max(1, (decayMs / 1000) * sr)
     return value + (sustain - value) * (1 - Math.exp(-1 / decay))

@@ -3,6 +3,8 @@
  * lands on the target note. The rack and the offline render share this voice.
  */
 
+import { polyphaseKernel, sampleKernel } from '../quality/resample'
+
 export interface Bass808Event {
   sample: number
   pitch: number
@@ -150,9 +152,23 @@ function begin(state: Bass808State, midi: number, vel: number, glide: boolean, p
   }
 }
 
-function readSample(buffer: Float32Array | null | undefined, pos: number) {
-  if (!buffer || buffer.length < 2) return 0
-  if (pos < 0 || pos >= buffer.length - 1) return 0
+/**
+ * One sample from an 808 one-shot.
+ * Playback slower than the file stays linear: slowing down does not alias, and
+ * the read stops at the buffer edge instead of borrowing samples past it.
+ * Playback faster than the file uses a windowed sinc so the new high pads,
+ * and any note above the sample root, do not fold over the Nyquist.
+ */
+function readSample(buffer: Float32Array | null | undefined, pos: number, speed = 1) {
+  if (!buffer || buffer.length < 2 || !Number.isFinite(pos)) return 0
+  if (pos < 0 || pos >= buffer.length) return 0
+  const rate = Number.isFinite(speed) && speed > 0 ? speed : 1
+  if (rate > 1.02) {
+    const fc = Math.max(0.04, Math.min(0.45, 0.42 / rate))
+    const quant = Math.round(fc * 16) / 16
+    return sampleKernel(polyphaseKernel(quant, 8), buffer, pos)
+  }
+  if (pos >= buffer.length - 1) return buffer[buffer.length - 1] || 0
   const i0 = Math.floor(pos)
   const frac = pos - i0
   const a = buffer[i0] || 0
@@ -194,7 +210,7 @@ export function bassStep(
   const source = num(params, 'source', 0) >= 0.5 && buffer && buffer.length > 8 ? 1 : 0
   const root = num(params, 'root', 36)
   const speed = 2 ** ((sounded - root) / 12) * ((bufferRate > 0 ? bufferRate : sr) / sr)
-  const sampled = source ? readSample(buffer, state.samplePos) : 0
+  const sampled = source ? readSample(buffer, state.samplePos, speed) : 0
   if (source) state.samplePos += speed
 
   const clickLen = Math.max(1, 0.008 * sr)

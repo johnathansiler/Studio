@@ -90,7 +90,7 @@ import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
 import type { GeneratedPart } from '../generators/types'
 import { normalizeGenerator } from '../generators/settings'
-import { buildSession, normalizePlayer, type PlayerSettings, type SessionDetection, type SessionPart } from '../players'
+import { buildSession, isBassPlayerTrack, normalizePlayer, type PlayerSettings, type SessionDetection, type SessionPart } from '../players'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { applySuggestion, applyUnstuckDraft, type SongDraft, type Suggestion } from '../unstuck'
 import { placeEnsemble } from '../ideas/commit'
@@ -3520,8 +3520,14 @@ export class ProjectStore {
       const plugin = this.pluginList(spec.trackId)?.find((item) => item.id === spec.pluginId)
       if (plugin) plugin.params = { ...plugin.params, [spec.param]: next }
     } else if (spec.target === 'instrument' && spec.deviceId) {
-      const device = this.track(spec.trackId)?.rack?.devices.find((item) => item.id === spec.deviceId)
-      if (device) device.params = { ...device.params, [spec.param]: next }
+      const track = this.track(spec.trackId)
+      const device = track?.rack?.devices.find((item) => item.id === spec.deviceId)
+      if (device) {
+        device.params = { ...device.params, [spec.param]: next }
+        if (spec.param === 'attack' && track && isBassPlayerTrack(track) && (device.kind === 'sub' || device.kind === 'fm' || device.kind === 'wave')) {
+          this.project.players = normalizePlayer({ ...this.playerState(), bassAttack: next })
+        }
+      }
     }
   }
 
@@ -5454,6 +5460,7 @@ export class ProjectStore {
   setPlayers(patch: Partial<PlayerSettings>, draft = false) {
     const apply = () => {
       this.project.players = normalizePlayer({ ...this.playerState(), ...patch })
+      if (patch.bassAttack != null) this.applyBassPlayerAttack(this.project.players.bassAttack)
     }
     if (draft) this.draft(apply)
     else this.mutate(apply)
@@ -5476,6 +5483,7 @@ export class ProjectStore {
       let selected: { trackId: string; clipId: string; noteIds: string[] } | null = null
       for (const part of built.parts) {
         const placed = this.placePlayer(part, origin)
+        if (part.role === 'bass') this.applyBassPlayerAttack(settings.bassAttack)
         if (part.role === 'drums' || !selected) selected = placed
       }
       if (selected) {
@@ -5487,6 +5495,14 @@ export class ProjectStore {
       }
       this.toast(built.summary)
     })
+  }
+
+  /** Copy the bass-player Attack onto the Bass track's synth so live, playback, and render share it. */
+  private applyBassPlayerAttack(ms: number) {
+    const track = this.project.tracks.find((item) => item.type === 'midi' && (item.name === 'Bass' || item.midiClips.some((clip) => clip.name.endsWith('bass player'))))
+    const device = track?.rack?.devices.find((item) => item.kind === 'sub' || item.kind === 'fm' || item.kind === 'wave')
+    if (!device) return
+    device.params = { ...device.params, attack: ms }
   }
 
   setGenerator(patch: Partial<import('../generators/types').GeneratorSettings>, draft = false) {

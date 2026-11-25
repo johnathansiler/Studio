@@ -1,3 +1,4 @@
+import { bassPlayerAttackMs } from '../players/settings'
 import { uid, type Project, type Track } from './types'
 import { KNOCK_PRESETS } from './knockPresets'
 import { FM_PRESETS, SUB_PRESETS, WAVE_PRESETS } from './tonePresets'
@@ -110,7 +111,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('detune', 'Detune', -40, 40, 6, 'ct'),
     spec('cutoff', 'Cutoff', 40, 16000, 1400, 'Hz'),
     spec('res', 'Res', 0, 0.9, 0.15),
-    spec('attack', 'Attack', 1, 2000, 8, 'ms'),
+    spec('attack', 'Attack', 0, 2000, 8, 'ms'),
     spec('decay', 'Decay', 5, 3000, 240, 'ms'),
     spec('sustain', 'Sustain', 0, 1, 0.7),
     spec('release', 'Release', 5, 4000, 280, 'ms'),
@@ -156,7 +157,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('mode', 'Mod mix', 0, 1, 0),
     spec('ratio', 'Ratio', 0.5, 8, 2),
     spec('index', 'Index', 0, 6, 1.4),
-    spec('attack', 'Attack', 1, 2000, 6, 'ms'),
+    spec('attack', 'Attack', 0, 2000, 6, 'ms'),
     spec('decay', 'Decay', 5, 3000, 200, 'ms'),
     spec('sustain', 'Sustain', 0, 1, 0.6),
     spec('release', 'Release', 5, 4000, 240, 'ms'),
@@ -186,7 +187,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('cutoff', 'Cutoff', 40, 16000, 8000, 'Hz'),
     spec('res', 'Res', 0, 0.9, 0),
     spec('fmode', 'Filter', 0, 3, 0),
-    spec('attack', 'Attack', 1, 2000, 8, 'ms'),
+    spec('attack', 'Attack', 0, 2000, 8, 'ms'),
     spec('decay', 'Decay', 5, 3000, 240, 'ms'),
     spec('sustain', 'Sustain', 0, 1, 0.75),
     spec('release', 'Release', 5, 4000, 280, 'ms'),
@@ -258,7 +259,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('root', 'Root', 0, 127, 36),
   ],
   sampler: [
-    spec('attack', 'Attack', 1, 2000, 4, 'ms'),
+    spec('attack', 'Attack', 0, 2000, 4, 'ms'),
     spec('decay', 'Decay', 5, 3000, 180, 'ms'),
     spec('sustain', 'Sustain', 0, 1, 0.8),
     spec('release', 'Release', 5, 4000, 200, 'ms'),
@@ -619,8 +620,26 @@ export function normalizeProjectRack(project: Project): Project {
   project.devicePresets = project.devicePresets ?? []
   project.rackPatches = project.rackPatches ?? []
   project.presetFavorites = project.presetFavorites ?? []
-  for (const track of project.tracks) normalizeTrackRack(track)
+  for (const track of project.tracks) {
+    const gainedSynth = track.type === 'midi' && !track.rack?.devices?.length
+    normalizeTrackRack(track)
+    if (gainedSynth) stampBassPlayerAttack(project, track)
+  }
   return project
+}
+
+/**
+ * A new bass synth takes a saved player Attack. Projects that never stored
+ * one keep the device default (8 ms). The builtin voice still falls back to
+ * 4 ms through `bassPlayerAttackMs`.
+ */
+function stampBassPlayerAttack(project: Project, track: Track) {
+  const saved = project.players?.bassAttack
+  if (typeof saved !== 'number' || !Number.isFinite(saved)) return
+  const ms = bassPlayerAttackMs(project, track)
+  if (ms == null) return
+  const device = track.rack?.devices.find((item) => item.kind === 'sub' || item.kind === 'fm' || item.kind === 'wave')
+  if (device) device.params.attack = ms
 }
 
 export function normalizeTrackRack(track: Track) {

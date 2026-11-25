@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { AnalysisSection } from '../analysis/types'
+import { renderArrangeInputs } from '../audio/arrangeSources'
+import { ATTACK_SEC, builtinAttackSec, builtinEnvelope } from '../audio/liveStage'
 import { DRUM_PADS } from '../model/drums'
 import { createEmptyProject, makeTrack, type MidiClip } from '../model/types'
-import { buildSession, chordsFromAnalysis } from '../players'
+import { BASS_PLAYER_ATTACK_MS, bassPlayerAttackMs, buildSession, chordsFromAnalysis } from '../players'
 import { diffProject } from '../state/ops'
 import { selectPlayers } from '../state/select'
 import { ProjectStore } from '../state/store'
@@ -159,5 +161,142 @@ describe('session players', () => {
     expect(restored.playerState().complexity).toBeCloseTo(0.2)
     store.undo()
     expect(store.playerState().style).toBe('pop')
+  })
+
+  it('keeps the bass attack at the current fade-in and saves a longer one', async () => {
+    expect(builtinAttackSec(BASS_PLAYER_ATTACK_MS)).toBe(ATTACK_SEC)
+    expect(builtinAttackSec(0)).toBe(0.0005)
+    const store = new ProjectStore(createEmptyProject())
+    expect(store.playerState().bassAttack).toBe(BASS_PLAYER_ATTACK_MS)
+    store.setPlayers({ bassAttack: 80 })
+    const restored = new ProjectStore(JSON.parse(JSON.stringify(store.project)))
+    expect(restored.playerState().bassAttack).toBe(80)
+    store.undo()
+    expect(store.playerState().bassAttack).toBe(BASS_PLAYER_ATTACK_MS)
+
+    const energy = async (ms: number) => {
+      const project = createEmptyProject()
+      project.players = { ...store.playerState(), bassAttack: ms }
+      project.tracks = [makeTrack({
+        name: 'Bass',
+        type: 'midi',
+        instrument: 'synth',
+        midiClips: [{
+          id: 'bass-clip',
+          name: 'Pop bass player',
+          startBeat: 0,
+          durationBeats: 2,
+          notes: [{ id: 'n', pitch: 40, startBeat: 0, durationBeats: 1, velocity: 1 }],
+        }],
+      })]
+      const rendered = await renderArrangeInputs(project, new Map(), 0, project.sampleRate)
+      const channel = rendered.get(project.tracks[0].id)?.[0] ?? new Float32Array()
+      let sum = 0
+      const early = Math.round(project.sampleRate * 0.02)
+      for (let i = 0; i < early; i++) sum += (channel[i] || 0) ** 2
+      return sum
+    }
+    const quick = await energy(BASS_PLAYER_ATTACK_MS)
+    const slow = await energy(800)
+    expect(quick).toBeGreaterThan(0)
+    expect(slow).toBeLessThan(quick * 0.5)
+
+    const span = builtinEnvelope(0.8, 0.25)
+    expect(span.rise).toBeLessThanOrEqual(0.25)
+    expect(span.releaseAt).toBeGreaterThan(span.rise)
+    const short = await (async () => {
+      const project = createEmptyProject()
+      project.tempo = 120
+      project.players = { ...store.playerState(), bassAttack: 800 }
+      project.tracks = [makeTrack({
+        name: 'Bass',
+        type: 'midi',
+        instrument: 'synth',
+        midiClips: [{
+          id: 'bass-clip',
+          name: 'Pop bass player',
+          startBeat: 0,
+          durationBeats: 0.5,
+          notes: [{ id: 'n', pitch: 40, startBeat: 0, durationBeats: 0.5, velocity: 1 }],
+        }],
+      })]
+      const rendered = await renderArrangeInputs(project, new Map(), 0, Math.round(project.sampleRate * 0.3))
+      const channel = rendered.get(project.tracks[0].id)?.[0] ?? new Float32Array()
+      let sum = 0
+      for (let i = 0; i < channel.length; i++) sum += (channel[i] || 0) ** 2
+      return sum
+    })()
+    expect(short).toBeGreaterThan(0.01)
+  })
+
+  it('applies a saved bass attack when loadProject creates the synth', async () => {
+    const store = new ProjectStore(createEmptyProject())
+    store.setPlayers({ bassAttack: 800, drummer: false, keys: false, followSections: false, endBar: 2 })
+    store.writeSession()
+    const written = store.project.tracks.find((track) => track.name === 'Bass')!
+    expect(written.midiClips.some((clip) => clip.notes.length > 0)).toBe(true)
+    expect(written.rack?.devices?.length ?? 0).toBe(0)
+    const saved = JSON.parse(JSON.stringify(store.project))
+    const loaded = new ProjectStore(createEmptyProject())
+    loaded.loadProject(saved, new Map())
+    const bass = loaded.project.tracks.find((track) => track.name === 'Bass')!
+    const device = bass.rack!.devices.find((item) => item.kind === 'sub')!
+    expect(device.params.attack).toBe(800)
+    expect(loaded.playerState().bassAttack).toBe(800)
+
+    const early = async (project: typeof loaded.project) => {
+      const rendered = await renderArrangeInputs(project, new Map(), 0, Math.round(project.sampleRate * 0.05))
+      const channel = rendered.get(bass.id)?.[0] ?? new Float32Array()
+      let sum = 0
+      const samples = Math.round(project.sampleRate * 0.02)
+      for (let i = 0; i < samples && i < channel.length; i++) sum += (channel[i] || 0) ** 2
+      return sum
+    }
+    const heard = await early(loaded.project)
+    const atSaved = JSON.parse(JSON.stringify(loaded.project))
+    atSaved.tracks.find((track: { name: string }) => track.name === 'Bass').rack.devices.find((item: { kind: string }) => item.kind === 'sub').params.attack = 800
+    const atDefault = JSON.parse(JSON.stringify(loaded.project))
+    atDefault.tracks.find((track: { name: string }) => track.name === 'Bass').rack.devices.find((item: { kind: string }) => item.kind === 'sub').params.attack = 8
+    expect(await early(atSaved)).toBeCloseTo(heard, 6)
+    expect(heard).toBeLessThan((await early(atDefault)) * 0.5)
+
+    loaded.setPlayers({ bassAttack: 200 })
+    expect(loaded.project.tracks.find((track) => track.name === 'Bass')!.rack!.devices.find((item) => item.kind === 'sub')!.params.attack).toBe(200)
+    loaded.setAutomated({ trackId: bass.id, target: 'instrument', param: 'attack', deviceId: device.id, min: 0, max: 2000 }, 120, false, 0)
+    expect(loaded.playerState().bassAttack).toBe(120)
+    expect(loaded.project.tracks.find((track) => track.name === 'Bass')!.rack!.devices.find((item) => item.kind === 'sub')!.params.attack).toBe(120)
+  })
+
+  it('leaves the device default when a bass project never saved an attack', () => {
+    const unsaved = (players?: { style: string }) => {
+      const project = createEmptyProject()
+      if (players) project.players = players as typeof project.players
+      else delete project.players
+      project.tracks.push(makeTrack({
+        name: 'Bass',
+        type: 'midi',
+        instrument: 'synth',
+        midiClips: [{
+          id: 'bass-clip',
+          name: 'Pop bass player',
+          startBeat: 0,
+          durationBeats: 1,
+          notes: [{ id: 'n', pitch: 40, startBeat: 0, durationBeats: 1, velocity: 1 }],
+        }],
+      }))
+      return JSON.parse(JSON.stringify(project))
+    }
+    const attackOf = (store: ProjectStore) => store.project.tracks.find((track) => track.name === 'Bass')!.rack!.devices.find((item) => item.kind === 'sub')!.params.attack
+    const opened = new ProjectStore(unsaved())
+    const partial = new ProjectStore(unsaved({ style: 'pop' }))
+    expect(attackOf(opened)).toBe(8)
+    expect(attackOf(partial)).toBe(8)
+    expect(bassPlayerAttackMs(opened.project, opened.project.tracks.find((track) => track.name === 'Bass')!)).toBe(BASS_PLAYER_ATTACK_MS)
+
+    const host = new ProjectStore(createEmptyProject())
+    host.loadProject(unsaved(), new Map())
+    expect(attackOf(host)).toBe(8)
+    host.loadProject(unsaved({ style: 'pop' }), new Map())
+    expect(attackOf(host)).toBe(8)
   })
 })

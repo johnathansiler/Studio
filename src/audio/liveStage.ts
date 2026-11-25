@@ -8,6 +8,26 @@ import { additiveSaw, partialsFor } from './quality/blep'
  */
 
 export const ATTACK_SEC = 0.004
+
+/**
+ * Seconds of fade-in for a bass-player note.
+ * 4 ms is `ATTACK_SEC`, so the default knob leaves the current voice alone.
+ * 0 ms still ramps for half a millisecond so the saw does not step.
+ */
+export function builtinAttackSec(ms: number) {
+  const safe = Number.isFinite(ms) ? ms : 4
+  return Math.max(0.0005, safe / 1000)
+}
+
+/**
+ * Attack ends by the end of the note. Release starts strictly later, so a
+ * long attack on a short note still rises instead of being cancelled.
+ */
+export function builtinEnvelope(attackSec: number, noteSec: number) {
+  const note = Math.max(0.0005, noteSec)
+  const rise = Math.min(Math.max(0.0005, attackSec), note)
+  return { rise, releaseAt: Math.max(rise + 0.001, note) }
+}
 export const RELEASE_SEC = 0.005
 /** Built-in synth voice, about -23 dB. Matches the transport oscillator. */
 export const BUILTIN_PEAK = 0.07

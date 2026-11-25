@@ -2,6 +2,9 @@ import { clamp } from '../generators/rng'
 import { STYLES } from '../generators/styles'
 import type { PlayerSettings } from './types'
 
+/** Built-in bass fade-in. Same length as `ATTACK_SEC` in the live stage (4 ms). */
+export const BASS_PLAYER_ATTACK_MS = 4
+
 export function defaultPlayers(): PlayerSettings {
   return {
     style: 'pop',
@@ -14,8 +17,21 @@ export function defaultPlayers(): PlayerSettings {
     drummer: true,
     bass: true,
     keys: true,
+    bassAttack: BASS_PLAYER_ATTACK_MS,
     seed: 1,
   }
+}
+
+export function isBassPlayerTrack(track: { name: string; midiClips?: { name: string }[] }) {
+  return track.name === 'Bass' || !!track.midiClips?.some((clip) => clip.name.endsWith('bass player'))
+}
+
+/** Attack time for a Bass track or a clip named like the bass player. Null for every other track. */
+export function bassPlayerAttackMs(project: { players?: Partial<PlayerSettings> }, track: { name: string; midiClips?: { name: string }[] }): number | null {
+  if (!isBassPlayerTrack(track)) return null
+  const raw = project.players?.bassAttack
+  const ms = typeof raw === 'number' && Number.isFinite(raw) ? raw : BASS_PLAYER_ATTACK_MS
+  return clamp(ms, 0, 2000)
 }
 
 export function normalizePlayer(value: Partial<PlayerSettings> | undefined): PlayerSettings {
@@ -35,6 +51,7 @@ export function normalizePlayer(value: Partial<PlayerSettings> | undefined): Pla
     drummer: value.drummer !== false,
     bass: value.bass !== false,
     keys: value.keys !== false,
+    bassAttack: clamp(value.bassAttack ?? base.bassAttack, 0, 2000),
     seed: Number.isFinite(value.seed) ? (value.seed as number) >>> 0 : base.seed,
   }
 }

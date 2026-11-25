@@ -17,6 +17,11 @@ export interface PlayerSettings {
   drummer: boolean
   bass: boolean
   keys: boolean
+  /**
+   * Bass note fade-in, milliseconds. 4 matches the built-in bass voice.
+   * 0 still uses a short ramp so the note does not click.
+   */
+  bassAttack: number
   seed: number
 }
 
