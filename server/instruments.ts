@@ -4,13 +4,14 @@
  */
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
+import { overlayRowsByKey } from '../src/library/overlay.ts'
 import {
   groupLibraryInstruments,
   searchInstruments,
   type InstrumentQuery,
   type LibraryInstrument,
 } from '../src/library/group.ts'
-import { LIBRARY_CATALOG_KEY, presignR2Get, type LibraryEnv } from './library.ts'
+import { LIBRARY_ADDITIONS_KEY, LIBRARY_CATALOG_KEY, presignR2Get, type LibraryEnv } from './library.ts'
 
 const CACHE_MS = 15 * 60 * 1000
 
@@ -19,22 +20,28 @@ export interface InstrumentSource {
   get(id: string): Promise<LibraryInstrument | null>
 }
 
-async function entriesFromR2(env: LibraryEnv) {
-  const url = await presignR2Get(env, LIBRARY_CATALOG_KEY)
-  const response = await fetch(url)
-  if (!response.ok) throw new Error('Could not read the library catalog.')
-  const gzip = Buffer.from(await response.arrayBuffer())
-  const hash = createHash('sha256').update(gzip).digest('hex')
-  const parsed = JSON.parse(gunzipSync(gzip).toString('utf8')) as { entries?: unknown }
-  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.entries)) throw new Error('Could not read the library catalog.')
-  // Keep only the fields grouping needs. The search-word lists are for the browser.
-  const entries = []
-  for (const item of parsed.entries) {
+export interface SlimCatalogRow {
+  key: string
+  size: number
+  pack: string
+  type: string
+  category: string
+  note: string
+  root: string
+}
+
+/** Fields grouping needs. Search words stay in the browser copy of the catalog. */
+export function slimCatalogRows(parsed: unknown): SlimCatalogRow[] {
+  const entries = parsed && typeof parsed === 'object' && Array.isArray((parsed as { entries?: unknown }).entries)
+    ? (parsed as { entries: unknown[] }).entries
+    : []
+  const rows: SlimCatalogRow[] = []
+  for (const item of entries) {
     if (!item || typeof item !== 'object') continue
     const row = item as Record<string, unknown>
     const key = typeof row.key === 'string' ? row.key : ''
     if (!key) continue
-    entries.push({
+    rows.push({
       key,
       size: typeof row.size === 'number' ? row.size : 0,
       pack: typeof row.pack === 'string' ? row.pack : '',
@@ -44,7 +51,58 @@ async function entriesFromR2(env: LibraryEnv) {
       root: typeof row.root === 'string' ? row.root : '',
     })
   }
-  return { hash, entries }
+  return rows
+}
+
+/** Base rows, then sidecar rows. The same key keeps one slot and the addition replaces it. */
+export function mergeCatalogRows(base: unknown, additions?: unknown): SlimCatalogRow[] {
+  const rows = slimCatalogRows(base)
+  if (additions == null) return rows
+  overlayRowsByKey(rows, slimCatalogRows(additions))
+  return rows
+}
+
+function rowsFromGzip(gzip: Buffer): SlimCatalogRow[] {
+  const parsed = JSON.parse(gunzipSync(gzip).toString('utf8')) as unknown
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as { entries?: unknown }).entries)) {
+    throw new Error('Could not read the library catalog.')
+  }
+  return slimCatalogRows(parsed)
+}
+
+async function readPrivateObject(env: LibraryEnv, key: string): Promise<Buffer | null> {
+  const url = await presignR2Get(env, key)
+  const response = await fetch(url)
+  if (response.status === 404) {
+    await response.arrayBuffer().catch(() => undefined)
+    return null
+  }
+  if (!response.ok) {
+    await response.arrayBuffer().catch(() => undefined)
+    throw new Error('Could not read the library catalog.')
+  }
+  return Buffer.from(await response.arrayBuffer())
+}
+
+async function entriesFromR2(env: LibraryEnv) {
+  let gzip: Buffer | null = await readPrivateObject(env, LIBRARY_CATALOG_KEY)
+  if (!gzip) throw new Error('Could not read the library catalog.')
+  const hash = createHash('sha256')
+  hash.update(gzip)
+  const entries = rowsFromGzip(gzip)
+  gzip = null
+  const extra = await readPrivateObject(env, LIBRARY_ADDITIONS_KEY)
+  if (extra) {
+    hash.update(extra)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(extra.toString('utf8')) as unknown
+    } catch {
+      throw new Error('Could not read the library catalog.')
+    }
+    overlayRowsByKey(entries, slimCatalogRows(parsed))
+  }
+  return { hash: hash.digest('hex'), entries }
 }
 
 export function createInstrumentSource(deps: {

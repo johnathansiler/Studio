@@ -6,14 +6,17 @@ import { createElement, createRef } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { browseLibraryRows } from '../library/browse'
-import { indexParsedCatalog, parseLibraryCatalog } from '../library/catalog'
+import { LIBRARY_ADDITIONS_KEY as CLIENT_ADDITIONS_KEY, LIBRARY_CATALOG_KEY as CLIENT_CATALOG_KEY, indexParsedCatalog, memoryCatalogCache, parseLibraryCatalog } from '../library/catalog'
+import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
+import { loadLibraryCatalog, setLibraryCaches } from '../library/audio'
 import { buildFastRows, classifyDrum, nearSongWindow } from '../library/fastBrowse'
 import { entryMatchesFilters, searchLibrary } from '../library/search'
 import { EMPTY_LIBRARY_QUERY } from '../library/types'
 import { encodeWav } from '../model/wav'
 import { createEmptyProject } from '../model/types'
 import { placeSound } from '../sounds/place'
-import { createLibraryApi, LIBRARY_NOT_READY, libraryCatalogWriteKey, presignR2Put, type LibraryEnv, type LibraryObjects } from '../../server/library.ts'
+import { createLibraryApi, LIBRARY_ADDITIONS_KEY, LIBRARY_CATALOG_KEY, LIBRARY_NOT_READY, libraryCatalogWriteKey, presignR2Put, type LibraryEnv, type LibraryObjects } from '../../server/library.ts'
+import { syntheticLibrary } from './libraryCatalogFixture'
 import { LibraryAddSounds } from '../ui/MyLibrary'
 import {
   LIBRARY_AUDIO_PREFIX,
@@ -81,14 +84,16 @@ function memoryObjects(seed?: Record<string, unknown>, options?: { conflictOnce?
     async put(key, bytes, _contentType, conditions) {
       const match = conditions?.ifMatch ? ` if-match ${conditions.ifMatch}` : ''
       const none = conditions?.ifNoneMatch ? ` if-none-match ${conditions.ifNoneMatch}` : ''
-      if (conflictArmed && key === 'catalog/catalog.json.gz') {
+      if (conflictArmed && key === LIBRARY_ADDITIONS_KEY) {
         conflictArmed = false
         calls.push(`put ${key} conflict`)
-        const current = JSON.parse(gunzipSync(objects.get(key)!).toString('utf8')) as { entries: unknown[]; count: number; version: number }
+        const current = objects.has(key)
+          ? JSON.parse(Buffer.from(objects.get(key)!).toString('utf8')) as { entries: unknown[]; count: number; version: number }
+          : { version: 1, generated_at: '', count: 0, entries: [] as unknown[] }
         current.entries.push(wire('audio/bass/racer.wav', { size: 8 }))
         current.count = current.entries.length
         current.version = 9
-        objects.set(key, gzipSync(Buffer.from(JSON.stringify(current))))
+        objects.set(key, Buffer.from(JSON.stringify(current)))
         etags.set(key, mint())
         throw new Error('catalog-conflict')
       }
@@ -124,6 +129,10 @@ function memoryObjects(seed?: Record<string, unknown>, options?: { conflictOnce?
 
 function readCatalog(bytes: Uint8Array) {
   return JSON.parse(gunzipSync(bytes).toString('utf8')) as { version: number; generated_at: string; count: number; pending?: string; entries: Record<string, unknown>[]; note?: string }
+}
+
+function readJson(bytes: Uint8Array) {
+  return JSON.parse(Buffer.from(bytes).toString('utf8')) as { version: number; generated_at: string; count: number; entries: Record<string, unknown>[] }
 }
 
 function silence(method: 'log' | 'error' | 'warn' | 'info') {
@@ -368,8 +377,10 @@ describe('library catalog append', () => {
     ],
   }
 
-  it('appends without dropping existing rows and writes a temp, a backup, then the live catalog', async () => {
+  it('appends into the sidecar and leaves the base catalog unread', async () => {
     const store = memoryObjects(existing)
+    const base = store.objects.get(LIBRARY_CATALOG_KEY)!
+    const baseCopy = base.slice()
     const api = createLibraryApi({ env: () => env, objects: store.api, signPut: async () => 'https://signed.example/nope' })
     const added = wire('audio/bass/new.wav', { size: 64, sample_rate: 48000, bit_depth: 24, channels: 1 })
     const result = await api.handle({
@@ -382,34 +393,36 @@ describe('library catalog append', () => {
     })
     expect(result.status).toBe(200)
     expect(result.body.added).toBe(1)
-    expect(result.body.version).toBe(5)
-    expect(result.body.count).toBe(3)
+    expect(result.body.skipped).toBe(0)
+    expect(result.body.version).toBe(1)
+    expect(result.body.count).toBe(1)
     expect(JSON.stringify(result.body)).not.toContain('owner-pass')
-    const live = store.objects.get('catalog/catalog.json.gz')
-    expect(live).toBeTruthy()
-    const document = readCatalog(live!)
-    expect(document.pending).toBe('later')
-    expect(document.note).toBe('keep me')
-    expect(document.count).toBe(3)
-    expect(document.generated_at).toBe('2026-11-24T21:00:00.000Z')
-    expect(document.entries[0]).toMatchObject({ key: 'Drums/kick.wav', size: 10, bpm_source: 'label', extra: 'stay' })
-    expect(document.entries[1]).toMatchObject({ key: 'Bass/old.wav', size: 20 })
-    expect(document.entries[2]).toMatchObject({ key: 'audio/bass/new.wav', bit_depth: 24, category: 'bass' })
+    expect(Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!).equals(Buffer.from(baseCopy))).toBe(true)
+    const baseDoc = readCatalog(store.objects.get(LIBRARY_CATALOG_KEY)!)
+    expect(baseDoc.pending).toBe('later')
+    expect(baseDoc.note).toBe('keep me')
+    expect(baseDoc.entries).toHaveLength(2)
+    const sidecar = readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.generated_at).toBe('2026-11-24T21:00:00.000Z')
+    expect(sidecar.count).toBe(1)
+    expect(sidecar.entries[0]).toMatchObject({ key: 'audio/bass/new.wav', bit_depth: 24, category: 'bass' })
     const backupKey = [...store.objects.keys()].find((key) => key.startsWith('catalog/backups/'))
     const tempKey = [...store.objects.keys()].find((key) => key.startsWith('catalog/tmp/'))
     expect(backupKey).toBeTruthy()
     expect(tempKey).toBeTruthy()
-    expect(readCatalog(store.objects.get(backupKey!)!).entries).toHaveLength(3)
+    expect(readJson(store.objects.get(backupKey!)!).entries).toHaveLength(1)
     expect(store.calls).toEqual([
-      'get catalog/catalog.json.gz',
+      `get ${LIBRARY_ADDITIONS_KEY}`,
       `put ${tempKey}`,
       `copy ${tempKey} ${backupKey}`,
-      'put catalog/catalog.json.gz if-match "1"',
+      `put ${LIBRARY_ADDITIONS_KEY} if-none-match *`,
     ])
+    expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
   })
 
-  it('keeps a row written by someone else when the catalog etag moves', async () => {
+  it('keeps a row written by someone else when the sidecar etag moves', async () => {
     const store = memoryObjects(existing, { conflictOnce: true })
+    const base = store.objects.get(LIBRARY_CATALOG_KEY)!.slice()
     const api = createLibraryApi({ env: () => env, objects: store.api })
     const result = await api.handle({
       method: 'POST',
@@ -421,11 +434,12 @@ describe('library catalog append', () => {
     })
     expect(result.status).toBe(200)
     expect(result.body.added).toBe(1)
-    const document = readCatalog(store.objects.get('catalog/catalog.json.gz')!)
-    const keys = document.entries.map((entry) => entry.key)
-    expect(keys).toEqual(['Drums/kick.wav', 'Bass/old.wav', 'audio/bass/racer.wav', 'audio/bass/new.wav'])
+    const sidecar = readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries.map((entry) => entry.key)).toEqual(['audio/bass/racer.wav', 'audio/bass/new.wav'])
+    expect(Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!).equals(Buffer.from(base))).toBe(true)
     expect(store.calls.some((call) => call.includes('conflict'))).toBe(true)
-    expect(store.calls.filter((call) => call.includes('catalog/catalog.json.gz if-match')).length).toBe(1)
+    expect(store.calls.filter((call) => call.includes(`${LIBRARY_ADDITIONS_KEY} if-match`)).length).toBe(1)
+    expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
   })
 
   it('serializes two appends so neither row disappears', async () => {
@@ -438,11 +452,12 @@ describe('library catalog append', () => {
     expect(first.status).toBe(200)
     expect(second.status).toBe(200)
     expect((first.body.added as number) + (second.body.added as number)).toBe(2)
-    const document = readCatalog(store.objects.get('catalog/catalog.json.gz')!)
-    expect(document.entries.map((entry) => entry.key)).toEqual(['Drums/kick.wav', 'Bass/old.wav', 'audio/bass/a.wav', 'audio/bass/b.wav'])
+    const sidecar = readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries.map((entry) => entry.key)).toEqual(['audio/bass/a.wav', 'audio/bass/b.wav'])
+    expect(readCatalog(store.objects.get(LIBRARY_CATALOG_KEY)!).entries).toHaveLength(2)
   })
 
-  it('creates a missing catalog only when nothing else landed first', async () => {
+  it('creates a missing sidecar only when nothing else landed first', async () => {
     const store = memoryObjects()
     const api = createLibraryApi({ env: () => env, objects: store.api })
     const result = await api.handle({
@@ -456,12 +471,20 @@ describe('library catalog append', () => {
     expect(result.status).toBe(200)
     expect(result.body.added).toBe(1)
     expect(store.calls.some((call) => call.includes('if-none-match *'))).toBe(true)
-    expect(readCatalog(store.objects.get('catalog/catalog.json.gz')!).entries).toHaveLength(1)
+    expect(store.objects.has(LIBRARY_CATALOG_KEY)).toBe(false)
+    expect(readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!).entries).toHaveLength(1)
   })
 
-  it('leaves the live catalog untouched when the read has no etag', async () => {
+  it('leaves the sidecar untouched when the read has no etag', async () => {
     const store = memoryObjects(existing)
-    const before = Buffer.from(store.objects.get('catalog/catalog.json.gz')!)
+    const base = Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!)
+    const prior = Buffer.from(JSON.stringify({
+      version: 2,
+      generated_at: '2026-11-11T00:00:00.000Z',
+      count: 1,
+      entries: [wire('audio/bass/kept.wav', { size: 8 })],
+    }))
+    store.objects.set(LIBRARY_ADDITIONS_KEY, prior)
     store.api.get = async (key) => {
       store.calls.push(`get ${key}`)
       const bytes = store.objects.get(key)
@@ -477,9 +500,11 @@ describe('library catalog append', () => {
       now: Date.parse('2026-11-24T21:14:00.000Z'),
     })
     expect(result.status).toBe(503)
-    expect(Buffer.from(store.objects.get('catalog/catalog.json.gz')!).equals(before)).toBe(true)
-    expect(readCatalog(before).entries.map((entry) => entry.key)).toEqual(['Drums/kick.wav', 'Bass/old.wav'])
+    expect(Buffer.from(store.objects.get(LIBRARY_ADDITIONS_KEY)!).equals(prior)).toBe(true)
+    expect(Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!).equals(base)).toBe(true)
+    expect(readJson(prior).entries.map((entry) => entry.key)).toEqual(['audio/bass/kept.wav'])
     expect(store.calls.some((call) => call.startsWith('put'))).toBe(false)
+    expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
   })
 
   it('dedupes by key and leaves the stored row untouched', async () => {
@@ -506,13 +531,13 @@ describe('library catalog append', () => {
     expect(again.status).toBe(200)
     expect(again.body.added).toBe(0)
     expect(again.body.skipped).toBe(1)
-    expect(again.body.version).toBe(5)
-    const document = readCatalog(store.objects.get('catalog/catalog.json.gz')!)
-    expect(document.entries).toHaveLength(3)
-    expect(document.entries[0]).toMatchObject({ key: 'Drums/kick.wav', extra: 'stay' })
-    expect(document.entries[2]).toMatchObject({ key: 'audio/bass/new.wav', size: 64, pack: 'Uploads' })
+    expect(again.body.version).toBe(1)
+    const sidecar = readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries).toHaveLength(1)
+    expect(sidecar.entries[0]).toMatchObject({ key: 'audio/bass/new.wav', size: 64, pack: 'Uploads' })
+    expect(readCatalog(store.objects.get(LIBRARY_CATALOG_KEY)!).entries[0]).toMatchObject({ key: 'Drums/kick.wav', extra: 'stay' })
     expect(store.calls.filter((call) => call.startsWith('put catalog/tmp/'))).toHaveLength(1)
-    expect(store.calls.filter((call) => call.startsWith('put catalog/catalog.json.gz'))).toHaveLength(1)
+    expect(store.calls.filter((call) => call.startsWith(`put ${LIBRARY_ADDITIONS_KEY}`))).toHaveLength(1)
   })
 
   it('refuses a catalog row that escapes the audio prefix and does not write', async () => {
@@ -530,6 +555,46 @@ describe('library catalog append', () => {
     expect(store.calls).toEqual([])
     expect(store.objects.size).toBe(1)
   })
+
+  it('appends 110 rows onto a 100k catalog without reading or rewriting the base', async () => {
+    const store = memoryObjects(syntheticLibrary(100_000))
+    const base = store.objects.get(LIBRARY_CATALOG_KEY)!
+    const baseCopy = base.slice()
+    const api = createLibraryApi({ env: () => env, objects: store.api })
+    const rows = Array.from({ length: 110 }, (_, index) => wire(`audio/bass/add-${index}.wav`, { size: 32 + index, type: 'loop', bpm: 100 }))
+    rows.push(wire('audio/bass/add-0.wav', { size: 999 }))
+    const result = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: rows },
+      now: Date.parse('2026-11-24T22:00:00.000Z'),
+    })
+    expect(result.status).toBe(200)
+    expect(result.body.added).toBe(110)
+    expect(result.body.skipped).toBe(1)
+    expect(result.body.count).toBe(110)
+    expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
+    expect(store.calls.filter((call) => call.startsWith('get '))).toEqual([`get ${LIBRARY_ADDITIONS_KEY}`])
+    expect(Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!).equals(Buffer.from(baseCopy))).toBe(true)
+    const sidecar = readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries).toHaveLength(110)
+    expect(sidecar.entries[0]).toMatchObject({ key: 'audio/bass/add-0.wav', size: 32 })
+    const again = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: rows.slice(0, 110) },
+      now: Date.parse('2026-11-24T22:05:00.000Z'),
+    })
+    expect(again.status).toBe(200)
+    expect(again.body.added).toBe(0)
+    expect(again.body.skipped).toBe(110)
+    expect(readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!).entries).toHaveLength(110)
+    expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
+  }, 60_000)
 })
 
 describe('phone wav upload', () => {
@@ -777,6 +842,132 @@ describe('bass shelves for uploaded loops and one-shots', () => {
   })
 })
 
+describe('merged catalog browse', () => {
+  it('shows appended rows and lets an addition replace the same key', async () => {
+    const base = {
+      version: 4,
+      generated_at: '2026-11-11T00:00:00Z',
+      count: 2,
+      pending: '',
+      entries: [
+        wire('audio/bass/Old_100_C.wav', { size: 64, type: 'loop', bpm: 100, musical_key: 'C major', search: 'bass loop old' }),
+        wire('audio/bass/Hit.wav', { size: 32, type: 'one-shot', bpm: null, musical_key: null, search: 'bass hit' }),
+      ],
+    }
+    const additions = {
+      version: 1,
+      generated_at: '2026-11-24T22:00:00.000Z',
+      count: 2,
+      entries: [
+        wire('audio/bass/Old_100_C.wav', { size: 80, type: 'loop', bpm: 120, musical_key: 'C major', pack: 'Uploads', search: 'bass loop replaced' }),
+        wire('audio/bass/Sub_90_Am.wav', { size: 70, type: 'loop', bpm: 90, musical_key: 'A minor', search: 'bass loop new' }),
+      ],
+    }
+    expect(CLIENT_CATALOG_KEY).toBe(LIBRARY_CATALOG_KEY)
+    expect(CLIENT_ADDITIONS_KEY).toBe(LIBRARY_ADDITIONS_KEY)
+    const parsed = parseLibraryCatalog(base, additions)
+    expect(parsed).toBeTruthy()
+    expect(parsed!.document.entries.map((entry) => entry.key)).toEqual(['audio/bass/Old_100_C.wav', 'audio/bass/Hit.wav', 'audio/bass/Sub_90_Am.wav'])
+    expect(parsed!.document.entries[0]).toMatchObject({ size: 80, bpm: 120, pack: 'Uploads' })
+    expect(parsed!.document.count).toBe(3)
+    const index = indexParsedCatalog(parsed!)
+    const query = { ...EMPTY_LIBRARY_QUERY, type: 'loop' as const }
+    const rows = browseLibraryRows(index, searchLibrary(index, query), [], query)
+    const sounds = rows.flatMap((row) => row.kind === 'sound' ? [row.entry] : [])
+    expect(sounds.map((entry) => entry.key)).toEqual(['audio/bass/Old_100_C.wav', 'audio/bass/Sub_90_Am.wav'])
+    expect(sounds[0]?.bpm).toBe(120)
+    expect(sounds[1]?.bpm).toBe(90)
+
+    const gzip = gzipSync(Buffer.from(JSON.stringify(base)))
+    const extra = Buffer.from(JSON.stringify(additions))
+    const cache = memoryCatalogCache()
+    writeLibraryAccessKey('owner-pass')
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/library/sign')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { keys?: string[] }
+        expect(body.keys).toEqual([CLIENT_CATALOG_KEY, CLIENT_ADDITIONS_KEY])
+        return new Response(JSON.stringify({
+          expiresIn: 900,
+          urls: [
+            { key: CLIENT_CATALOG_KEY, url: 'https://library.test/catalog.json.gz' },
+            { key: CLIENT_ADDITIONS_KEY, url: 'https://library.test/catalog-additions.json' },
+          ],
+        }), { status: 200 })
+      }
+      if (url.endsWith('catalog-additions.json')) return new Response(extra)
+      return new Response(gzip)
+    }) as typeof fetch
+    try {
+      const loaded = await loadLibraryCatalog(fetchImpl, cache)
+      const loadedRows = browseLibraryRows(loaded.index, searchLibrary(loaded.index, query), [], query)
+      expect(loadedRows.flatMap((row) => row.kind === 'sound' ? [row.entry.key] : [])).toEqual(['audio/bass/Old_100_C.wav', 'audio/bass/Sub_90_Am.wav'])
+      expect(loaded.document.entries.find((entry) => entry.key === 'audio/bass/Old_100_C.wav')?.bpm).toBe(120)
+      expect(loaded.document.count).toBe(3)
+    } finally {
+      clearLibraryAccessKey()
+      setLibraryCaches({ catalog: null })
+    }
+  })
+
+  it('opens the base catalog when the sidecar is missing, not JSON, or the wrong shape', async () => {
+    const base = {
+      version: 2,
+      generated_at: '2026-11-11T00:00:00Z',
+      count: 1,
+      pending: '',
+      entries: [wire('audio/bass/Hit.wav', { size: 32, type: 'one-shot', search: 'bass hit' })],
+    }
+    const gzip = gzipSync(Buffer.from(JSON.stringify(base)))
+    const warned: string[] = []
+    const original = console.warn
+    console.warn = (...args: unknown[]) => { warned.push(args.map((item) => String(item)).join(' ')) }
+    const cases: { name: string; additions: Response | null; warn: boolean }[] = [
+      { name: 'missing', additions: new Response('', { status: 404 }), warn: false },
+      { name: 'status', additions: new Response('no', { status: 500 }), warn: true },
+      { name: 'riff', additions: new Response(new Uint8Array([82, 73, 70, 70])), warn: true },
+      { name: 'shape', additions: new Response(JSON.stringify({ nope: true })), warn: true },
+      { name: 'network', additions: null, warn: true },
+    ]
+    try {
+      for (const item of cases) {
+        warned.length = 0
+        writeLibraryAccessKey('owner-pass')
+        const cache = memoryCatalogCache()
+        const fetchImpl = (async (input: RequestInfo | URL) => {
+          const url = String(input)
+          if (url.endsWith('/api/library/sign')) {
+            return new Response(JSON.stringify({
+              expiresIn: 900,
+              urls: [
+                { key: CLIENT_CATALOG_KEY, url: 'https://library.test/catalog.json.gz' },
+                { key: CLIENT_ADDITIONS_KEY, url: 'https://library.test/catalog-additions.json' },
+              ],
+            }), { status: 200 })
+          }
+          if (url.endsWith('catalog-additions.json')) {
+            if (!item.additions) throw new Error('offline')
+            return item.additions
+          }
+          return new Response(gzip)
+        }) as typeof fetch
+        const loaded = await loadLibraryCatalog(fetchImpl, cache)
+        expect(loaded.document.entries.map((entry) => entry.key), item.name).toEqual(['audio/bass/Hit.wav'])
+        expect(loaded.document.count, item.name).toBe(1)
+        expect(warned.join('\n'), item.name).not.toContain('owner-pass')
+        expect(warned.length > 0, item.name).toBe(item.warn)
+        if (item.warn) expect(warned.join('\n'), item.name).toContain('My Library additions were skipped')
+        clearLibraryAccessKey()
+        setLibraryCaches({ catalog: null })
+      }
+    } finally {
+      console.warn = original
+      clearLibraryAccessKey()
+      setLibraryCaches({ catalog: null })
+    }
+  })
+})
+
 describe('library upload script', () => {
   it('uploads new wavs, skips a second run, and prints counts only', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'library-upload-'))
@@ -818,5 +1009,31 @@ describe('library upload script', () => {
     expect(puts).toHaveLength(1)
     const progress = readFileSync(join(dir, '.library-upload-progress.json'), 'utf8')
     expect(progress).not.toContain('owner-pass')
+  })
+
+  it('appends catalog rows in batches of 50', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'library-upload-batch-'))
+    const wav = Buffer.from(encodeWav([new Float32Array([0.1, -0.1])], 44100))
+    const entries = Array.from({ length: 51 }, (_, index) => wire(`audio/bass/n${index}.wav`, { size: wav.byteLength }))
+    for (const entry of entries) writeFileSync(join(dir, `${entry.key.split('/').pop()}`), wav)
+    writeFileSync(join(dir, 'catalog-entries.json'), JSON.stringify({ entries }))
+    const batches: number[] = []
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/library/upload-sign')) {
+        const body = JSON.parse(String(init?.body)) as { keys: { key: string }[] }
+        return new Response(JSON.stringify({ urls: body.keys.map((item) => ({ key: item.key, url: `https://bucket.test/${encodeURIComponent(item.key)}`, exists: false })) }), { status: 200 })
+      }
+      if (url.startsWith('https://bucket.test/')) return new Response(null, { status: 200 })
+      if (url.endsWith('/api/library/catalog-append')) {
+        const body = JSON.parse(String(init?.body)) as { entries: unknown[] }
+        batches.push(body.entries.length)
+        return new Response(JSON.stringify({ added: body.entries.length, skipped: 0 }), { status: 200 })
+      }
+      return new Response('no', { status: 404 })
+    }) as typeof fetch
+    const counts = await uploadFolder({ folder: dir, baseUrl: 'https://cueharbor.test', accessKey: 'owner-pass', fetchImpl, attempts: 1 })
+    expect(counts).toEqual({ uploaded: 51, skipped: 0, added: 51, failed: 0 })
+    expect(batches).toEqual([50, 1])
   })
 })

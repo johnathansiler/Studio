@@ -5,6 +5,7 @@ import { chromium, type Browser, type Page, type Route } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import { groupLibraryInstruments } from '../library/group'
 import { encodeWav } from '../model/wav'
+import { LIBRARY_TEST_ADDITIONS_PATH, libraryTestObjectUrl } from './libraryRoute'
 
 const folder = 'Orchestral/Philharmonia Orchestra All Samples/french horn'
 const catalog = {
@@ -89,15 +90,16 @@ async function routeLibrary(route: Route, url: string) {
         body: JSON.stringify({
           ready: true,
           expiresIn: 900,
-          urls: (body.keys ?? ['catalog/catalog.json.gz']).map((key) => ({
-            key,
-            url: key.endsWith('.gz') ? `${url}/library-test/catalog.json.gz` : `${url}/library-test/audio.wav`,
-          })),
+          urls: (body.keys ?? ['catalog/catalog.json.gz']).map((key) => ({ key, url: libraryTestObjectUrl(url, key) })),
         }),
       })
       return
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true }) })
+    return
+  }
+  if (target.includes(LIBRARY_TEST_ADDITIONS_PATH)) {
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '' })
     return
   }
   if (target.includes('/library-test/catalog')) {
@@ -243,10 +245,7 @@ describe('chord shots group into one library row', () => {
           body: JSON.stringify({
             ready: true,
             expiresIn: 900,
-            urls: (body.keys ?? ['catalog/catalog.json.gz']).map((key) => ({
-              key,
-              url: key.endsWith('.gz') ? `${url}/library-test/catalog.json.gz` : `${url}/library-test/audio.wav`,
-            })),
+            urls: (body.keys ?? ['catalog/catalog.json.gz']).map((key) => ({ key, url: libraryTestObjectUrl(url, key) })),
           }),
         })
         return
@@ -256,6 +255,10 @@ describe('chord shots group into one library row', () => {
     }
     if (target.includes('/api/library/instruments')) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ total: 0, offset: 0, limit: 200, instruments: [] }) })
+      return
+    }
+    if (target.includes(LIBRARY_TEST_ADDITIONS_PATH)) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: '' })
       return
     }
     if (target.includes('/library-test/catalog')) {

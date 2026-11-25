@@ -4,6 +4,7 @@ import { gzipSync } from 'node:zlib'
 import { chromium, type Browser, type Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import { encodeWav } from '../model/wav'
+import { LIBRARY_TEST_ADDITIONS_PATH, libraryTestObjectUrl } from './libraryRoute'
 
 const catalog = {
   version: 1,
@@ -259,15 +260,16 @@ describe('my library on a phone', () => {
             return
           }
           const body = route.request().postDataJSON() as { keys?: string[] }
-          const urls = (body.keys ?? []).map((key) => ({
-            key,
-            url: key.endsWith('.gz') ? `${url}/library-test/catalog.json.gz` : `${url}/library-test/audio.wav`,
-          }))
+          const urls = (body.keys ?? []).map((key) => ({ key, url: libraryTestObjectUrl(url, key) }))
           await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true, expiresIn: 900, urls }) })
           return
         }
         if (target.includes('/api/library')) {
           await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true }) })
+          return
+        }
+        if (target.includes(LIBRARY_TEST_ADDITIONS_PATH)) {
+          await route.fulfill({ status: 404, contentType: 'application/json', body: '' })
           return
         }
         if (target.includes('/library-test/catalog')) {
@@ -286,7 +288,9 @@ describe('my library on a phone', () => {
       const browserPane = page.locator('[data-playlist-browser="open"]')
       await browserPane.getByRole('button', { name: 'My Library', exact: true }).click()
       await page.getByLabel('Library passphrase').fill('harbor-key')
+      const additionsMissing = page.waitForResponse((res) => res.url().includes(LIBRARY_TEST_ADDITIONS_PATH))
       await page.getByRole('button', { name: 'Unlock', exact: true }).click()
+      expect((await additionsMissing).status()).toBe(404)
       await page.getByLabel('Search my library').waitFor()
       const addSounds = page.getByRole('button', { name: 'Add sounds', exact: true })
       await addSounds.waitFor()

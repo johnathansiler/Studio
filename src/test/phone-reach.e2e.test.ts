@@ -5,6 +5,7 @@ import { chromium, type Browser, type Page, type Route } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import { dragGain } from '../model/mixLaw'
 import { encodeWav } from '../model/wav'
+import { LIBRARY_TEST_ADDITIONS_PATH, libraryTestObjectUrl } from './libraryRoute'
 
 async function waitForServer(url: string, child: ChildProcess) {
   const started = Date.now()
@@ -306,15 +307,16 @@ describe('phone reach, dock, loop handle, and fader', () => {
       const target = route.request().url()
       if (target.includes('/api/library/sign')) {
         const body = route.request().postDataJSON() as { keys?: string[] }
-        const urls = (body.keys ?? []).map((key) => ({
-          key,
-          url: key.endsWith('.gz') ? `${url}/library-test/catalog.json.gz` : `${url}/library-test/audio.wav`,
-        }))
+        const urls = (body.keys ?? []).map((key) => ({ key, url: libraryTestObjectUrl(url, key) }))
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true, expiresIn: 900, urls }) })
         return
       }
       if (target.includes('/api/library')) {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true }) })
+        return
+      }
+      if (target.includes(LIBRARY_TEST_ADDITIONS_PATH)) {
+        await route.fulfill({ status: 404, contentType: 'application/json', body: '' })
         return
       }
       if (target.includes('/library-test/catalog')) {
