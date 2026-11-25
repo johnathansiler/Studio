@@ -26,6 +26,7 @@ import { hitRoute } from '../instruments/mpc/model'
 import { padSendGain, renderPadVoice } from '../instruments/mpc/render'
 import { matchBufferRate, renderPatchSpan } from '../instruments/patch/engine'
 import { renderNotes, renderNotesPaced, type SampleBuffer } from './rack/dsp'
+import { writeSharedNoise } from './sharedNoise'
 import { isDrumsPlugin } from './plugins/ids'
 import { renderSamplerSpan } from './plugins/sampler'
 import { clipNeedsStretch, renderClipChannels } from './stretch/engine'
@@ -1036,12 +1037,7 @@ function noiseAt(sampleRate: number) {
   const cached = noiseCache.get(sampleRate)
   if (cached) return cached
   const data = new Float32Array(sampleRate)
-  let seed = 0x6d2b79f5
-  for (let i = 0; i < data.length; i++) {
-    seed = Math.imul(seed ^ (seed >>> 15), seed | 1)
-    seed ^= seed + Math.imul(seed ^ (seed >>> 7), seed | 61)
-    data[i] = ((seed >>> 0) / 4294967296) * 2 - 1
-  }
+  writeSharedNoise(data)
   noiseCache.set(sampleRate, data)
   return data
 }

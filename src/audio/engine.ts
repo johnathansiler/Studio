@@ -30,6 +30,8 @@ import { padSendGain, renderPadVoice } from '../instruments/mpc/render'
 import { RackHost } from './rack/host'
 import { PadHost } from './voices/host'
 import { graphPlugins, renderArrangeInputs } from './arrangeSources'
+import { writeSharedNoise } from './sharedNoise'
+import { startTransportHit } from './transportHit'
 import { LibraryHost } from './multisample/host'
 import '../library/instrumentsApi'
 import type { SamplePack } from './multisample/types'
@@ -3947,68 +3949,16 @@ export class AudioEngine {
       }, when, Math.max(0.05, dur))
       return
     }
-    if (hit.kind === 'kick') {
-      const osc = ctx.createOscillator()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(160, when)
-      osc.frequency.exponentialRampToValueAtTime(48, when + Math.max(0.02, Math.min(0.18, dur)))
-      this.envelope(ctx, strip, osc, when, Math.min(0.28, dur + 0.05), shaped, undefined, into)
-      return
-    }
-    if (hit.kind === 'perc') {
-      const osc = ctx.createOscillator()
-      osc.type = 'square'
-      osc.frequency.value = 440 * 2 ** ((hit.pitch - 69) / 12)
-      this.envelope(ctx, strip, osc, when, Math.min(0.16, dur), shaped, undefined, into)
-      return
-    }
-    if (hit.kind === 'openhat' || hit.kind === 'tom' || hit.kind === 'cymbal') {
-      if (this.playResidentDrum(ctx, strip, shaped, when, into)) return
-      if (hit.kind === 'tom') {
-        const osc = ctx.createOscillator()
-        osc.type = 'sine'
-        const freq = Math.max(70, 80 * 2 ** ((hit.pitch - 36) / 24))
-        osc.frequency.setValueAtTime(freq * 1.4, when)
-        osc.frequency.exponentialRampToValueAtTime(Math.max(45, freq), when + 0.18)
-        this.envelope(ctx, strip, osc, when, Math.min(0.35, Math.max(0.12, dur * 2)), shaped, undefined, into)
-        return
-      }
-      const ring = ctx.createBufferSource()
-      ring.buffer = this.noiseBuffer(ctx)
-      const filter = ctx.createBiquadFilter()
-      filter.type = 'highpass'
-      filter.frequency.value = hit.kind === 'cymbal' ? 5000 : 6500
-      ring.connect(filter)
-      this.envelope(ctx, strip, filter, when, hit.kind === 'cymbal' ? 0.7 : 0.5, shaped, ring, into)
-      return
-    }
-    const noise = ctx.createBufferSource()
-    noise.buffer = this.noiseBuffer(ctx)
-    if (hit.kind === 'hat') {
-      const filter = ctx.createBiquadFilter()
-      filter.type = 'highpass'
-      filter.frequency.value = 7000
-      noise.connect(filter)
-      this.envelope(ctx, strip, filter, when, Math.min(0.06, dur), shaped, noise, into)
-      return
-    }
-    if (hit.kind === 'clap') {
-      const filter = ctx.createBiquadFilter()
-      filter.type = 'bandpass'
-      filter.frequency.value = 1400
-      noise.connect(filter)
-      this.envelope(ctx, strip, filter, when, Math.min(0.18, dur), shaped, noise, into)
-      return
-    }
-    const tone = ctx.createOscillator()
-    tone.type = 'triangle'
-    tone.frequency.value = 190
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'highpass'
-    filter.frequency.value = 800
-    noise.connect(filter)
-    this.envelope(ctx, strip, filter, when, Math.min(0.16, dur), shaped, noise, into)
-    this.envelope(ctx, strip, tone, when, 0.08, { ...shaped, velocity: shaped.velocity * 0.4 }, undefined, into)
+    startTransportHit({
+      ctx,
+      destination: into,
+      hit: shaped,
+      when,
+      dur,
+      noise: this.noiseBuffer(ctx),
+      resident: this.cachedDrum(ctx, shaped.pitch),
+      hold: live ? (end, nodes) => { this.holdVoice(end, nodes) } : undefined,
+    })
   }
 
   private cachedDrum(ctx: BaseAudioContext, pitch: number) {
@@ -4024,26 +3974,6 @@ export class AudioEngine {
     }
     const index = DRUM_PADS.findIndex((pad) => pad.pitch === Math.round(pitch))
     return index >= 0 ? list[index] : null
-  }
-
-  /** Designed drum voice. Gate shortens the tail; a normal step plays the whole hit. */
-  private playResidentDrum(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number, into?: AudioNode) {
-    const buffer = this.cachedDrum(ctx, hit.pitch)
-    if (!buffer) return false
-    const src = ctx.createBufferSource()
-    const gain = ctx.createGain()
-    src.buffer = buffer
-    const peak = Math.max(0.001, 0.22 * hit.velocity * Math.max(0, hit.volume ?? 1))
-    gain.gain.setValueAtTime(0.0001, when)
-    gain.gain.exponentialRampToValueAtTime(peak, when + 0.003)
-    src.connect(gain)
-    const panNodes = connectNotePan(ctx, gain, into ?? strip.input, hit.pan || 0)
-    const gate = Math.max(0.08, Math.min(1, (hit.durationBeats || 0.2) / 0.2))
-    src.start(when)
-    const end = when + Math.max(0.05, buffer.duration * gate)
-    src.stop(end)
-    if (ctx === this.ctx) this.holdVoice(end + 0.03, [src, gain, ...panNodes])
-    return true
   }
 
   private playDrum(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, bucket?: Stoppable[]) {
@@ -4073,8 +4003,7 @@ export class AudioEngine {
   private noiseBuffer(ctx: BaseAudioContext) {
     if (this.noise && this.noise.sampleRate === ctx.sampleRate) return this.noise
     const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate)
-    const data = buffer.getChannelData(0)
-    for (let index = 0; index < data.length; index++) data[index] = Math.random() * 2 - 1
+    writeSharedNoise(buffer.getChannelData(0))
     if (ctx === this.ctx) this.noise = buffer
     return buffer
   }
