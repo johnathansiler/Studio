@@ -48,10 +48,7 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
 
 .bass808-tabs button,
 .bass-quiet,
-.shell.phone .bass808 .bass-quiet,
-.shell.phone .bass808 .bass-pad,
-.shell.phone .bass808 .bass-keys button,
-.shell.phone .bass808-tabs button {
+.shell.phone .bass808 .bass-quiet {
   min-width: 40px;
   min-height: 40px;
   height: 40px;
@@ -63,7 +60,27 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   font-size: 13px;
 }
 
+/* Phone's global button size must not wipe the pad, key, or selected-tab paint. */
+.shell.phone .bass808 .bass-pad,
+.shell.phone .bass808 .bass-keys button,
+.shell.phone .bass808-tabs button {
+  box-sizing: border-box;
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.shell.phone .bass808-tabs button {
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted, #8aa094);
+  font-size: 13px;
+}
+
 .bass808-tabs button[aria-selected="true"],
+.shell.phone .bass808-tabs button[aria-selected="true"],
 .bass-quiet.on {
   color: #eef3ea;
   border-color: #31443a;
@@ -194,7 +211,8 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   border-color: #73c48f;
 }
 
-.bass-pad.on {
+.bass-pad.on,
+.shell.phone .bass808 .bass-pad.on {
   background: #73c48f;
   color: #102117;
 }
@@ -271,7 +289,8 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   border-radius: 0 0 4px 4px;
 }
 
-.bass-keys button.on {
+.bass-keys button.on,
+.shell.phone .bass808 .bass-keys button.on {
   background: #73c48f;
   color: #102117;
 }

@@ -133,6 +133,48 @@ describe('built app on a phone', () => {
         expect(play.playClip, `play clips at ${width}`).toBe(0)
         expect(play.short, `controls under 40px at ${width}`).toBe(0)
         expect(play.keysBottom, `keys inside the play pane at ${width}`).toBeLessThanOrEqual(play.playBottom + 1)
+        const paint = await page.evaluate(() => {
+          const color = (node: Element | null) => node ? getComputedStyle(node).backgroundColor : ''
+          const pad = document.querySelector('.bass-pad')
+          const root = document.querySelector('.bass-pad.root')
+          const white = document.querySelector('.bass-keys button:not(.black)')
+          const black = document.querySelector('.bass-keys button.black')
+          const selected = document.querySelector('.bass808-tabs button[aria-selected="true"]')
+          const idle = document.querySelector('.bass808-tabs button[aria-selected="false"]')
+          pad?.classList.add('on')
+          white?.classList.add('on')
+          black?.classList.add('on')
+          const pressed = { pad: color(pad), white: color(white), black: color(black) }
+          pad?.classList.remove('on')
+          white?.classList.remove('on')
+          black?.classList.remove('on')
+          const duplicate = [...document.querySelectorAll('#transport-duplicate')].filter((node) => {
+            const box = node.getBoundingClientRect()
+            return box.width > 0 && box.height > 0
+          })
+          return {
+            pad: color(pad),
+            rootBorder: root ? getComputedStyle(root).borderTopColor : '',
+            white: color(white),
+            black: color(black),
+            pressed,
+            selected: color(selected),
+            idle: color(idle),
+            duplicate: duplicate.length,
+          }
+        })
+        const clear = (value: string) => value === 'transparent' || value === 'rgba(0, 0, 0, 0)'
+        expect(clear(paint.pad), `pad fill at ${width}`).toBe(false)
+        expect(clear(paint.white), `white key at ${width}`).toBe(false)
+        expect(clear(paint.black), `black key at ${width}`).toBe(false)
+        expect(clear(paint.pressed.pad), `pressed pad at ${width}`).toBe(false)
+        expect(clear(paint.pressed.white), `pressed white key at ${width}`).toBe(false)
+        expect(clear(paint.pressed.black), `pressed black key at ${width}`).toBe(false)
+        expect(paint.pressed.pad, `pressed pad changes at ${width}`).not.toBe(paint.pad)
+        expect(clear(paint.rootBorder), `root outline at ${width}`).toBe(false)
+        expect(clear(paint.selected), `selected tab at ${width}`).toBe(false)
+        expect(clear(paint.idle), `quiet tab at ${width}`).toBe(true)
+        expect(paint.duplicate, `no full-width Duplicate while the plugin is open at ${width}`).toBe(0)
         await page.screenshot({ path: `/opt/cursor/artifacts/bass-play-${width}.png` })
         await page.locator('.bass-close').click()
         await page.locator('[data-bass808="open"]').waitFor({ state: 'hidden' })

@@ -67,7 +67,7 @@ describe('track view layout', () => {
       expect(extras).not.toContain('id="transport-delete"')
       expect(extras).not.toContain('>Tap<')
       expect(extras).not.toContain('>Tempo<')
-      expect(extras).toContain('>Duplicate<')
+      expect(extras).not.toContain('>Duplicate<')
       expect(extras).not.toContain('>Punch<')
       expect(extras).not.toContain('>Reset<')
       expect(extras).not.toContain('>Click<')
@@ -76,6 +76,33 @@ describe('track view layout', () => {
       expect(extras).not.toContain('>Metronome<')
       expect(extras).not.toContain('>Count-in<')
     }
+  })
+
+  it('shows Duplicate only after a clip is selected', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const bare = renderToStaticMarkup(createElement(TransportBar, {
+      store,
+      engine: engine as never,
+      onPlay() {},
+      onStop() {},
+      onRecord() {},
+      onSeek() {},
+      onReset() {},
+    }))
+    expect(bare).not.toContain('id="transport-duplicate"')
+    const track = store.project.tracks.find((item) => item.type === 'midi')!
+    store.addMidiClip(track.id, 0)
+    const held = renderToStaticMarkup(createElement(TransportBar, {
+      store,
+      engine: engine as never,
+      onPlay() {},
+      onStop() {},
+      onRecord() {},
+      onSeek() {},
+      onReset() {},
+    }))
+    expect(held).toContain('id="transport-duplicate"')
+    expect(held).toContain('>Duplicate<')
   })
 
   it('puts Add Track under the last track and the viewfinder above the header column', () => {

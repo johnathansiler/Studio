@@ -445,7 +445,11 @@ export function PhoneDock({
         />,
         document.body,
       ) : null}
-      {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
+      {kind === 'plugin' ? (
+        <div id="transport-extras" hidden />
+      ) : kind !== 'arrange' && kind !== 'mix' ? (
+        <div id="transport-extras" className="transport-extras-slot parked" />
+      ) : null}
       {toolsOpen ? (
         <>
           <button
