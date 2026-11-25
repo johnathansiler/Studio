@@ -228,4 +228,42 @@ describe('session players', () => {
     })()
     expect(short).toBeGreaterThan(0.01)
   })
+
+  it('applies a saved bass attack when loadProject creates the synth', async () => {
+    const store = new ProjectStore(createEmptyProject())
+    store.setPlayers({ bassAttack: 800, drummer: false, keys: false, followSections: false, endBar: 2 })
+    store.writeSession()
+    const written = store.project.tracks.find((track) => track.name === 'Bass')!
+    expect(written.midiClips.some((clip) => clip.notes.length > 0)).toBe(true)
+    expect(written.rack?.devices?.length ?? 0).toBe(0)
+    const saved = JSON.parse(JSON.stringify(store.project))
+    const loaded = new ProjectStore(createEmptyProject())
+    loaded.loadProject(saved, new Map())
+    const bass = loaded.project.tracks.find((track) => track.name === 'Bass')!
+    const device = bass.rack!.devices.find((item) => item.kind === 'sub')!
+    expect(device.params.attack).toBe(800)
+    expect(loaded.playerState().bassAttack).toBe(800)
+
+    const early = async (project: typeof loaded.project) => {
+      const rendered = await renderArrangeInputs(project, new Map(), 0, Math.round(project.sampleRate * 0.05))
+      const channel = rendered.get(bass.id)?.[0] ?? new Float32Array()
+      let sum = 0
+      const samples = Math.round(project.sampleRate * 0.02)
+      for (let i = 0; i < samples && i < channel.length; i++) sum += (channel[i] || 0) ** 2
+      return sum
+    }
+    const heard = await early(loaded.project)
+    const atSaved = JSON.parse(JSON.stringify(loaded.project))
+    atSaved.tracks.find((track: { name: string }) => track.name === 'Bass').rack.devices.find((item: { kind: string }) => item.kind === 'sub').params.attack = 800
+    const atDefault = JSON.parse(JSON.stringify(loaded.project))
+    atDefault.tracks.find((track: { name: string }) => track.name === 'Bass').rack.devices.find((item: { kind: string }) => item.kind === 'sub').params.attack = 8
+    expect(await early(atSaved)).toBeCloseTo(heard, 6)
+    expect(heard).toBeLessThan((await early(atDefault)) * 0.5)
+
+    loaded.setPlayers({ bassAttack: 200 })
+    expect(loaded.project.tracks.find((track) => track.name === 'Bass')!.rack!.devices.find((item) => item.kind === 'sub')!.params.attack).toBe(200)
+    loaded.setAutomated({ trackId: bass.id, target: 'instrument', param: 'attack', deviceId: device.id, min: 0, max: 2000 }, 120, false, 0)
+    expect(loaded.playerState().bassAttack).toBe(120)
+    expect(loaded.project.tracks.find((track) => track.name === 'Bass')!.rack!.devices.find((item) => item.kind === 'sub')!.params.attack).toBe(120)
+  })
 })

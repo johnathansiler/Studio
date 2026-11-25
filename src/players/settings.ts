@@ -22,10 +22,13 @@ export function defaultPlayers(): PlayerSettings {
   }
 }
 
+export function isBassPlayerTrack(track: { name: string; midiClips?: { name: string }[] }) {
+  return track.name === 'Bass' || !!track.midiClips?.some((clip) => clip.name.endsWith('bass player'))
+}
+
 /** Attack time for a Bass track or a clip named like the bass player. Null for every other track. */
 export function bassPlayerAttackMs(project: { players?: Partial<PlayerSettings> }, track: { name: string; midiClips?: { name: string }[] }): number | null {
-  const named = track.name === 'Bass' || !!track.midiClips?.some((clip) => clip.name.endsWith('bass player'))
-  if (!named) return null
+  if (!isBassPlayerTrack(track)) return null
   const raw = project.players?.bassAttack
   const ms = typeof raw === 'number' && Number.isFinite(raw) ? raw : BASS_PLAYER_ATTACK_MS
   return clamp(ms, 0, 2000)

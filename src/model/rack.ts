@@ -1,3 +1,4 @@
+import { bassPlayerAttackMs } from '../players/settings'
 import { uid, type Project, type Track } from './types'
 import { KNOCK_PRESETS } from './knockPresets'
 import { FM_PRESETS, SUB_PRESETS, WAVE_PRESETS } from './tonePresets'
@@ -619,8 +620,20 @@ export function normalizeProjectRack(project: Project): Project {
   project.devicePresets = project.devicePresets ?? []
   project.rackPatches = project.rackPatches ?? []
   project.presetFavorites = project.presetFavorites ?? []
-  for (const track of project.tracks) normalizeTrackRack(track)
+  for (const track of project.tracks) {
+    const gainedSynth = track.type === 'midi' && !track.rack?.devices?.length
+    normalizeTrackRack(track)
+    if (gainedSynth) stampBassPlayerAttack(project, track)
+  }
   return project
+}
+
+/** A new bass synth takes the saved player Attack, not the Analog default of 8 ms. */
+function stampBassPlayerAttack(project: Project, track: Track) {
+  const ms = bassPlayerAttackMs(project, track)
+  if (ms == null) return
+  const device = track.rack?.devices.find((item) => item.kind === 'sub' || item.kind === 'fm' || item.kind === 'wave')
+  if (device) device.params.attack = ms
 }
 
 export function normalizeTrackRack(track: Track) {
