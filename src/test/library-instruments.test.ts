@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { selectLayers } from '../audio/multisample/map'
 import { midiVelocity } from '../audio/multisample/types'
@@ -5,8 +6,8 @@ import { browseLibraryRows } from '../library/browse'
 import { groupLibraryInstruments, layersForNotes, midiName, noteMidi, planSignKeys, playbackKeys, searchInstruments, summarizeInstrument, tokenizeStem } from '../library/group'
 import { cleanLibraryFiles } from '../library/project'
 import { programFromLibraryInstrument } from '../library/instrumentProgram'
-import { createLibraryApi, type LibraryEnv } from '../../server/library.ts'
-import { mergeCatalogRows } from '../../server/instruments.ts'
+import { createLibraryApi, LIBRARY_ADDITIONS_KEY, LIBRARY_CATALOG_KEY, type LibraryEnv } from '../../server/library.ts'
+import { createInstrumentSource, mergeCatalogRows } from '../../server/instruments.ts'
 import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { memoryAudioCache, setLibraryCaches } from '../library/audio'
 import { rememberInstrumentLayers } from '../library/instrumentsApi'
@@ -331,6 +332,54 @@ describe('catalog additions on the instrument search', () => {
     const horn = instruments.find((item) => item.id === page.instruments[0]?.id)
     expect(horn?.layers.some((layer) => layer.key === added.key)).toBe(true)
     expect(horn?.layers.find((layer) => layer.key === replaced.key)?.size).toBe(99)
+  })
+
+  it('searches the base catalog when the sidecar is missing or unreadable', async () => {
+    const folder = 'Orchestral/Horns/french horn'
+    const base = {
+      entries: [48, 60].map((midi) => ({
+        key: `${folder}/french-horn_${midiName(midi)}_1_piano_normal.mp3`,
+        size: 10,
+        pack: 'Philharmonia Orchestra All Samples',
+        type: 'multisample note',
+        category: 'brass',
+        note: midiName(midi),
+        root: '',
+      })),
+    }
+    const gzip = gzipSync(Buffer.from(JSON.stringify(base)))
+    const addedKey = `${folder}/french-horn_${midiName(72)}_1_piano_normal.mp3`
+    const cases: { name: string; sidecar: Response | null }[] = [
+      { name: 'missing', sidecar: new Response('missing', { status: 404 }) },
+      { name: 'status', sidecar: new Response('no', { status: 500 }) },
+      { name: 'json', sidecar: new Response('not-json', { status: 200 }) },
+      { name: 'offline', sidecar: null },
+      {
+        name: 'merged',
+        sidecar: new Response(JSON.stringify({ entries: [{ key: addedKey, size: 44, pack: 'Philharmonia Orchestra All Samples', type: 'multisample note', category: 'brass', note: midiName(72), root: '' }] }), { status: 200 }),
+      },
+    ]
+    for (const item of cases) {
+      const fetchImpl = (async (input: RequestInfo | URL) => {
+        const url = String(input)
+        expect(url).not.toContain(env.LIBRARY_ACCESS_KEY)
+        expect(url).not.toContain(env.R2_SECRET_ACCESS_KEY)
+        if (url.includes(LIBRARY_ADDITIONS_KEY)) {
+          if (!item.sidecar) throw new Error('offline')
+          return item.sidecar.clone()
+        }
+        if (url.includes(LIBRARY_CATALOG_KEY)) return new Response(gzip)
+        return new Response('missing', { status: 404 })
+      }) as typeof fetch
+      const source = createInstrumentSource({ env: () => env, now: () => 5_000, fetch: fetchImpl })
+      const page = await source.search({ text: 'french', category: '', pack: '', offset: 0, limit: 10 })
+      expect(page.total, item.name).toBe(1)
+      const instrument = await source.get(String(page.instruments[0]?.id))
+      expect(instrument?.layers.some((layer) => layer.key.includes(midiName(48))), item.name).toBe(true)
+      const hasAdded = instrument?.layers.some((layer) => layer.key === addedKey) ?? false
+      expect(hasAdded, item.name).toBe(item.name === 'merged')
+      expect(JSON.stringify(page), item.name).not.toContain('owner-pass')
+    }
   })
 })
 

@@ -61,7 +61,7 @@ function wire(key: string, extra: Record<string, unknown> = {}) {
   }
 }
 
-function memoryObjects(seed?: Record<string, unknown>, options?: { conflictOnce?: boolean }) {
+function memoryObjects(seed?: Record<string, unknown>, options?: { conflictOnce?: boolean; omitGetEtag?: boolean; headEtag?: boolean }) {
   const objects = new Map<string, Uint8Array>()
   const etags = new Map<string, string>()
   const calls: string[] = []
@@ -79,7 +79,8 @@ function memoryObjects(seed?: Record<string, unknown>, options?: { conflictOnce?
     async get(key) {
       calls.push(`get ${key}`)
       const bytes = objects.get(key)
-      return bytes ? { status: 200, bytes, etag: etags.get(key) ?? null } : { status: 404, bytes: null, etag: null }
+      if (!bytes) return { status: 404, bytes: null, etag: null }
+      return { status: 200, bytes, etag: options?.omitGetEtag ? null : (etags.get(key) ?? null) }
     },
     async put(key, bytes, _contentType, conditions) {
       const match = conditions?.ifMatch ? ` if-match ${conditions.ifMatch}` : ''
@@ -124,6 +125,13 @@ function memoryObjects(seed?: Record<string, unknown>, options?: { conflictOnce?
       return objects.has(key)
     },
   }
+  if (options?.headEtag != null) {
+    api.etag = async (key) => {
+      calls.push(`head-etag ${key}`)
+      if (!options.headEtag) return null
+      return etags.get(key) ?? null
+    }
+  }
   return { objects, calls, api }
 }
 
@@ -133,6 +141,10 @@ function readCatalog(bytes: Uint8Array) {
 
 function readJson(bytes: Uint8Array) {
   return JSON.parse(Buffer.from(bytes).toString('utf8')) as { version: number; generated_at: string; count: number; entries: Record<string, unknown>[] }
+}
+
+function storedBody(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
 function silence(method: 'log' | 'error' | 'warn' | 'info') {
@@ -475,8 +487,8 @@ describe('library catalog append', () => {
     expect(readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!).entries).toHaveLength(1)
   })
 
-  it('leaves the sidecar untouched when the read has no etag', async () => {
-    const store = memoryObjects(existing)
+  it('leaves the sidecar untouched when neither GET nor HEAD yields an etag', async () => {
+    const store = memoryObjects(existing, { omitGetEtag: true, headEtag: false })
     const base = Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!)
     const prior = Buffer.from(JSON.stringify({
       version: 2,
@@ -485,11 +497,6 @@ describe('library catalog append', () => {
       entries: [wire('audio/bass/kept.wav', { size: 8 })],
     }))
     store.objects.set(LIBRARY_ADDITIONS_KEY, prior)
-    store.api.get = async (key) => {
-      store.calls.push(`get ${key}`)
-      const bytes = store.objects.get(key)
-      return bytes ? { status: 200, bytes, etag: null } : { status: 404, bytes: null, etag: null }
-    }
     const api = createLibraryApi({ env: () => env, objects: store.api })
     const result = await api.handle({
       method: 'POST',
@@ -504,7 +511,278 @@ describe('library catalog append', () => {
     expect(Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!).equals(base)).toBe(true)
     expect(readJson(prior).entries.map((entry) => entry.key)).toEqual(['audio/bass/kept.wav'])
     expect(store.calls.some((call) => call.startsWith('put'))).toBe(false)
+    expect(store.calls.some((call) => call.startsWith('head-etag'))).toBe(true)
     expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
+  })
+
+  it('appends a second and third time when GET omits the etag and HEAD still has it', async () => {
+    const store = memoryObjects(existing, { omitGetEtag: true, headEtag: true })
+    const base = Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!)
+    const api = createLibraryApi({ env: () => env, objects: store.api })
+    const now = Date.parse('2026-11-24T21:20:00.000Z')
+    const first = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/one.wav', { size: 8 })] },
+      now,
+    })
+    const second = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/two.wav', { size: 8 })] },
+      now: now + 1,
+    })
+    const third = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/three.wav', { size: 8 })] },
+      now: now + 2,
+    })
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(third.status).toBe(200)
+    expect(first.body.added).toBe(1)
+    expect(second.body.added).toBe(1)
+    expect(third.body.added).toBe(1)
+    const sidecar = readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries.map((entry) => entry.key)).toEqual(['audio/bass/one.wav', 'audio/bass/two.wav', 'audio/bass/three.wav'])
+    expect(Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!).equals(base)).toBe(true)
+    const livePuts = store.calls.filter((call) => call.startsWith(`put ${LIBRARY_ADDITIONS_KEY}`))
+    expect(livePuts[0]).toContain('if-none-match *')
+    expect(livePuts.slice(1).every((call) => /if-match "[^"]+"/.test(call))).toBe(true)
+    expect(livePuts.slice(1).some((call) => call.includes('if-none-match'))).toBe(false)
+    expect(store.calls.some((call) => call.startsWith('head-etag'))).toBe(true)
+    expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
+    expect(JSON.stringify([first.body, second.body, third.body])).not.toContain('owner-pass')
+  })
+
+  it('retries a 412 after recovering the etag from HEAD', async () => {
+    const store = memoryObjects(existing, { conflictOnce: true, omitGetEtag: true, headEtag: true })
+    const base = Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!)
+    const api = createLibraryApi({ env: () => env, objects: store.api })
+    const result = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/new.wav', { size: 64 })] },
+      now: Date.parse('2026-11-24T21:22:00.000Z'),
+    })
+    expect(result.status).toBe(200)
+    expect(result.body.added).toBe(1)
+    const sidecar = readJson(store.objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries.map((entry) => entry.key)).toEqual(['audio/bass/racer.wav', 'audio/bass/new.wav'])
+    expect(Buffer.from(store.objects.get(LIBRARY_CATALOG_KEY)!).equals(base)).toBe(true)
+    expect(store.calls.some((call) => call.includes('conflict'))).toBe(true)
+    expect(store.calls.filter((call) => call.includes(`${LIBRARY_ADDITIONS_KEY} if-match`)).length).toBe(1)
+    expect(store.calls.some((call) => call.startsWith('head-etag'))).toBe(true)
+    expect(store.calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
+  })
+
+  it('reads a missing R2 etag from HEAD and still conditions the second and third append', async () => {
+    const bucket = env.R2_BUCKET!
+    const objects = new Map<string, Uint8Array>()
+    const etags = new Map<string, string>()
+    const calls: string[] = []
+    let token = 1
+    let conflict = true
+    const mint = () => {
+      token += 1
+      return `"${token}"`
+    }
+    const keyFromPath = (path: string) => {
+      const decoded = decodeURIComponent(path).replace(/^\/+/, '')
+      const slash = decoded.indexOf('/')
+      return slash === -1 ? decoded : decoded.slice(slash + 1)
+    }
+    const fetchImpl: typeof fetch = async (input) => {
+      const request = input instanceof Request ? input : new Request(String(input))
+      const key = keyFromPath(new URL(request.url).pathname)
+      const method = request.method
+      if (request.url.includes(env.R2_SECRET_ACCESS_KEY!) || request.url.includes('owner-pass')) {
+        return new Response('secret', { status: 500 })
+      }
+      if (method === 'GET' || method === 'HEAD') {
+        calls.push(`${method} ${key} encoding ${request.headers.get('accept-encoding') ?? ''}`)
+        const tag = etags.get(key) ?? null
+        if (!objects.has(key)) return new Response('missing', { status: 404 })
+        if (method === 'HEAD') {
+          return new Response(null, { status: tag ? 200 : 404, headers: tag ? { etag: tag } : undefined })
+        }
+        // The stored object has an ETag, but this GET drops it the way R2 did.
+        return new Response(storedBody(objects.get(key)!), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (method === 'PUT') {
+        const copy = request.headers.get('x-amz-copy-source')
+        const ifMatch = request.headers.get('if-match')
+        const ifNone = request.headers.get('if-none-match')
+        calls.push(`PUT ${key}${ifMatch ? ` if-match ${ifMatch}` : ''}${ifNone ? ` if-none-match ${ifNone}` : ''}${copy ? ' copy' : ''}`)
+        if (copy) {
+          const source = keyFromPath(copy)
+          const bytes = objects.get(source)
+          if (!bytes) return new Response('missing', { status: 404 })
+          objects.set(key, bytes.slice())
+          etags.set(key, mint())
+          return new Response('<CopyObjectResult/>', { status: 200 })
+        }
+        const body = new Uint8Array(await request.arrayBuffer())
+        if (conflict && key === LIBRARY_ADDITIONS_KEY && ifMatch) {
+          conflict = false
+          const current = JSON.parse(Buffer.from(objects.get(key)!).toString('utf8')) as { entries: unknown[]; count: number; version: number }
+          current.entries.push(wire('audio/bass/racer.wav', { size: 8 }))
+          current.count = current.entries.length
+          current.version += 1
+          objects.set(key, Buffer.from(JSON.stringify(current)))
+          etags.set(key, mint())
+          return new Response(null, { status: 412 })
+        }
+        if (ifMatch && etags.get(key) !== ifMatch) return new Response(null, { status: 412 })
+        if (ifNone === '*' && objects.has(key)) return new Response(null, { status: 412 })
+        objects.set(key, body)
+        etags.set(key, mint())
+        return new Response(null, { status: 200, headers: { etag: etags.get(key)! } })
+      }
+      return new Response('no', { status: 405 })
+    }
+    const api = createLibraryApi({ env: () => env, fetch: fetchImpl })
+    const now = Date.parse('2026-11-24T21:30:00.000Z')
+    const append = (name: string, at: number) => api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire(`audio/bass/${name}.wav`, { size: 8 })] },
+      now: at,
+    })
+    const first = await append('one', now)
+    const second = await append('two', now + 1)
+    const third = await append('three', now + 2)
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(third.status).toBe(200)
+    expect(first.body.added).toBe(1)
+    expect(second.body.added).toBe(1)
+    expect(third.body.added).toBe(1)
+    const sidecar = readJson(objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries.map((entry) => entry.key)).toEqual([
+      'audio/bass/one.wav',
+      'audio/bass/racer.wav',
+      'audio/bass/two.wav',
+      'audio/bass/three.wav',
+    ])
+    const live = calls.filter((call) => call.startsWith(`PUT ${LIBRARY_ADDITIONS_KEY}`))
+    expect(live[0]).toContain('if-none-match *')
+    expect(live.filter((call) => call.includes('if-match')).length).toBeGreaterThanOrEqual(2)
+    expect(live.slice(1).every((call) => call.includes('if-match'))).toBe(true)
+    expect(calls.some((call) => call.startsWith(`HEAD ${LIBRARY_ADDITIONS_KEY} encoding identity`))).toBe(true)
+    expect(calls.some((call) => call.startsWith(`GET ${LIBRARY_ADDITIONS_KEY} encoding identity`))).toBe(true)
+    expect(calls.some((call) => call.includes(LIBRARY_CATALOG_KEY))).toBe(false)
+    expect(calls.join('\n')).not.toContain(env.R2_SECRET_ACCESS_KEY)
+    expect(JSON.stringify([first.body, second.body, third.body])).not.toContain('owner-pass')
+    expect(bucket).toBe('cueharbor-private-sounds')
+  })
+
+  it('keeps a strong GET etag and replaces a weak one with the HEAD etag', async () => {
+    const objects = new Map<string, Uint8Array>()
+    const etags = new Map<string, string>()
+    const calls: string[] = []
+    let token = 1
+    const mint = () => `"${token += 1}"`
+    let weak = false
+    const keyFromPath = (path: string) => {
+      const decoded = decodeURIComponent(path).replace(/^\/+/, '')
+      const slash = decoded.indexOf('/')
+      return slash === -1 ? decoded : decoded.slice(slash + 1)
+    }
+    const fetchImpl: typeof fetch = async (input) => {
+      const request = input instanceof Request ? input : new Request(String(input))
+      const key = keyFromPath(new URL(request.url).pathname)
+      const method = request.method
+      calls.push(`${method} ${key}`)
+      if (method === 'HEAD') {
+        const tag = etags.get(key)
+        if (!tag) return new Response(null, { status: 404 })
+        return new Response(null, { status: 200, headers: { ETag: tag } })
+      }
+      if (method === 'GET') {
+        const bytes = objects.get(key)
+        if (!bytes) return new Response('missing', { status: 404 })
+        const headers = new Headers({ 'content-type': 'application/json' })
+        const tag = etags.get(key)
+        if (tag) headers.set('etag', weak ? `W/${tag}` : tag)
+        return new Response(storedBody(bytes), { status: 200, headers })
+      }
+      if (method === 'PUT') {
+        const copy = request.headers.get('x-amz-copy-source')
+        const ifMatch = request.headers.get('if-match')
+        const ifNone = request.headers.get('if-none-match')
+        if (copy) {
+          const source = keyFromPath(copy)
+          const bytes = objects.get(source)
+          if (!bytes) return new Response('missing', { status: 404 })
+          objects.set(key, bytes.slice())
+          etags.set(key, mint())
+          return new Response(null, { status: 200 })
+        }
+        const body = new Uint8Array(await request.arrayBuffer())
+        if (ifMatch && etags.get(key) !== ifMatch) return new Response(null, { status: 412 })
+        if (ifNone === '*' && objects.has(key)) return new Response(null, { status: 412 })
+        objects.set(key, body)
+        etags.set(key, mint())
+        calls.push(`stored ${key} ${ifMatch ?? ifNone ?? 'open'}`)
+        return new Response(null, { status: 200 })
+      }
+      return new Response('no', { status: 405 })
+    }
+    const api = createLibraryApi({ env: () => env, fetch: fetchImpl })
+    const now = Date.parse('2026-11-24T21:40:00.000Z')
+    const created = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/strong.wav', { size: 8 })] },
+      now,
+    })
+    expect(created.status).toBe(200)
+    const beforeHead = calls.filter((call) => call.startsWith('HEAD')).length
+    const matched = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/next.wav', { size: 8 })] },
+      now: now + 1,
+    })
+    expect(matched.status).toBe(200)
+    expect(calls.filter((call) => call.startsWith('HEAD')).length).toBe(beforeHead)
+    const strongPut = calls.find((call) => call.startsWith('stored catalog/catalog-additions.json "'))
+    expect(strongPut).toBeTruthy()
+    expect(strongPut).not.toContain('W/')
+    weak = true
+    const weakened = await api.handle({
+      method: 'POST',
+      pathname: '/api/library/catalog-append',
+      ip: '8.8.8.8',
+      accessKey: 'owner-pass',
+      body: { entries: [wire('audio/bass/after-weak.wav', { size: 8 })] },
+      now: now + 2,
+    })
+    expect(weakened.status).toBe(200)
+    expect(calls.filter((call) => call.startsWith('HEAD')).length).toBeGreaterThan(beforeHead)
+    const sidecar = readJson(objects.get(LIBRARY_ADDITIONS_KEY)!)
+    expect(sidecar.entries.map((entry) => entry.key)).toEqual([
+      'audio/bass/strong.wav',
+      'audio/bass/next.wav',
+      'audio/bass/after-weak.wav',
+    ])
+    expect(calls.join('\n')).not.toContain('owner-pass')
   })
 
   it('dedupes by key and leaves the stored row untouched', async () => {

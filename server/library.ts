@@ -138,6 +138,11 @@ export interface LibraryObjects {
   put(key: string, bytes: Uint8Array, contentType: string, conditions?: LibraryWriteConditions): Promise<void>
   copy(from: string, to: string, conditions?: LibraryWriteConditions): Promise<void>
   head?(key: string): Promise<boolean>
+  /**
+   * Strong ETag from HEAD. Catalog append uses this when GET omitted the header
+   * (or only returned a weak tag) so the conditional PUT still has If-Match.
+   */
+  etag?(key: string): Promise<string | null>
 }
 
 function awsClient(ready: LibraryReady) {
@@ -149,8 +154,52 @@ function awsClient(ready: LibraryReady) {
   })
 }
 
-function r2Objects(readEnv: () => LibraryEnv): LibraryObjects {
-  async function call(method: string, key: string, init?: { body?: Uint8Array; contentType?: string; copySource?: string; conditions?: LibraryWriteConditions }) {
+/** First ETag header value. `.get` is case-insensitive; iteration covers a wrapper that hides `.get`. */
+function rawEtag(headers: Headers): string {
+  try {
+    const direct = headers.get('etag')
+    if (direct) return direct
+  } catch {
+    // fall through to iteration
+  }
+  try {
+    for (const [name, value] of headers.entries()) {
+      if (name.toLowerCase() === 'etag' && value) return value
+    }
+  } catch {
+    // no header list
+  }
+  return ''
+}
+
+function isWeakEtag(value: string) {
+  return /^w\//i.test(value.trim().split(',')[0]?.trim() ?? '')
+}
+
+/**
+ * ETag for If-Match. R2's object tag is a quoted strong tag. A proxy may wrap it
+ * as a weak tag or drop the quotes; If-Match uses the strong comparison, so a
+ * weak tag never matches and an unquoted tag does not either.
+ */
+function quoteEtag(value: string | null | undefined): string | null {
+  let text = value?.trim().split(',')[0]?.trim() ?? ''
+  if (!text || text === '*') return null
+  if (/^w\//i.test(text)) text = text.slice(2).trim()
+  if (!text || text === '*') return null
+  if (text.startsWith('"') && text.endsWith('"') && text.length > 2) return text
+  if (/^[\x21\x23-\x7E]+$/.test(text)) return `"${text}"`
+  return null
+}
+
+function responseEtag(response: Response, allowWeak: boolean): string | null {
+  const raw = rawEtag(response.headers)
+  if (!raw) return null
+  if (!allowWeak && isWeakEtag(raw)) return null
+  return quoteEtag(raw)
+}
+
+function r2Objects(readEnv: () => LibraryEnv, fetchImpl?: typeof fetch): LibraryObjects {
+  async function call(method: string, key: string, init?: { body?: Uint8Array; contentType?: string; copySource?: string; conditions?: LibraryWriteConditions; identity?: boolean }) {
     const ready = readLibraryEnv(readEnv())
     const objectKey = method === 'PUT' ? libraryCatalogWriteKey(key) : libraryObjectKey(key)
     if (!ready || !objectKey) throw new Error(LIBRARY_NOT_READY)
@@ -159,17 +208,19 @@ function r2Objects(readEnv: () => LibraryEnv): LibraryObjects {
     if (init?.copySource) headers['x-amz-copy-source'] = init.copySource
     if (init?.conditions?.ifMatch) headers['if-match'] = init.conditions.ifMatch
     if (init?.conditions?.ifNoneMatch) headers['if-none-match'] = init.conditions.ifNoneMatch
-    const response = await awsClient(ready).fetch(r2ObjectUrl(ready.accountId, ready.bucket, objectKey), {
-      method,
-      headers,
-      body: init?.body as BodyInit | undefined,
-    })
-    return response
+    // Ask for the stored bytes. A compressed GET drops or weakens ETag, and the
+    // next conditional PUT then has nothing safe to send as If-Match.
+    if (init?.identity) headers['accept-encoding'] = 'identity'
+    const url = r2ObjectUrl(ready.accountId, ready.bucket, objectKey)
+    const request = { method, headers, body: init?.body as BodyInit | undefined }
+    if (!fetchImpl) return awsClient(ready).fetch(url, request)
+    return fetchImpl(await awsClient(ready).sign(url, request))
   }
   return {
     async get(key) {
-      const response = await call('GET', key)
-      const etag = response.headers.get('etag')
+      const response = await call('GET', key, { identity: true })
+      // A weak tag is not usable for If-Match. Leave it empty so the caller can HEAD.
+      const etag = responseEtag(response, false)
       const bytes = new Uint8Array(await response.arrayBuffer())
       if (response.status === 404) return { status: 404, bytes: null, etag: null }
       if (!response.ok) return { status: response.status, bytes: null, etag: null }
@@ -209,6 +260,13 @@ function r2Objects(readEnv: () => LibraryEnv): LibraryObjects {
       if (response.status === 404) return false
       if (response.ok) return true
       throw new Error('Could not sign that sound.')
+    },
+    async etag(key) {
+      const response = await call('HEAD', key, { identity: true })
+      const etag = responseEtag(response, true)
+      await response.body?.cancel().catch(() => undefined)
+      if (response.status === 404 || !response.ok) return null
+      return etag
     },
   }
 }
@@ -284,12 +342,14 @@ export function createLibraryApi(deps: {
   now?: () => number
   instruments?: InstrumentCatalog
   objects?: LibraryObjects
+  /** Used by the R2 client when `objects` is not injected. Tests pass this so they never call R2. */
+  fetch?: typeof fetch
 }): LibraryApi {
   const failures = new Map<string, number[]>()
   const successes = new Map<string, number[]>()
   const sign = deps.sign ?? ((key: string, env: LibraryEnv) => presignR2Get(env, key))
   const signPut = deps.signPut ?? ((key: string, size: number, env: LibraryEnv) => presignR2Put(env, key, size))
-  const objects = deps.objects ?? r2Objects(deps.env)
+  const objects = deps.objects ?? r2Objects(deps.env, deps.fetch)
   let catalogTail: Promise<unknown> = Promise.resolve()
   let writeSeq = 0
 
@@ -425,18 +485,57 @@ function catalogConflict(error: unknown) {
 
 const EMPTY_ADDITIONS = { version: 0, generated_at: '', count: 0, entries: [] as unknown[] }
 
+function catalogUnavailable(): { ok: false; result: LibraryResult } {
+  return { ok: false, result: { status: 503, body: { error: 'Could not update the library catalog.' } } }
+}
+
+/** Quoted tag for If-Match. A weak tag is refused here; HEAD may still recover a strong one. */
+function strongSidecarEtag(value: string | null | undefined): string | null {
+  if (!value || isWeakEtag(value)) return null
+  return quoteEtag(value)
+}
+
+/**
+ * Sidecar bytes paired with the ETag of those bytes.
+ * GET against R2 can omit ETag (or return only a weak tag). HEAD still carries
+ * the object tag. A second read confirms the tag still names the bytes, so a
+ * writer who landed in between gets a 412 retry instead of an overwrite.
+ */
+async function loadSidecar(objects: LibraryObjects): Promise<LibraryObjectBody> {
+  const first = await objects.get(LIBRARY_ADDITIONS_KEY)
+  if (first.status !== 200 || !first.bytes) return first
+  const fromGet = strongSidecarEtag(first.etag)
+  if (fromGet) return { status: 200, bytes: first.bytes, etag: fromGet }
+  if (!objects.etag) return { status: 200, bytes: first.bytes, etag: quoteEtag(first.etag) }
+  const headed = quoteEtag(await objects.etag(LIBRARY_ADDITIONS_KEY))
+  if (!headed) return { status: 200, bytes: first.bytes, etag: quoteEtag(first.etag) }
+  const again = await objects.get(LIBRARY_ADDITIONS_KEY)
+  if (again.status !== 200 || !again.bytes) return again
+  const againEtag = strongSidecarEtag(again.etag)
+  if (againEtag) return { status: 200, bytes: again.bytes, etag: againEtag }
+  const confirm = quoteEtag(await objects.etag(LIBRARY_ADDITIONS_KEY))
+  if (confirm && confirm === headed) return { status: 200, bytes: again.bytes, etag: confirm }
+  throw new Error(CATALOG_CONFLICT)
+}
+
+type AdditionsRead =
+  | { ok: true; document: unknown; etag: string | null }
+  | { ok: false; result: LibraryResult }
+  | { ok: 'retry' }
+
 /** Sidecar only. The base catalog object is not read or written here. */
-async function readAdditions(objects: LibraryObjects): Promise<{ ok: true; document: unknown; etag: string | null } | { ok: false; result: LibraryResult }> {
+async function readAdditions(objects: LibraryObjects): Promise<AdditionsRead> {
   try {
-    const loaded = await objects.get(LIBRARY_ADDITIONS_KEY)
+    const loaded = await loadSidecar(objects)
     if (loaded.status === 404) return { ok: true, document: { ...EMPTY_ADDITIONS, entries: [] }, etag: null }
-    if (loaded.status !== 200 || !loaded.bytes || !loaded.etag) return { ok: false, result: { status: 503, body: { error: 'Could not update the library catalog.' } } }
+    if (loaded.status !== 200 || !loaded.bytes || !loaded.etag) return catalogUnavailable()
     const current = JSON.parse(Buffer.from(loaded.bytes).toString('utf8')) as unknown
     const parsed = current && typeof current === 'object' && !Array.isArray(current) ? current as { entries?: unknown } : null
-    if (!parsed || !Array.isArray(parsed.entries)) return { ok: false, result: { status: 503, body: { error: 'Could not update the library catalog.' } } }
+    if (!parsed || !Array.isArray(parsed.entries)) return catalogUnavailable()
     return { ok: true, document: current, etag: loaded.etag }
-  } catch {
-    return { ok: false, result: { status: 503, body: { error: 'Could not update the library catalog.' } } }
+  } catch (error) {
+    if (catalogConflict(error)) return { ok: 'retry' }
+    return catalogUnavailable()
   }
 }
 
@@ -452,6 +551,7 @@ async function appendCatalog(
 ): Promise<LibraryResult> {
   for (let attempt = 0; attempt < 4; attempt++) {
     const loaded = await readAdditions(objects)
+    if (loaded.ok === 'retry') continue
     if (!loaded.ok) return loaded.result
     const merged = mergeCatalogEntries(loaded.document, listed, now)
     if (!merged.ok) return { status: 400, body: { error: 'Those catalog entries cannot be added.' } }
