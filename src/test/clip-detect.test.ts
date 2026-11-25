@@ -277,6 +277,41 @@ describe('clip key and tempo', () => {
     expect(response.hearing?.root).toBeNull()
   })
 
+  it('does not name a drum-category clip or noise, even when the audio is tonal', () => {
+    const rate = 22050
+    const audio = progression(MAJOR_CADENCE, 0, rate, 0)
+    for (const sound of [
+      { id: 'kit', soundCategory: 'drums' },
+      { id: 'hiss', soundCategory: 'noise' },
+    ]) {
+      const response = handleClipDetect({
+        id: sound.id === 'kit' ? 10 : 11,
+        type: 'clip-detect',
+        sampleRate: rate,
+        channels: [audio],
+        clip: {
+          id: sound.id,
+          name: 'Groove',
+          bufferId: 'buf',
+          startSample: 0,
+          offsetSamples: 0,
+          durationSamples: audio.length,
+          fadeInSamples: 0,
+          fadeOutSamples: 0,
+          gain: 1,
+          source: 'import',
+          soundType: 'loop',
+          soundCategory: sound.soundCategory,
+        },
+        tempo: 120,
+      })
+      expect(response.hearing?.clearKey).toBe(false)
+      expect(response.hearing?.key).toBe('')
+      expect(response.hearing?.maybeKey ?? '').toBe('')
+      expect(response.hearing?.root).toBeNull()
+    }
+  })
+
   it('says there is no clear key on a drum loop', () => {
     const rate = 22050
     const heard = detectKey(drums(100, 4, rate), rate)

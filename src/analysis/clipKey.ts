@@ -1,12 +1,10 @@
 /**
  * Key and tempo of one audio clip.
  *
- * Key reads the whole buffer (a short loop wraps around the seam): harmonic
- * and percussive spectra are split, peaks land on a log-frequency chroma, and
- * A harmonic pitch-class profile is correlated with the EDMA profiles.
- * A confident key is major or minor. A weaker tonal reading is "Unsure"
- * and keeps its best guess. "No clear key" is for drums, one-shots, and noise,
- * and those are not given a name.
+ * Key reads the whole buffer. A harmonic pitch-class profile is correlated
+ * with the EDMA profiles. A confident key is major or minor. A weaker tonal
+ * reading is "Unsure" and keeps its best guess. "No clear key" is for drums,
+ * one-shots, and noise, and those are not given a name.
  *
  * Tempo listens to the source, before the stretch: an onset-strength envelope,
  * its autocorrelation, and a comb tempogram.
@@ -17,6 +15,8 @@
 
 import type { ClipHearing } from '../model/types'
 import { estimateKey, type KeyDetectOptions, type KeyProfile } from './keyEstimate'
+
+export { clipDeniesKey } from './deniedKey'
 
 export type { KeyDetectOptions, KeyProfile }
 
@@ -277,13 +277,3 @@ export function hearingOf(key: KeyReading, tempo: TempoReading): ClipHearing {
   }
 }
 
-/** Drum loops, one-shots, and noise are not given a key name. */
-export function clipDeniesKey(clip: { soundType?: string; soundRole?: string; soundCategory?: string }) {
-  const type = (clip.soundType ?? '').toLowerCase().replace(/[\s_]+/g, '-')
-  if (type === 'one-shot' || type === 'oneshot') return true
-  const role = (clip.soundRole ?? '').toLowerCase()
-  if (role.includes('drum')) return true
-  const category = (clip.soundCategory ?? '').toLowerCase()
-  if (category === 'kick' || category === 'snare' || category === 'hat' || category === 'hi-hat' || category === 'hihat' || category === 'clap' || category === 'percussion' || category === 'perc' || category === 'cymbal' || category === 'tom' || category === 'rim') return true
-  return false
-}
