@@ -37,13 +37,27 @@ function urlKeepsSecret(url, accessKey) {
   }
 }
 
+const HIDDEN_KEY = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
+const ENCODED_KEY = /%(?:2e|2f|5c|00)/i
+
+function segmentOk(part) {
+  if (!part || part === '.' || part === '..') return false
+  const folded = part.normalize('NFKC')
+  if (!folded || folded === '.' || folded === '..') return false
+  if (folded.includes('/') || folded.includes('\\') || HIDDEN_KEY.test(folded)) return false
+  if (ENCODED_KEY.test(part) || ENCODED_KEY.test(folded)) return false
+  return true
+}
+
 function audioKey(key) {
   if (typeof key !== 'string') return false
   const text = key.trim()
   if (!text.startsWith('audio/') || text.length > 512) return false
   if (!text.toLowerCase().endsWith('.wav')) return false
-  if (text.includes('\\') || text.includes('://')) return false
-  return text.split('/').every((part) => part && part !== '.' && part !== '..')
+  if (text.includes('\\') || text.includes('://') || HIDDEN_KEY.test(text) || ENCODED_KEY.test(text)) return false
+  if (!text.split('/').every(segmentOk)) return false
+  const folded = text.normalize('NFKC')
+  return folded.startsWith('audio/') && folded.toLowerCase().endsWith('.wav') && folded.split('/').every(segmentOk)
 }
 
 async function walkWavs(folder) {
@@ -103,7 +117,11 @@ async function putWithRetry(url, bytes, fetchImpl, attempts) {
       const response = await fetchImpl(url, {
         method: 'PUT',
         redirect: 'error',
-        headers: { 'content-type': 'audio/wav', 'if-none-match': '*' },
+        headers: {
+          'content-type': 'audio/wav',
+          'content-length': String(bytes.byteLength ?? bytes.length),
+          'if-none-match': '*',
+        },
         body: bytes,
       })
       if (response.ok) return true

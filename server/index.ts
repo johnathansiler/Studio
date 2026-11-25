@@ -20,7 +20,7 @@ const usage = createUsageLedger()
 const libraryApi = createLibraryApi({
   env: () => process.env,
   sign: (key, env) => presignR2Get(env, key),
-  signPut: (key, env) => presignR2Put(env, key),
+  signPut: (key, size, env) => presignR2Put(env, key, size),
   instruments: createInstrumentSource({ env: () => process.env }),
 })
 

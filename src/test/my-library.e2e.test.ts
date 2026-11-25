@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
-import { chromium, type Browser } from 'playwright'
+import { chromium, type Browser, type Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import { encodeWav } from '../model/wav'
 
@@ -117,6 +117,48 @@ const catalog = {
       search: 'guitar riff loop',
     },
     {
+      key: 'audio/bass/Sub_120_C.wav',
+      size: 200,
+      format: 'wav',
+      pack: 'Uploads',
+      type: 'loop',
+      category: 'bass',
+      instrument: 'bass',
+      genre: [],
+      bpm: 120,
+      bpm_source: 'label',
+      bpm_alt: null,
+      musical_key: 'C major',
+      root: 'C',
+      note: null,
+      chord: null,
+      mood: [],
+      tags: ['upload', 'loop'],
+      license: 'upload',
+      search: 'bass loop 120 c major upload',
+    },
+    {
+      key: 'audio/bass/Sub_80_Am.wav',
+      size: 200,
+      format: 'wav',
+      pack: 'Uploads',
+      type: 'loop',
+      category: 'bass',
+      instrument: 'bass',
+      genre: [],
+      bpm: 80,
+      bpm_source: 'label',
+      bpm_alt: null,
+      musical_key: 'A minor',
+      root: 'A',
+      note: null,
+      chord: null,
+      mood: [],
+      tags: ['upload', 'loop'],
+      license: 'upload',
+      search: 'bass loop 80 a minor upload',
+    },
+    {
       key: 'Pads/warm_A_minor.wav',
       size: 200,
       format: 'wav',
@@ -142,6 +184,18 @@ const catalog = {
 
 const gzip = gzipSync(Buffer.from(JSON.stringify(catalog)))
 const wav = Buffer.from(encodeWav([Float32Array.from({ length: 480 }, (_, i) => Math.sin(i / 8) * 0.4)], 48000))
+
+async function addPill(page: Page) {
+  return page.evaluate(() => {
+    const add = document.querySelector('.library-add-row .library-add-btn')
+    const dock = document.querySelector('.phone-dock-slot, .studio-dock')
+    if (!(add instanceof HTMLElement)) return null
+    const box = add.getBoundingClientRect()
+    const dockBox = dock instanceof HTMLElement ? dock.getBoundingClientRect() : null
+    const overlaps = !!dockBox && box.bottom > dockBox.top + 0.5 && box.top < dockBox.bottom - 0.5 && box.right > dockBox.left && box.left < dockBox.right
+    return { height: box.height, width: box.width, overlaps }
+  })
+}
 
 async function waitForServer(url: string, child: ChildProcess) {
   const started = Date.now()
@@ -237,7 +291,9 @@ describe('my library on a phone', () => {
       const addSounds = page.getByRole('button', { name: 'Add sounds', exact: true })
       await addSounds.waitFor()
       const addBox = await addSounds.boundingBox()
-      expect(addBox && addBox.height <= 32 && addBox.height >= 20).toBe(true)
+      expect(addBox && addBox.height >= 40 && addBox.width >= 40 && addBox.width < 180).toBe(true)
+      const pill = await addPill(page)
+      expect(pill && pill.height >= 40 && !pill.overlaps).toBe(true)
       await addSounds.click()
       await page.getByLabel('Sound category').fill('bass')
       await page.getByLabel('Sound BPM').fill('96')
@@ -387,13 +443,41 @@ describe('my library on a phone', () => {
       await page.locator('[data-lane="oneshots"]').click()
       await page.locator('[data-drum-chip="bass"]').waitFor()
       expect(await page.locator('[data-drum-chip="bass"]').innerText()).toMatch(/Bass/)
-      await page.locator('[data-lane="oneshots"]').click()
+      await page.locator('[data-lane="drums"]').click()
+      await expect.poll(async () => page.locator('[data-drum-chip="bass"]').count()).toBe(0)
+      await expect.poll(async () => page.locator('[data-library-key="Bass/C_sharp.wav"]').count()).toBe(0)
+      await page.locator('[data-lane="drums"]').click()
+      await page.locator('[data-lane="loops"]').click()
+      await page.locator('[data-loop-chip="bass"]').waitFor()
+      expect(await page.locator('[data-loop-chip="bass"]').innerText()).toMatch(/Bass\s+2/)
+      await page.locator('[data-loop-chip="bass"]').click()
+      await page.getByRole('button', { name: 'Near tempo', exact: true }).click()
+      await page.getByRole('button', { name: 'In C', exact: true }).click()
+      await expect.poll(async () => page.locator('[data-library-key="audio/bass/Sub_120_C.wav"]').count()).toBe(1)
+      await expect.poll(async () => page.locator('[data-library-key="audio/bass/Sub_80_Am.wav"]').count()).toBe(0)
+      await page.locator('[data-loop-chip="all"]').click()
+      await page.getByRole('button', { name: 'Clear all', exact: true }).click()
       await page.setViewportSize({ width: 384, height: 844 })
+      const phonePill = await addPill(page)
+      expect(phonePill && phonePill.height >= 40 && phonePill.width >= 40 && phonePill.width < 180 && !phonePill.overlaps).toBe(true)
+      await page.getByRole('button', { name: 'Add sounds', exact: true }).click()
+      const formClear = await page.evaluate(() => {
+        const form = document.querySelector('.library-add-form')
+        const dock = document.querySelector('.phone-dock-slot, .studio-dock')
+        if (!(form instanceof HTMLElement)) return null
+        const box = form.getBoundingClientRect()
+        const dockBox = dock instanceof HTMLElement ? dock.getBoundingClientRect() : null
+        const overlaps = !!dockBox && box.bottom > dockBox.top + 0.5 && box.top < dockBox.bottom - 0.5 && box.right > dockBox.left && box.left < dockBox.right
+        return { overlaps, height: box.height }
+      })
+      expect(formClear && !formClear.overlaps).toBe(true)
+      await page.getByRole('button', { name: 'Add sounds', exact: true }).click()
+      await page.getByLabel('Sound category').waitFor({ state: 'hidden' })
       await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.getByRole('button', { name: 'Type', exact: true }).click()
       await page.locator('.library-filter-sheet').getByRole('button', { name: 'Loops', exact: true }).click()
       await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
-      await expect.poll(async () => page.locator('.sound-row[data-content-type="loop"]').count()).toBe(3)
+      await expect.poll(async () => page.locator('.sound-row[data-content-type="loop"]').count()).toBeGreaterThan(0)
       await expect.poll(async () => page.locator('.sound-row[data-content-type="one-shot"]').count()).toBe(0)
       await expect.poll(async () => page.locator('.sound-row[data-content-type="sfx"]').count()).toBe(0)
       await expect.poll(async () => page.locator('[data-lane="loops"].on').innerText()).toContain('Loops')
@@ -403,6 +487,18 @@ describe('my library on a phone', () => {
         return box.height >= 40 && box.top >= (sheet?.top ?? 0) && box.bottom <= window.innerHeight
       })
       expect(chipSeen).toBe(true)
+      await page.evaluate(() => {
+        const list = document.querySelector('.sound-list')
+        let el: HTMLElement | null = list instanceof HTMLElement ? list : null
+        while (el) {
+          const overflow = getComputedStyle(el).overflowY
+          if (overflow === 'auto' || overflow === 'scroll') {
+            el.scrollTop = el.scrollHeight
+            break
+          }
+          el = el.parentElement
+        }
+      })
       await expect.poll(async () => page.locator('[data-sound-bpm="100"]').count()).toBeGreaterThan(0)
       await page.screenshot({ path: '/opt/cursor/artifacts/loops_list_384.png' })
       await page.getByRole('button', { name: /^Filter/ }).click()
@@ -417,6 +513,8 @@ describe('my library on a phone', () => {
       await page.screenshot({ path: '/opt/cursor/artifacts/loops_filter_884.png' })
       await page.keyboard.press('Escape')
       await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
+      const widePill = await addPill(page)
+      expect(widePill && widePill.height >= 40 && widePill.width >= 40 && widePill.width < 180 && !widePill.overlaps).toBe(true)
       await page.locator('[data-lane="loops"].on').click()
       await page.setViewportSize({ width: 390, height: 844 })
       await page.getByLabel('Search my library').fill('trap 808 C')

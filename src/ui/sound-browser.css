@@ -1202,25 +1202,30 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   margin: 0 0 6px;
 }
 .my-library .library-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
-  height: 26px;
-  min-height: 26px;
-  max-height: 26px;
-  padding: 0 10px;
+  box-sizing: border-box;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  min-width: 40px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: transparent;
   color: var(--faint, #6d7f74);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  line-height: 24px;
+  line-height: 1;
 }
 .shell.phone .my-library .library-add-btn {
-  height: 26px;
-  min-height: 26px;
-  max-height: 26px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
 }
 .my-library .library-add-form {
   display: flex;
@@ -1234,8 +1239,8 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .my-library .library-add-form input {
   flex: 1 1 88px;
   min-width: 0;
-  height: 32px;
-  min-height: 32px;
+  height: 40px;
+  min-height: 40px;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--panel-2);
