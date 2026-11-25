@@ -1,9 +1,9 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { renderBass808, bassActive, bassNote, createBassState, glideLength, midiHz } from '../audio/bass808/voice'
+import { renderBass808, bassActive, bassNote, createBassState, glideLength, midiHz, BASS808_ATTACK_MS } from '../audio/bass808/voice'
 import { RackRuntime, renderNotes } from '../audio/rack/dsp'
-import { bassPadPitches, slideLinks } from '../audio/bass808/pattern'
+import { bassPadPitches, drillTrapPattern, slideLinks } from '../audio/bass808/pattern'
 import { BASS808_SHOTS, shotRoot } from '../audio/bass808/shots'
 import { graphPlugins } from '../audio/arrangeSources'
 import { createPlugin, defaultParams, normalizeProject } from '../audio/plugins/catalog'
@@ -185,6 +185,39 @@ describe('808 bass voice', () => {
     expect(Math.abs(voice.midi[4000 + glideLength(90, sr)] - 43)).toBeLessThan(0.02)
   })
 
+  it('keeps the default attack identical and stays click-free at zero', () => {
+    const sr = 48000
+    const legacy = renderBass808(clean, [{ sample: 0, pitch: 36, vel: 0.9 }], sr, 4000)
+    const named = renderBass808({ ...clean, attack: BASS808_ATTACK_MS }, [{ sample: 0, pitch: 36, vel: 0.9 }], sr, 4000)
+    let gap = 0
+    for (let i = 0; i < legacy.left.length; i++) gap = Math.max(gap, Math.abs(legacy.left[i] - named.left[i]))
+    expect(gap).toBe(0)
+    const fast = renderBass808({ ...clean, attack: 0, click: 0, drop: 0 }, [{ sample: 0, pitch: 48, vel: 1 }], sr, 2000)
+    expect(maxDelta(fast.left, 0, 64)).toBeLessThan(0.08)
+    const slow = renderBass808({ ...clean, attack: 800, sustain: 1, click: 0, drop: 0 }, [{ sample: 0, pitch: 36, vel: 1 }], sr, sr)
+    const early = Math.abs(slow.left[Math.round(sr * 0.02)] || 0)
+    const late = Math.abs(slow.left[Math.round(sr * 0.5)] || 0)
+    expect(early).toBeLessThan(Math.abs(named.left[Math.round(sr * 0.02)] || 0) * 0.5)
+    expect(late).toBeGreaterThan(early * 2)
+  })
+
+  it('slides from the last pitch in always mode after the note has gone quiet', () => {
+    const sr = 48000
+    const gap = Math.round(sr * 1.4)
+    const rendered = renderBass808(
+      { ...clean, glide: 100, gmode: 0, sustain: 0, decay: 40 },
+      [
+        { sample: 0, pitch: 36, vel: 0.9 },
+        { sample: 2000, pitch: 36, vel: 0 },
+        { sample: gap, pitch: 48, vel: 0.9 },
+      ],
+      sr,
+      gap + 64,
+    )
+    expect(Math.abs(rendered.midi[gap] - 36)).toBeLessThan(0.5)
+    expect(Math.abs(rendered.midi[gap + 20] - 48)).toBeGreaterThan(0.2)
+  })
+
   it('steals the single voice in mono mode', () => {
     const sr = 48000
     const state = createBassState()
@@ -277,6 +310,19 @@ describe('808 bass presets and pattern', () => {
       { id: 'c', pitch: 40, startBeat: 3, durationBeats: 1 },
     ])
     expect(links).toEqual([{ from: expect.objectContaining({ id: 'a' }), to: expect.objectContaining({ id: 'b' }) }])
+    const overlapped = slideLinks([
+      { id: 'held', pitch: 36, startBeat: 0, durationBeats: 1.15 },
+      { id: 'into', pitch: 43, startBeat: 1, durationBeats: 0.7, slide: true },
+      { id: 'older', pitch: 40, startBeat: 0, durationBeats: 0.4 },
+    ])
+    expect(overlapped).toEqual([{ from: expect.objectContaining({ id: 'held' }), to: expect.objectContaining({ id: 'into' }) }])
+    const pattern = drillTrapPattern(9, 'aeolian').map((note, index) => ({ ...note, id: String(index) }))
+    const drawn = slideLinks(pattern)
+    expect(drawn).toHaveLength(pattern.filter((note) => note.slide).length)
+    for (const link of drawn) {
+      expect(link.from.startBeat).toBeLessThan(link.to.startBeat)
+      expect(link.from.startBeat + link.from.durationBeats).toBeGreaterThan(link.to.startBeat)
+    }
     const pads = bassPadPitches(0, 'ionian')
     expect(pads[0] % 12).toBe(0)
     expect(new Set(pads.map((pitch) => pitch % 12)).size).toBe(pads.length > 7 ? 7 : pads.length)
@@ -325,6 +371,26 @@ describe('808 bass presets and pattern', () => {
     expect(html).toContain('Legato only')
     expect(html).toContain('aria-label="Transport"')
     expect(html).toContain('Glide')
+    expect(html).toContain('Attack')
+    expect(html).toContain('aria-label="Attack"')
+  })
+
+  it('keeps an attack edit through undo, automation, and a saved project', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.addQuickTrack('bass808')!
+    const device = store.track(id)!.rack!.devices.find((item) => item.kind === 'bass808')!
+    expect(device.params.attack).toBe(1.5)
+    const spec = { trackId: id, target: 'instrument' as const, param: 'attack', deviceId: device.id, min: 0, max: 2000 }
+    store.setAutomated(spec, 240, false, 0)
+    expect(store.track(id)!.rack!.devices.find((item) => item.id === device.id)!.params.attack).toBe(240)
+    store.undo()
+    expect(store.track(id)!.rack!.devices.find((item) => item.id === device.id)!.params.attack).toBe(1.5)
+    store.project.automationMode = 'latch'
+    store.setAutomated(spec, 640, true, 4800)
+    const lane = store.project.rackAutomation.find((item) => item.deviceId === device.id && item.param === 'attack')
+    expect(lane?.points.length).toBeGreaterThan(0)
+    const saved = JSON.parse(JSON.stringify(store.project))
+    expect(saved.tracks.find((item: { id: string }) => item.id === id).rack.devices.find((item: { kind: string }) => item.kind === 'bass808').params.attack).toBe(640)
   })
 
   it('offers 808 Bass from Add Track and the instrument list', async () => {

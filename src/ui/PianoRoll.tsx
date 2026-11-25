@@ -873,9 +873,9 @@ export function PianoRoll({
           }} />
         )}
         {!compact && onIdeas && <TipButton label={sheet('ideas').label} hint={sheet('ideas').hint} onClick={onIdeas} />}
-        {!compact && store.selectedNoteId && (
+        {store.selectedNoteId && (
           <TipButton
-            className={clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'on' : ''}
+            className={`slide-toggle${clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? ' on' : ''}`}
             label={sheet('slide').label}
             hint={sheet('slide').hint}
             pressed={!!clip.notes.find((note) => note.id === store.selectedNoteId)?.slide}
@@ -1039,26 +1039,14 @@ export function PianoRoll({
                       onNoteDown(event, note)
                     }}
                   >
-                    <button
-                      type="button"
-                      className="note-slide"
-                      aria-label={note.slide ? 'Slide on' : 'Slide off'}
-                      aria-pressed={!!note.slide}
-                      title={note.slide ? 'Slide into this note' : 'Slide off'}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        store.updateNote(track.id, clip.id, note.id, { slide: !note.slide })
-                      }}
-                    >
-                      {note.slide ? 'S' : ''}
-                    </button>
+                    {note.slide ? <span className="note-slide" title="Slides into this note">S</span> : null}
                   </div>
                 )
               })}
               <svg className="slide-line" aria-hidden="true">
                 {slideLinks(notes).map((link) => {
-                  const x1 = (link.from.startBeat + link.from.durationBeats) * pxBeat
+                  const leave = Math.min(link.from.startBeat + link.from.durationBeats, Math.max(link.from.startBeat, link.to.startBeat))
+                  const x1 = leave * pxBeat
                   const y1 = (HIGH - link.from.pitch) * row + row / 2
                   const x2 = link.to.startBeat * pxBeat
                   const y2 = (HIGH - link.to.pitch) * row + row / 2
