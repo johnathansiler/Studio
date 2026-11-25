@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { renderBass808, bassActive, bassNote, createBassState, glideLength, midiHz, BASS808_ATTACK_MS } from '../audio/bass808/voice'
 import { RackRuntime, renderNotes } from '../audio/rack/dsp'
-import { bassPadPitches, drillTrapPattern, slideLinks } from '../audio/bass808/pattern'
+import { bassPadDegree, bassPadPitches, BASS_PAD_EXTRA, drillTrapPattern, slideLinks } from '../audio/bass808/pattern'
 import { BASS808_SHOTS, shotRoot } from '../audio/bass808/shots'
 import { graphPlugins } from '../audio/arrangeSources'
 import { createPlugin, defaultParams, normalizeProject } from '../audio/plugins/catalog'
@@ -324,8 +324,9 @@ describe('808 bass presets and pattern', () => {
       expect(link.from.startBeat + link.from.durationBeats).toBeGreaterThan(link.to.startBeat)
     }
     const pads = bassPadPitches(0, 'ionian')
-    expect(pads[0] % 12).toBe(0)
-    expect(new Set(pads.map((pitch) => pitch % 12)).size).toBe(pads.length > 7 ? 7 : pads.length)
+    expect(pads).toHaveLength(8 + BASS_PAD_EXTRA * 2)
+    expect(pads[BASS_PAD_EXTRA]).toBe(bassPadDegree(0, 'ionian', 0))
+    expect(new Set(pads.map((pitch) => pitch % 12)).size).toBe(7)
   })
 
   it('points sample shots at catalog paths without renaming them', () => {
@@ -373,6 +374,9 @@ describe('808 bass presets and pattern', () => {
     expect(html).toContain('Glide')
     expect(html).toContain('Attack')
     expect(html).toContain('aria-label="Attack"')
+    expect(html).toContain('Pad F1')
+    expect(html).toContain('Pad G3')
+    expect(html).toContain('F1 – G3')
   })
 
   it('keeps an attack edit through undo, automation, and a saved project', () => {
@@ -407,5 +411,65 @@ describe('808 bass presets and pattern', () => {
     store.addPlugin(keys.id, 'bass808')
     expect(store.track(keys.id)!.instrument).toBe('bass808')
     expect(store.bassTrackId).toBe(keys.id)
+  })
+
+  it('extends each end of the bass pads by four scale degrees', () => {
+    const count = 8
+    for (const scaleId of ['ionian', 'aeolian', 'majorPentatonic', 'dimHalfWhole']) {
+      const pads = bassPadPitches(2, scaleId)
+      expect(pads, scaleId).toHaveLength(count + BASS_PAD_EXTRA * 2)
+      for (let index = 0; index < pads.length; index++) {
+        expect(pads[index], `${scaleId} ${index}`).toBe(bassPadDegree(2, scaleId, index - BASS_PAD_EXTRA))
+      }
+      const oldLow = bassPadDegree(2, scaleId, 0)
+      const oldHigh = bassPadDegree(2, scaleId, count - 1)
+      expect(pads[BASS_PAD_EXTRA], scaleId).toBe(oldLow)
+      expect(pads[pads.length - 1 - BASS_PAD_EXTRA], scaleId).toBe(oldHigh)
+      expect(pads[0], scaleId).toBeLessThan(oldLow)
+      expect(pads[pads.length - 1], scaleId).toBeGreaterThan(oldHigh)
+      expect(new Set(pads).size, scaleId).toBe(pads.length)
+    }
+  })
+
+  it('keeps the new low pads tuned and audible, and band-limits a sample played above its root', () => {
+    const sr = 48000
+    const low = bassPadDegree(0, 'majorPentatonic', -BASS_PAD_EXTRA)
+    expect(low).toBeGreaterThanOrEqual(24)
+    const played = renderBass808(
+      { ...clean, sustain: 1, decay: 4000 },
+      [{ sample: 0, pitch: low, vel: 1 }],
+      sr,
+      sr,
+    )
+    expect(cents(measureHz(played.left, sr, 8000), midiHz(low))).toBeLessThan(20)
+    expect(Math.max(...played.left.map((sample) => Math.abs(sample)))).toBeGreaterThan(0.05)
+    for (const sample of played.left) expect(Number.isFinite(sample)).toBe(true)
+
+    const rootHz = midiHz(36)
+    const lowBuffer = new Float32Array(sr)
+    for (let i = 0; i < lowBuffer.length; i++) lowBuffer[i] = Math.sin((2 * Math.PI * rootHz * i) / sr)
+    const sampled = renderBass808(
+      { ...clean, source: 1, root: 36, tone: 8000, sustain: 1, decay: 4000 },
+      [{ sample: 0, pitch: low, vel: 1 }],
+      sr,
+      sr,
+      { samples: lowBuffer, sampleRate: sr },
+    )
+    expect(cents(measureHz(sampled.left, sr, 8000), midiHz(low))).toBeLessThan(30)
+    expect(Math.max(...sampled.left.map((sample) => Math.abs(sample)))).toBeGreaterThan(0.02)
+
+    const tone = 10000
+    const buffer = new Float32Array(sr)
+    for (let i = 0; i < buffer.length; i++) buffer[i] = Math.sin((2 * Math.PI * tone * i) / sr)
+    const high = renderBass808(
+      { ...clean, source: 1, root: 36, tone: 18000, sustain: 1, decay: 4000 },
+      [{ sample: 0, pitch: 60, vel: 1 }],
+      sr,
+      sr / 2,
+      { samples: buffer, sampleRate: sr },
+    )
+    const slice = high.left.subarray(2000, 8000)
+    expect(mag(slice, 8000, sr)).toBeLessThan(0.05)
+    for (const sample of high.left) expect(Number.isFinite(sample)).toBe(true)
   })
 })

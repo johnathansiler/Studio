@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { AnalysisSection } from '../analysis/types'
+import { renderArrangeInputs } from '../audio/arrangeSources'
+import { ATTACK_SEC, builtinAttackSec, builtinEnvelope } from '../audio/liveStage'
 import { DRUM_PADS } from '../model/drums'
 import { createEmptyProject, makeTrack, type MidiClip } from '../model/types'
-import { buildSession, chordsFromAnalysis } from '../players'
+import { BASS_PLAYER_ATTACK_MS, buildSession, chordsFromAnalysis } from '../players'
 import { diffProject } from '../state/ops'
 import { selectPlayers } from '../state/select'
 import { ProjectStore } from '../state/store'
@@ -159,5 +161,71 @@ describe('session players', () => {
     expect(restored.playerState().complexity).toBeCloseTo(0.2)
     store.undo()
     expect(store.playerState().style).toBe('pop')
+  })
+
+  it('keeps the bass attack at the current fade-in and saves a longer one', async () => {
+    expect(builtinAttackSec(BASS_PLAYER_ATTACK_MS)).toBe(ATTACK_SEC)
+    expect(builtinAttackSec(0)).toBe(0.0005)
+    const store = new ProjectStore(createEmptyProject())
+    expect(store.playerState().bassAttack).toBe(BASS_PLAYER_ATTACK_MS)
+    store.setPlayers({ bassAttack: 80 })
+    const restored = new ProjectStore(JSON.parse(JSON.stringify(store.project)))
+    expect(restored.playerState().bassAttack).toBe(80)
+    store.undo()
+    expect(store.playerState().bassAttack).toBe(BASS_PLAYER_ATTACK_MS)
+
+    const energy = async (ms: number) => {
+      const project = createEmptyProject()
+      project.players = { ...store.playerState(), bassAttack: ms }
+      project.tracks = [makeTrack({
+        name: 'Bass',
+        type: 'midi',
+        instrument: 'synth',
+        midiClips: [{
+          id: 'bass-clip',
+          name: 'Pop bass player',
+          startBeat: 0,
+          durationBeats: 2,
+          notes: [{ id: 'n', pitch: 40, startBeat: 0, durationBeats: 1, velocity: 1 }],
+        }],
+      })]
+      const rendered = await renderArrangeInputs(project, new Map(), 0, project.sampleRate)
+      const channel = rendered.get(project.tracks[0].id)?.[0] ?? new Float32Array()
+      let sum = 0
+      const early = Math.round(project.sampleRate * 0.02)
+      for (let i = 0; i < early; i++) sum += (channel[i] || 0) ** 2
+      return sum
+    }
+    const quick = await energy(BASS_PLAYER_ATTACK_MS)
+    const slow = await energy(800)
+    expect(quick).toBeGreaterThan(0)
+    expect(slow).toBeLessThan(quick * 0.5)
+
+    const span = builtinEnvelope(0.8, 0.25)
+    expect(span.rise).toBeLessThanOrEqual(0.25)
+    expect(span.releaseAt).toBeGreaterThan(span.rise)
+    const short = await (async () => {
+      const project = createEmptyProject()
+      project.tempo = 120
+      project.players = { ...store.playerState(), bassAttack: 800 }
+      project.tracks = [makeTrack({
+        name: 'Bass',
+        type: 'midi',
+        instrument: 'synth',
+        midiClips: [{
+          id: 'bass-clip',
+          name: 'Pop bass player',
+          startBeat: 0,
+          durationBeats: 0.5,
+          notes: [{ id: 'n', pitch: 40, startBeat: 0, durationBeats: 0.5, velocity: 1 }],
+        }],
+      })]
+      const rendered = await renderArrangeInputs(project, new Map(), 0, Math.round(project.sampleRate * 0.3))
+      const channel = rendered.get(project.tracks[0].id)?.[0] ?? new Float32Array()
+      let sum = 0
+      for (let i = 0; i < channel.length; i++) sum += (channel[i] || 0) ** 2
+      return sum
+    })()
+    expect(short).toBeGreaterThan(0.01)
   })
 })

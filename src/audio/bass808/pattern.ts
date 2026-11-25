@@ -48,23 +48,47 @@ export function slideLinks<T extends SlideNote>(notes: readonly T[]): { from: T;
   return links
 }
 
+/** Scale degrees added below the original low pad and above the original high pad. */
+export const BASS_PAD_EXTRA = 4
+
 /**
- * Eight beats of 808 slides. Every pitch is a scale tone of `root`.
- * Slide notes overlap the one before them so legato glide has a source.
+ * Bass pads in the song key.
+ * The middle `count` degrees start on the root (the original eight pads).
+ * `extra` scale degrees sit below that run and the same number sit above it.
+ * A chromatic scale steps by semitone; every other scale steps by scale degree.
  */
-/** Eight bass pads in the song key, starting on the root. */
-export function bassPadPitches(root: number, scaleId: string | undefined, count = 8) {
+export function bassPadPitches(root: number, scaleId: string | undefined, count = 8, extra = BASS_PAD_EXTRA) {
   const scale = scaleById(scaleId)
   const pc = ((Math.round(root) % 12) + 12) % 12
   const base = 36 + pc
   const len = Math.max(1, scale.intervals.length)
-  return Array.from({ length: count }, (_, index) => {
-    const wrapped = index % len
-    const oct = Math.floor(index / len)
-    return Math.max(0, Math.min(127, base + scale.intervals[wrapped] + oct * 12))
+  const span = Math.max(1, Math.round(count))
+  const wing = Math.max(0, Math.round(extra))
+  const start = -wing
+  return Array.from({ length: span + wing * 2 }, (_, index) => {
+    const degree = start + index
+    const wrapped = ((degree % len) + len) % len
+    const oct = Math.floor(degree / len)
+    const midi = base + scale.intervals[wrapped] + oct * 12
+    return Math.max(0, Math.min(127, midi))
   })
 }
 
+/** MIDI pitch of one scale degree above the pad root, matching `bassPadPitches`. */
+export function bassPadDegree(root: number, scaleId: string | undefined, degree: number) {
+  const scale = scaleById(scaleId)
+  const pc = ((Math.round(root) % 12) + 12) % 12
+  const base = 36 + pc
+  const len = Math.max(1, scale.intervals.length)
+  const wrapped = ((degree % len) + len) % len
+  const oct = Math.floor(degree / len)
+  return Math.max(0, Math.min(127, base + scale.intervals[wrapped] + oct * 12))
+}
+
+/**
+ * Eight beats of 808 slides. Every pitch is a scale tone of `root`.
+ * Slide notes overlap the one before them so legato glide has a source.
+ */
 export function drillTrapPattern(root: number, scaleId: string | undefined): PatternNote[] {
   const scale = scaleById(scaleId)
   const pc = ((Math.round(root) % 12) + 12) % 12

@@ -10,7 +10,8 @@ import { patternHitTrack, transportPatternClips } from '../model/channelRack'
 import { rackLanesFor } from '../model/automation'
 import { DRUM_PADS, residentDrums } from '../model/drums'
 import { notePanGains } from './level'
-import { ATTACK_SEC, builtinLevel, drumLevel } from './liveStage'
+import { ATTACK_SEC, builtinAttackSec, builtinEnvelope, builtinLevel, drumLevel } from './liveStage'
+import { bassPlayerAttackMs } from '../players/settings'
 import { prepareClipNotes } from '../model/midiTools'
 import { normalizePadKit } from '../model/padMachine'
 import { renderQuantizedClip } from '../model/quantize'
@@ -435,9 +436,11 @@ async function mixVoice(
     addStereo(out, rendered, origin, origin, length, 0)
     return
   }
+  const bassMs = bassPlayerAttackMs(project, track)
+  const attackSec = bassMs == null ? ATTACK_SEC : builtinAttackSec(bassMs)
   notes.forEach((note, index) => {
     if (index % 16 === 0) shouldCancel?.()
-    mixBuiltin(out, note, rate, origin, length)
+    mixBuiltin(out, note, rate, origin, length, attackSec)
   })
 }
 
@@ -603,14 +606,13 @@ function chokeSeconds(
   return (soon - note.start) / rate
 }
 
-function mixBuiltin(out: Float32Array[], note: TimedNote, rate: number, origin: number, length: number) {
+function mixBuiltin(out: Float32Array[], note: TimedNote, rate: number, origin: number, length: number, attackSec = ATTACK_SEC) {
   const dur = Math.max(0.05, note.duration / rate)
   const total = Math.min(length + Math.round(rate), Math.ceil((dur + 0.03) * rate))
   const freq = 440 * 2 ** ((note.pitch + note.tune - 69) / 12)
   const peak = builtinLevel(note.velocity)
   const startCut = note.filter == null ? 2200 : Math.max(80, 200 + note.filter * 8000)
   const ramp = Math.min(0.3, dur)
-  const releaseAt = Math.max(0.05, dur)
   const filter = setBiquad('low', startCut, 1, rate)
   const pcm = new Float32Array(total)
   let phase = 0
@@ -620,9 +622,10 @@ function mixBuiltin(out: Float32Array[], note: TimedNote, rate: number, origin: 
     if (i % 8 === 0) setBiquad('low', cut, 1, rate, filter)
     phase += freq / rate
     const saw = 2 * ((phase % 1) - 0.5)
-    const gain = t < ATTACK_SEC
-      ? expSeg(t, 0, ATTACK_SEC, FLOOR, peak)
-      : expSeg(t, ATTACK_SEC, releaseAt, peak, FLOOR)
+    const env = builtinEnvelope(attackSec, dur)
+    const gain = t < env.rise
+      ? expSeg(t, 0, env.rise, FLOOR, peak)
+      : expSeg(t, env.rise, env.releaseAt, peak, FLOOR)
     pcm[i] = finite(tick(filter, saw) * gain)
   }
   const [left, right] = panPair(note.pan)

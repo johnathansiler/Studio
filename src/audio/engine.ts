@@ -57,7 +57,8 @@ import { publishNotice } from './core/notice'
 import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGesture, routeChangePlan, routeOf, type RouteSnapshot } from './core/driver'
 import { bufferHintOf, formatLatencyReadout, writeBufferHint, type BufferHint } from './core/buffer'
 import { contextAttempts } from './core/contextOptions'
-import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_CHUNK_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, clipSliceEnvelope, drumLevel, liveWhen, nextTimelineSample, placeNoteTime, scheduleDelaySeconds } from './liveStage'
+import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_CHUNK_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinAttackSec, builtinEnvelope, builtinLevel, clipSliceEnvelope, drumLevel, liveWhen, nextTimelineSample, placeNoteTime, scheduleDelaySeconds } from './liveStage'
+import { bassPlayerAttackMs } from '../players/settings'
 import { safetyCurve } from './level'
 import { fileDither } from './master/ditherPlan'
 import { holdFullScale, SAFETY_LOOK } from './master/safety'
@@ -5147,7 +5148,7 @@ export class AudioEngine {
     const previous = this.liveTrackId
     this.liveTrackId = trackId
     const strip = track ? this.strips.get(track.id) : undefined
-    if (strip) this.startBuiltin(ctx, strip, trackId, pitch, velocity, fine / 100)
+    if (strip) this.startBuiltin(ctx, strip, track, pitch, velocity, fine / 100)
     else this.liveNoteOn(pitch, velocity, -1, 0, fine ? { tune: fine / 100 } : undefined)
     this.liveTrackId = previous
   }
@@ -5222,8 +5223,15 @@ export class AudioEngine {
     this.liveOnAt.delete(`${trackId}:${Math.round(pitch)}`)
   }
 
-  private startBuiltin(ctx: AudioContext, strip: StripNodes, trackId: string, pitch: number, velocity: number, tune = 0) {
+  private attackSecFor(track: Track | null | undefined) {
+    if (!track || !this.project) return ATTACK_SEC
+    const ms = bassPlayerAttackMs(this.project, track)
+    return ms == null ? ATTACK_SEC : builtinAttackSec(ms)
+  }
+
+  private startBuiltin(ctx: AudioContext, strip: StripNodes, track: Track | null | undefined, pitch: number, velocity: number, tune = 0) {
     const when = liveWhen(ctx.currentTime)
+    const trackId = track?.id ?? 'live'
     const key = `${trackId}:${Math.round(pitch)}`
     this.stopBuiltin(key, when)
     while (this.liveBuiltins.length >= 16) {
@@ -5240,7 +5248,7 @@ export class AudioEngine {
     filter.frequency.exponentialRampToValueAtTime(900, when + 0.3)
     const peak = builtinLevel(velocity)
     gain.gain.setValueAtTime(0.0001, when)
-    gain.gain.exponentialRampToValueAtTime(peak, when + ATTACK_SEC)
+    gain.gain.exponentialRampToValueAtTime(peak, when + this.attackSecFor(track))
     osc.connect(filter)
     filter.connect(gain)
     gain.connect(strip.input)
@@ -5594,7 +5602,7 @@ export class AudioEngine {
   }
 
   /** Speaker-only sequence. `at` and `dur` are seconds from now. Never enters the cue. */
-  previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[]) {
+  previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[], attackSec = ATTACK_SEC) {
     this.stopPreview()
     const ctx = this.ctx
     const out = this.speakerSide()
@@ -5611,7 +5619,7 @@ export class AudioEngine {
       const dur = Math.max(0.05, Math.min(8, event.dur))
       const velocity = Math.max(0.05, Math.min(1, event.velocity ?? 0.7))
       if (event.drum) this.previewHit(ctx, bus, event.pitch, when, dur, velocity, stops)
-      else this.previewTone(ctx, bus, event.pitch, event.cents ?? 0, when, dur, velocity, stops)
+      else this.previewTone(ctx, bus, event.pitch, event.cents ?? 0, when, dur, velocity, stops, attackSec)
     }
     this.previewStops = stops
   }
@@ -5916,14 +5924,15 @@ export class AudioEngine {
     return true
   }
 
-  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
+  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[], attackSec = ATTACK_SEC) {
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.type = 'triangle'
     osc.frequency.value = 440 * 2 ** ((Math.round(pitch) + cents / 100 - 69) / 12)
+    const env = builtinEnvelope(attackSec, dur)
     gain.gain.setValueAtTime(0.0001, when)
-    gain.gain.exponentialRampToValueAtTime(builtinLevel(velocity), when + ATTACK_SEC)
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur)
+    gain.gain.exponentialRampToValueAtTime(builtinLevel(velocity), when + env.rise)
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + env.releaseAt)
     osc.connect(gain)
     gain.connect(bus)
     osc.start(when)
@@ -6126,9 +6135,10 @@ export class AudioEngine {
     filter.frequency.setValueAtTime(cut == null ? 2200 : Math.max(80, 200 + cut * 8000), when)
     filter.frequency.exponentialRampToValueAtTime(900, when + Math.min(0.3, dur))
     const peak = builtinLevel(note.velocity)
+    const env = builtinEnvelope(this.attackSecFor(track), dur)
     gain.gain.setValueAtTime(0.0001, when)
-    gain.gain.exponentialRampToValueAtTime(peak, when + ATTACK_SEC)
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.05, dur))
+    gain.gain.exponentialRampToValueAtTime(peak, when + env.rise)
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + env.releaseAt)
     osc.connect(filter)
     filter.connect(gain)
     const panNodes = connectNotePan(ctx, gain, strip.input, note.pan || 0)

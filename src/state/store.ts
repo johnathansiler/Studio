@@ -5476,6 +5476,7 @@ export class ProjectStore {
       let selected: { trackId: string; clipId: string; noteIds: string[] } | null = null
       for (const part of built.parts) {
         const placed = this.placePlayer(part, origin)
+        if (part.role === 'bass') this.applyBassPlayerAttack(settings.bassAttack)
         if (part.role === 'drums' || !selected) selected = placed
       }
       if (selected) {
@@ -5487,6 +5488,14 @@ export class ProjectStore {
       }
       this.toast(built.summary)
     })
+  }
+
+  /** Copy the bass-player Attack onto the Bass track's synth so live, playback, and render share it. */
+  private applyBassPlayerAttack(ms: number) {
+    const track = this.project.tracks.find((item) => item.type === 'midi' && (item.name === 'Bass' || item.midiClips.some((clip) => clip.name.endsWith('bass player'))))
+    const device = track?.rack?.devices.find((item) => item.kind === 'sub' || item.kind === 'fm' || item.kind === 'wave')
+    if (!device) return
+    device.params = { ...device.params, attack: ms }
   }
 
   setGenerator(patch: Partial<import('../generators/types').GeneratorSettings>, draft = false) {

@@ -47,6 +47,9 @@ export function Bass808Panel({
   const specs = DEVICE_PARAMS.bass808
   const scale = store.project.scale
   const pads = bassPadPitches(scale?.root ?? 0, scale?.scale)
+  const lowNote = noteLabel(pads[0] ?? 36)
+  const highNote = noteLabel(pads[pads.length - 1] ?? 48)
+  const rootPc = ((scale?.root ?? 0) % 12 + 12) % 12
   const wide = typeof window !== 'undefined' && window.innerWidth >= 720
   const zone = device?.zones[0]
   const loadedShot = BASS808_SHOTS.find((item) => item.name === (zone ? store.buffers.get(zone.bufferId)?.name : ''))?.id ?? ''
@@ -196,12 +199,14 @@ export function Bass808Panel({
           >
             Drill/Trap pattern
           </button>
-          <div className="bass-pads">
-            {pads.map((pitch) => (
+          <div className="bass-board">
+          <p className="bass-range">{lowNote} – {highNote}</p>
+          <div className="bass-pads" role="group" aria-label={`Bass pads ${lowNote} to ${highNote}`}>
+            {pads.map((pitch, index) => (
               <button
-                key={pitch}
+                key={`${index}-${pitch}`}
                 type="button"
-                className="bass-pad"
+                className={`bass-pad${((pitch % 12) + 12) % 12 === rootPc ? ' root' : ''}`}
                 aria-label={`Pad ${noteLabel(pitch)}`}
                 onPointerDown={(event) => {
                   event.preventDefault()
@@ -221,6 +226,7 @@ export function Bass808Panel({
                 {noteLabel(pitch)}
               </button>
             ))}
+          </div>
           </div>
           <div className="bass-keys" aria-label="Keys">
             {Array.from({ length: 13 }, (_, index) => 36 + index).filter((pitch) => ![1, 3, 6, 8, 10].includes(pitch % 12)).map((pitch) => (
@@ -254,7 +260,7 @@ export function Bass808Panel({
                   type="button"
                   className="black"
                   aria-label={`Key ${noteLabel(pitch)}`}
-                  style={{ left: `calc(${whiteBefore} * 12.5% - 9px)` }}
+                  style={{ left: `calc(${whiteBefore} * 12.5% - 20px)` }}
                   onPointerDown={(event) => {
                     event.preventDefault()
                     down(pitch)
