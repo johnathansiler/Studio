@@ -885,6 +885,7 @@ export function MyLibrary({
           </div>
           {variant === 'library' && (
             <LibraryAddSounds
+              part="button"
               open={addOpen}
               category={addCategory}
               bpm={addBpm}
@@ -1045,6 +1046,23 @@ export function MyLibrary({
             />
           )}
           </div>
+          {variant === 'library' && (
+            <LibraryAddSounds
+              part="form"
+              open={addOpen}
+              category={addCategory}
+              bpm={addBpm}
+              musicalKey={addKey}
+              message={addMessage}
+              busy={adding}
+              fileRef={addFiles}
+              onToggle={() => setAddOpen((open) => !open)}
+              onCategory={setAddCategory}
+              onBpm={setAddBpm}
+              onKey={setAddKey}
+              onSubmit={(event) => void submitAdds(event)}
+            />
+          )}
           <div className="library-recent-head">
             <p className="sound-count library-count" data-library-count={counted}>{countLabel}</p>
             {quick === 'recent' && recent.length > 0 && <button type="button" className="library-clear-recent" onClick={() => clearRecent()}>Clear recent</button>}
@@ -1263,6 +1281,7 @@ function memoryKeys(items: { id: string; legacyId?: string; library?: { key?: st
 }
 
 export function LibraryAddSounds({
+  part = 'all',
   open,
   category,
   bpm,
@@ -1276,6 +1295,8 @@ export function LibraryAddSounds({
   onKey,
   onSubmit,
 }: {
+  /** The pill stays in the sticky header. The form scrolls with the list so it cannot sit on the dock. */
+  part?: 'all' | 'button' | 'form'
   open: boolean
   category: string
   bpm: string
@@ -1289,21 +1310,27 @@ export function LibraryAddSounds({
   onKey: (value: string) => void
   onSubmit: (event: FormEvent) => void
 }) {
+  const button = (
+    <div className="library-add-row">
+      <button type="button" className="library-add-btn" aria-expanded={open} onClick={onToggle}>Add sounds</button>
+    </div>
+  )
+  const form = open ? (
+    <form className="library-add-form" data-add-sounds="open" onSubmit={onSubmit}>
+      <input ref={fileRef} type="file" accept=".wav,audio/wav,audio/wave,audio/x-wav" multiple aria-label="WAV files" />
+      <input aria-label="Sound category" placeholder="Category" value={category} onChange={(event) => onCategory(event.target.value)} />
+      <input aria-label="Sound BPM" inputMode="decimal" placeholder="BPM" value={bpm} onChange={(event) => onBpm(event.target.value)} />
+      <input aria-label="Sound key" placeholder="Key" value={musicalKey} onChange={(event) => onKey(event.target.value)} />
+      <button type="submit" className="library-add-btn" disabled={busy}>Upload</button>
+      {message ? <p className="sound-status">{message}</p> : null}
+    </form>
+  ) : null
+  if (part === 'button') return button
+  if (part === 'form') return form
   return (
     <>
-      <div className="library-add-row">
-        <button type="button" className="library-add-btn" aria-expanded={open} onClick={onToggle}>Add sounds</button>
-      </div>
-      {open && (
-        <form className="library-add-form" data-add-sounds="open" onSubmit={onSubmit}>
-          <input ref={fileRef} type="file" accept=".wav,audio/wav,audio/wave,audio/x-wav" multiple aria-label="WAV files" />
-          <input aria-label="Sound category" placeholder="Category" value={category} onChange={(event) => onCategory(event.target.value)} />
-          <input aria-label="Sound BPM" inputMode="decimal" placeholder="BPM" value={bpm} onChange={(event) => onBpm(event.target.value)} />
-          <input aria-label="Sound key" placeholder="Key" value={musicalKey} onChange={(event) => onKey(event.target.value)} />
-          <button type="submit" className="library-add-btn" disabled={busy}>Upload</button>
-          {message ? <p className="sound-status">{message}</p> : null}
-        </form>
-      )}
+      {button}
+      {form}
     </>
   )
 }
