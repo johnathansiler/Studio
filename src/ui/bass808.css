@@ -9,8 +9,12 @@
   color: var(--text, #eef3ea);
 }
 
-/* The shared overlay scrolls. This panel must not: Record, Stop, and Play stay put. */
+/* The shared overlay scrolls and covers the phone dock. This panel does neither. */
 [data-screen-overlay].bass808 {
+  overflow: hidden !important;
+}
+body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
+  bottom: var(--phone-chrome-bottom, 52px) !important;
   overflow: hidden !important;
 }
 
@@ -79,6 +83,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1 1 auto;
 }
 
 .bass808[data-tab="tone"] .bass-play,
@@ -96,14 +101,14 @@
 
 .bass-knobs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px 2px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px 0;
   justify-items: center;
 }
 
 .bass-knobs .kit-knob button {
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
 }
 
 .bass-sample {
@@ -149,9 +154,10 @@
 }
 
 .bass-keys {
+  position: relative;
   display: flex;
-  height: 72px;
-  min-height: 64px;
+  height: 96px;
+  min-height: 84px;
   gap: 2px;
   touch-action: none;
   flex: 0 0 auto;
@@ -160,6 +166,7 @@
 .bass-keys button {
   flex: 1;
   min-width: 0;
+  height: 100%;
   border-radius: 0 0 6px 6px;
   border: 1px solid #cfd6d0;
   background: #f4f7f2;
@@ -169,12 +176,17 @@
 }
 
 .bass-keys button.black {
+  position: absolute;
+  top: 0;
+  width: 22px;
+  min-width: 22px;
+  height: 58%;
+  flex: none;
+  z-index: 1;
   background: #1a120c;
   color: #f4f7f2;
   border-color: #1a120c;
-  margin-top: -8px;
-  height: 70%;
-  align-self: flex-start;
+  border-radius: 0 0 4px 4px;
 }
 
 .bass-keys button.on {
@@ -190,21 +202,20 @@
   .bass808[data-tab="both"] .bass-play {
     display: grid;
     grid-template-rows: auto auto auto;
-    align-content: start;
+    align-content: stretch;
     gap: 8px;
   }
   .bass808-body {
     display: grid;
     grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
-    align-items: start;
+    align-items: stretch;
   }
-  .bass-knobs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .bass-knobs .kit-knob button { width: 72px; height: 72px; }
+  .bass-knobs .kit-knob button { width: 68px; height: 68px; }
   .bass-pads { grid-template-rows: repeat(2, 96px); flex: none; }
 }
 
 @media (max-width: 420px) {
-  .bass-knobs .kit-knob button { width: 56px; height: 56px; }
+  .bass-knobs .kit-knob button { width: 52px; height: 52px; }
   .bass-knobs .kit-knob em,
   .bass-knobs .kit-knob small { font-size: 10px; }
 }

@@ -2001,6 +2001,12 @@ html[data-posture="tabletop"] .shell .master-sheet {
 }
 .touch-menu button { min-height: 44px; min-width: 64px; }
 .note.slide { outline: 1px dashed var(--amber); }
+.shell .slide-toggle,
+.shell.phone .slide-toggle {
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+}
 .note .note-slide,
 .shell.phone .note .note-slide {
   position: absolute;
