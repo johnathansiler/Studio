@@ -442,6 +442,12 @@ describe('drop prompt', () => {
     await offerLoopKeyShift(store, vocal.id, 'vocal-loop', { loop: true, catalogKey: 'A minor' })
     expect(store.keyShiftOffer).toBeNull()
 
+    const kit = placeLoop(store, audio, rate, 'Groove')
+    const kitClip = store.track(kit.trackId)!.clips.find((item) => item.id === kit.clipId)!
+    kitClip.soundCategory = 'drums'
+    await offerLoopKeyShift(store, kit.trackId, kit.clipId, { loop: true })
+    expect(store.keyShiftOffer).toBeNull()
+
     const drums = placeLoop(store, audio, rate, 'Drum loop')
     const drumClip = store.track(drums.trackId)!.clips.find((item) => item.id === drums.clipId)!
     drumClip.stretch!.mode = 'beats'

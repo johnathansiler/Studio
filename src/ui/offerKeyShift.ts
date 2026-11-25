@@ -1,3 +1,4 @@
+import { clipDeniesKey } from '../analysis/deniedKey'
 import { monoMix } from '../analysis/mix'
 import { isRecordedClip } from '../audio/recordTake'
 import { keyFromFilename, keyFromText } from '../library/musicalKey'
@@ -132,6 +133,7 @@ async function planLoopKeyShift(
       .map((channel) => channel.subarray(offset, Math.min(channel.length, offset + source)))
       .filter((channel) => channel.length > 0)
     if (!slices.length) return null
+    if (clipDeniesKey(clip)) return null
     const { detectKeyOffThread } = await import('../analysis/keyJob')
     let heard
     try {

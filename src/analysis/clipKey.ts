@@ -16,6 +16,8 @@
 import type { ClipHearing } from '../model/types'
 import { estimateKey, type KeyDetectOptions, type KeyProfile } from './keyEstimate'
 
+export { clipDeniesKey } from './deniedKey'
+
 export type { KeyDetectOptions, KeyProfile }
 
 export interface KeyCandidate {
@@ -273,15 +275,4 @@ export function hearingOf(key: KeyReading, tempo: TempoReading): ClipHearing {
     bpmConfidence: tempo.bpm > 0 ? tempo.confidence : 0,
     cents: Math.round(key.cents),
   }
-}
-
-/** Drum loops, one-shots, and noise are not given a key name. */
-export function clipDeniesKey(clip: { soundType?: string; soundRole?: string; soundCategory?: string }) {
-  const type = (clip.soundType ?? '').toLowerCase().replace(/[\s_]+/g, '-')
-  if (type === 'one-shot' || type === 'oneshot') return true
-  const role = (clip.soundRole ?? '').toLowerCase()
-  if (role.includes('drum')) return true
-  const category = (clip.soundCategory ?? '').toLowerCase()
-  if (category === 'drum' || category === 'drums' || category === 'kick' || category === 'snare' || category === 'hat' || category === 'hi-hat' || category === 'hihat' || category === 'clap' || category === 'percussion' || category === 'perc' || category === 'cymbal' || category === 'tom' || category === 'rim') return true
-  return false
 }
