@@ -15,6 +15,7 @@ const INSTRUMENT_WORDS: Record<string, string> = {
   synth: 'Synth',
   sampler: 'Sampler',
   '808': '808',
+  bass808: '808 Bass',
   'drum-machine': 'Beat Machine',
   library: 'Library',
   scaler: 'Scaler',

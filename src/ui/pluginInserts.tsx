@@ -178,6 +178,7 @@ export function insertChoices<T extends { id: string; name: string }>(entries: r
   return [
     { id: 'steps', name: 'Step Sequencer' },
     { id: 'pads', name: 'Beat Machine' },
+    { id: 'bass808', name: '808 Bass' },
     ...ordered.filter((item) => item.id !== 'pads' && item.id !== 'steps'),
   ]
 }
@@ -210,7 +211,7 @@ function pluginHost(store: ProjectStore, trackId: string | 'master', pluginId: s
 
 /** Instruments that addPlugin already opens. Focusing them again would toggle the face shut. */
 function opensOwnFace(pluginId: string) {
-  return pluginId === 'scaler' || pluginId === 'steps' || pluginId === 'synth' || insertsBeatMachine(pluginId)
+  return pluginId === 'scaler' || pluginId === 'steps' || pluginId === 'synth' || pluginId === 'bass808' || insertsBeatMachine(pluginId)
 }
 
 function closeMixSheet() {
@@ -262,11 +263,11 @@ export function clipInsertName(name: string, column: number) {
  * Synth, sampler, Scaler, and Beat Machine stay in that serial chain, so they are not labeled as skipped sources.
  */
 export function isInstrumentSource(plugin: { pluginId: string; params?: Record<string, number> }) {
-  return plugin.pluginId === 'steps'
+  return plugin.pluginId === 'steps' || plugin.pluginId === 'bass808'
 }
 
 /** These choices retarget through addPlugin when the clicked strip is not a MIDI track. */
-const RETARGET_IDS = new Set(['steps', 'scaler', 'synth'])
+const RETARGET_IDS = new Set(['steps', 'scaler', 'synth', 'bass808'])
 
 export function stripCanHost(store: ProjectStore, trackId: string | 'master', pluginId: string) {
   if (!RETARGET_IDS.has(pluginId) && !insertsBeatMachine(pluginId)) return true

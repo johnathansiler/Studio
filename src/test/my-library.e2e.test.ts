@@ -174,6 +174,30 @@ describe('my library on a phone', () => {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
       await page.route('**/*', async (route) => {
         const target = route.request().url()
+        if (target.includes('/api/library/upload-sign')) {
+          const header = route.request().headers()['x-library-key']
+          if (header !== 'harbor-key') {
+            await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'That passphrase does not unlock the library.' }) })
+            return
+          }
+          const body = route.request().postDataJSON() as { keys?: { key: string; size: number }[] }
+          const urls = (body.keys ?? []).map((item) => ({ key: item.key, url: `${url}/library-test/upload`, exists: false }))
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true, expiresIn: 900, urls }) })
+          return
+        }
+        if (target.includes('/api/library/catalog-append')) {
+          const header = route.request().headers()['x-library-key']
+          if (header !== 'harbor-key') {
+            await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'That passphrase does not unlock the library.' }) })
+            return
+          }
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true, added: 1, skipped: 0, version: 2, count: 7 }) })
+          return
+        }
+        if (target.includes('/library-test/upload') && route.request().method() === 'PUT') {
+          await route.fulfill({ status: 200, body: '' })
+          return
+        }
         if (target.includes('/api/library/sign')) {
           const header = route.request().headers()['x-library-key']
           if (header !== 'harbor-key') {
@@ -210,6 +234,31 @@ describe('my library on a phone', () => {
       await page.getByLabel('Library passphrase').fill('harbor-key')
       await page.getByRole('button', { name: 'Unlock', exact: true }).click()
       await page.getByLabel('Search my library').waitFor()
+      const addSounds = page.getByRole('button', { name: 'Add sounds', exact: true })
+      await addSounds.waitFor()
+      const addBox = await addSounds.boundingBox()
+      expect(addBox && addBox.height <= 32 && addBox.height >= 20).toBe(true)
+      await addSounds.click()
+      await page.getByLabel('Sound category').fill('bass')
+      await page.getByLabel('Sound BPM').fill('96')
+      await page.getByLabel('Sound key').fill('A minor')
+      expect(await page.getByLabel('WAV files').getAttribute('accept')).toContain('wav')
+      await page.getByLabel('WAV files').setInputFiles({ name: 'Finger.wav', mimeType: 'audio/wav', buffer: wav })
+      const putDone = page.waitForRequest((req) => req.method() === 'PUT' && req.url().includes('/library-test/upload'))
+      const appendDone = page.waitForRequest((req) => req.url().includes('/api/library/catalog-append') && req.method() === 'POST')
+      await page.getByRole('button', { name: 'Upload', exact: true }).click()
+      const put = await putDone
+      const append = await appendDone
+      expect(Buffer.from(put.postDataBuffer()!).equals(wav)).toBe(true)
+      const appended = append.postDataJSON() as { entries: { key: string; category: string; bit_depth?: number; bpm: number }[] }
+      expect(appended.entries[0].key).toBe('audio/bass/Finger.wav')
+      expect(appended.entries[0].category).toBe('bass')
+      expect(appended.entries[0].bpm).toBe(96)
+      expect(appended.entries[0].bit_depth).toBe(16)
+      expect(append.headers()['x-library-key']).toBe('harbor-key')
+      await page.getByLabel('Search my library').waitFor()
+      await addSounds.click()
+      await page.getByLabel('Sound category').waitFor({ state: 'hidden' })
       await page.getByRole('button', { name: 'Play 139 Trap Click C' }).click()
       const kept = page.locator('[data-browse-id="sound:Drums/139_Trap_Click_C.wav"].is-kept')
       await kept.waitFor()
@@ -335,6 +384,10 @@ describe('my library on a phone', () => {
       await page.screenshot({ path: '/opt/cursor/artifacts/key_results_fold.png' })
       await page.getByRole('button', { name: 'Clear all', exact: true }).click()
       await page.getByLabel('Search my library').fill('')
+      await page.locator('[data-lane="oneshots"]').click()
+      await page.locator('[data-drum-chip="bass"]').waitFor()
+      expect(await page.locator('[data-drum-chip="bass"]').innerText()).toMatch(/Bass/)
+      await page.locator('[data-lane="oneshots"]').click()
       await page.setViewportSize({ width: 384, height: 844 })
       await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.getByRole('button', { name: 'Type', exact: true }).click()

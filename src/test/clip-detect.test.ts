@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { renderStretch } from '../audio/stretch/engine'
-import { detectKey, detectTempo, hearingOf } from '../analysis/clipKey'
+import { clipDeniesKey, detectKey, detectTempo, hearingOf } from '../analysis/clipKey'
 import { handleClipDetect } from '../analysis/clipWorker'
 import { altReadout, keyReadout, relateTempo, tempoForSong, tempoReadout } from '../model/clipHearing'
 import { migrateProject } from '../model/schema'
@@ -277,15 +277,19 @@ describe('clip key and tempo', () => {
     expect(response.hearing?.root).toBeNull()
   })
 
-  it('does not name a drum-category clip or noise, even when the audio is tonal', () => {
+  it('does not name a drum loop that is filed as drums, or a noise clip', () => {
     const rate = 22050
     const audio = progression(MAJOR_CADENCE, 0, rate, 0)
+    expect(detectKey(audio, rate).clear).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'drums' })).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'noise' })).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'piano' })).toBe(false)
     for (const sound of [
-      { id: 'kit', soundCategory: 'drums' },
-      { id: 'hiss', soundCategory: 'noise' },
+      { id: 'beat', category: 'drums' },
+      { id: 'hiss', category: 'noise' },
     ]) {
       const response = handleClipDetect({
-        id: sound.id === 'kit' ? 10 : 11,
+        id: sound.id === 'beat' ? 10 : 11,
         type: 'clip-detect',
         sampleRate: rate,
         channels: [audio],
@@ -301,7 +305,7 @@ describe('clip key and tempo', () => {
           gain: 1,
           source: 'import',
           soundType: 'loop',
-          soundCategory: sound.soundCategory,
+          soundCategory: sound.category,
         },
         tempo: 120,
       })

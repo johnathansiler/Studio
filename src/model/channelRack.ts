@@ -157,7 +157,7 @@ export function emptyPatternLoopSamples(project: Project): number {
  * Offline renders stay on the clips that were actually placed.
  */
 export function transportPatternClips(project: Project, live: boolean): PatternClip[] {
-  const clips = project.patternClips ?? []
+  const clips = (project.patternClips ?? []).filter((clip) => !clip.muted)
   if (!live || rackPlayMode(project) !== 'pattern') return clips
   const pattern = activeBeatPattern(project)
   if (!pattern) return clips

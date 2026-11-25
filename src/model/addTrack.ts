@@ -3,7 +3,7 @@ import { makeTrack, TRACK_COLORS, type Track, type TrackInstrument } from './typ
 export type AddKind = 'audio' | 'midi' | 'drum' | 'bus'
 
 /** One tap in the Add Track menu. `audio` is the older name for a Vocal track. */
-export type TrackChoice = 'instrument' | 'steps' | 'pads' | 'vocal' | 'loop' | 'audio'
+export type TrackChoice = 'instrument' | 'bass808' | 'steps' | 'pads' | 'vocal' | 'loop' | 'audio'
 
 export const TRACK_CHOICES: { id: TrackChoice; name: string; detail: string }[] = [
   { id: 'instrument', name: 'Instrument', detail: 'Play keys' },
@@ -79,6 +79,7 @@ function label(spec: AddTrackSpec) {
   if (spec.instrument === 'pads') return 'Beat Machine'
   if (spec.instrument === 'library') return 'Library'
   if (spec.instrument === 'sampler') return 'Sampler'
+  if (spec.instrument === 'bass808') return '808 Bass'
   if (spec.instrument === '808') return '808'
   if (spec.instrument === 'drum-machine') return 'Drums'
   if (spec.instrument === 'synth') return 'Synth'

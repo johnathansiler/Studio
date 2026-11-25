@@ -6,6 +6,9 @@ import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
 import { queueClipStretch } from '../audio/stretch/commit'
 import { clampLockBpm, clipTempoPatch, tempoDrivesLength } from '../model/clipTempo'
 import { TUNE_INSERT_PRESET } from '../audio/plugins/autoTune'
+import { applyBass808, bassDevice } from '../audio/bass808/track'
+import { drillTrapPattern } from '../audio/bass808/pattern'
+import { shotById, shotRoot } from '../audio/bass808/shots'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
   detectRoot,
@@ -144,7 +147,9 @@ import { canArmAudio, clipWantsLoopTrack } from '../model/audioKind'
 import { applyHarmonizeToProject, transposeMidiClip, type HarmonizeMove } from '../model/harmonize'
 import { clampInputDb, isRecordedClip } from '../audio/recordTake'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
+import { LibrarySamplesMissing } from '../audio/arrangeSources'
 import { applyFreeze } from '../audio/bounce'
+import { audioName, installRender, renderClipToAudio, RenderCancelled, RenderEmpty, withNormalize, type RenderedAudio, type RenderPlace, type RenderTarget } from '../audio/renderToAudio'
 import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead, stampMidiAtBeat } from '../model/playheadPlace'
 import { TEMPO_MAX, TEMPO_MIN } from '../model/tap'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
@@ -287,6 +292,8 @@ export class ProjectStore {
   scalerTrackId: string | null = null
   /** Open Pads panel. The kit itself is on the track. */
   padsTrackId: string | null = null
+  /** Open 808 Bass panel. The device itself is on the track rack. */
+  bassTrackId: string | null = null
   /** Track whose Step Sequencer panel is open. */
   stepTrackId: string | null = null
   /** Clip the pad recorder is printing into. A zero loop span grows with the take. Not saved. */
@@ -348,6 +355,21 @@ export class ProjectStore {
   private takeNotes: { trackId: string; clipId: string; noteId: string }[] = []
   /** Clip settings. Not saved. */
   clipSheet = false
+  /** Bounce a MIDI clip or pattern to audio. Not saved. */
+  renderAudio: {
+    target: RenderTarget
+    name: string
+    includeEffects: boolean
+    normalize: boolean
+    place: RenderPlace
+    running: boolean
+    progress: number
+    warnDb: number | null
+    error: string | null
+  } | null = null
+  private pendingRender: RenderedAudio | null = null
+  private renderToken = 0
+  private renderPaint = 0
   /** Selected song section. Not saved. */
   sectionId: string | null = null
   /** Selected tempo-map point, by its quarter-note beat. Not saved. */
@@ -423,6 +445,7 @@ export class ProjectStore {
     this.patchTrackId = null
     this.scalerTrackId = null
     this.stepTrackId = null
+    this.bassTrackId = null
     if (this.padsTrackId === trackId) return
     this.padsTrackId = trackId
     this.emit()
@@ -535,6 +558,7 @@ export class ProjectStore {
     this.editGeneration += 1
     fn()
     this.journal.seal(this.project, label)
+    this.pruneRenderBuffers()
     this.emit()
   }
 
@@ -590,6 +614,7 @@ export class ProjectStore {
     const step = this.journal.undo(this.project)
     if (!step) return
     this.quantizePreview = null
+    this.pruneRenderBuffers()
     this.toast(`Undid: ${step.label}`)
     this.emit()
   }
@@ -601,6 +626,7 @@ export class ProjectStore {
     const step = this.journal.redo(this.project)
     if (!step) return
     this.quantizePreview = null
+    this.pruneRenderBuffers()
     this.toast(`Redid: ${step.label}`)
     this.emit()
   }
@@ -1044,22 +1070,28 @@ export class ProjectStore {
         if (sound) current.instrument = sound
       }
       if (instrument === 'pads') current.padKit = normalizePadKit(current.padKit ?? this.project.padKit)
+      if (instrument === 'bass808') applyBass808(current)
     })
     if (instrument === 'scaler') {
       this.rackTrackId = null
       this.patchTrackId = null
       this.padsTrackId = null
+      this.bassTrackId = null
       this.scalerTrackId = trackId
       this.emit()
     } else if (instrument === 'pads') {
       this.rackTrackId = null
       this.patchTrackId = null
       this.scalerTrackId = null
+      this.bassTrackId = null
       this.padsTrackId = trackId
       this.emit()
+    } else if (instrument === 'bass808') {
+      this.showBass(trackId)
     } else {
       if (this.scalerTrackId === trackId) this.scalerTrackId = null
       if (this.padsTrackId === trackId) this.padsTrackId = null
+      if (this.bassTrackId === trackId) this.bassTrackId = null
       this.emit()
     }
   }
@@ -1102,6 +1134,84 @@ export class ProjectStore {
     if (!this.padsTrackId) return
     this.padsTrackId = null
     this.emit()
+  }
+
+  /** Open the 808 Bass panel. Installing the instrument opens it again. */
+  showBass(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (track.instrument !== 'bass808' || !bassDevice(track)) {
+      this.setTrackInstrument(trackId, 'bass808')
+      return
+    }
+    this.rackTrackId = null
+    this.patchTrackId = null
+    this.scalerTrackId = null
+    this.stepTrackId = null
+    this.padsTrackId = null
+    this.bassTrackId = trackId
+    this.emit()
+  }
+
+  closeBass() {
+    if (!this.bassTrackId) return
+    this.bassTrackId = null
+    this.emit()
+  }
+
+  /** One tap drops an editable slide pattern in the song key. */
+  insertBassPattern(trackId: string, startBeat = 0) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      applyBass808(track)
+      const scale = this.project.scale
+      const notes = drillTrapPattern(scale?.root ?? 0, scale?.scale).map((note) => ({
+        id: uid('note'),
+        pitch: note.pitch,
+        startBeat: note.startBeat,
+        durationBeats: note.durationBeats,
+        velocity: note.velocity,
+        ...(note.slide ? { slide: true } : {}),
+      }))
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: 'Drill / Trap',
+        startBeat: Math.max(0, startBeat),
+        durationBeats: 8,
+        notes,
+      }
+      track.midiClips.push(clip)
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+    })
+  }
+
+  /** Load one catalog 808 one-shot and tune it so its root note is that MIDI pitch. */
+  async loadBassShot(trackId: string, shotId: string) {
+    const shot = shotById(shotId)
+    if (!shot || !bassDevice(this.track(trackId))) return
+    const [{ fetchSoundBytes }, { soundFileUrl }, { decodeSoundBytes }] = await Promise.all([
+      import('../sounds/cache'),
+      import('../sounds/source'),
+      import('../sounds/place'),
+    ])
+    const decoded = await decodeSoundBytes(await fetchSoundBytes(soundFileUrl(shot.path)))
+    const root = shotRoot(shot)
+    this.mutate(() => {
+      const device = bassDevice(this.track(trackId))
+      if (!device) return
+      const id = uid('smp')
+      this.buffers.set(id, {
+        id,
+        name: shot.name,
+        sampleRate: decoded.sampleRate,
+        channels: decoded.channels.map((channel) => Float32Array.from(channel)),
+      })
+      device.zones = [{ id: uid('zone'), bufferId: id, root, lo: 0, hi: 127, loopStart: 0, loopEnd: 0, tune: 0 }]
+      device.params = { ...device.params, source: 1, root }
+    })
   }
 
   trackKit(trackId: string): PadProgram {
@@ -2399,6 +2509,14 @@ export class ProjectStore {
       this.padsTrackId = null
       this.keyboardMidi = false
     }
+    if (made[0]?.instrument === 'bass808') {
+      applyBass808(made[0])
+      this.bassTrackId = made[0].id
+      this.padsTrackId = null
+      this.scalerTrackId = null
+      this.rackTrackId = null
+      this.stepTrackId = null
+    }
     if (made[0]?.instrument === 'pads') {
         made[0].padKit = normalizePadKit(made[0].padKit)
         if (!made[0].plugins.some((plugin) => isDrumsPlugin(plugin))) made[0].plugins.push(createPlugin('pads'))
@@ -2675,6 +2793,11 @@ export class ProjectStore {
         else this.emit()
         return
       }
+      if (plugin?.pluginId === 'bass808' && trackId !== 'master') {
+        this.pluginFocus = null
+        this.showBass(trackId)
+        return
+      }
     }
     this.pluginFocus = trackId && pluginId ? { trackId, pluginId } : null
     this.emit()
@@ -2720,6 +2843,10 @@ export class ProjectStore {
     }
     if (pluginId === 'synth') {
       this.insertSynthPlugin(trackId)
+      return
+    }
+    if (pluginId === 'bass808') {
+      this.insertBass808(trackId)
       return
     }
     this.mutate(() => {
@@ -2785,6 +2912,18 @@ export class ProjectStore {
     this.setTrackInstrument(hostId, 'synth')
     this.patchTrackId = null
     this.openPatch(hostId)
+  }
+
+  /** 808 Bass is an insert. Adding it opens the bass panel. */
+  private insertBass808(trackId: string | 'master') {
+    let host = trackId !== 'master' ? this.track(trackId) : null
+    if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null
+    if (!host) {
+      const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'bass808', input: 'mic', channels: 1, armed: false, choice: 'bass808' })
+      if (ids[0]) this.showBass(ids[0])
+      return
+    }
+    this.setTrackInstrument(host.id, 'bass808')
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
@@ -4474,6 +4613,185 @@ export class ProjectStore {
     }, 'Convert to MIDI')
   }
 
+  /** Open the render sheet for the MIDI clip or Beat Machine pattern selected on Arrange. */
+  openRenderForSelection() {
+    if (this.selectedPatternClipId) {
+      this.openRenderAudio({ kind: 'pattern', clipId: this.selectedPatternClipId })
+      return
+    }
+    if (this.selectedMidiClipId) {
+      for (const track of this.project.tracks) {
+        if (track.midiClips.some((clip) => clip.id === this.selectedMidiClipId)) {
+          this.openRenderAudio({ kind: 'midi', trackId: track.id, clipId: this.selectedMidiClipId })
+          return
+        }
+      }
+    }
+    this.toast('Select a MIDI clip first.', 'warn')
+  }
+
+  openRenderTrack(trackId: string) {
+    this.openRenderAudio({ kind: 'track', trackId })
+  }
+
+  openRenderAudio(target: RenderTarget) {
+    const name = this.renderTargetName(target)
+    if (!name) {
+      this.toast('Nothing on that track to render.', 'warn')
+      return
+    }
+    this.renderToken += 1
+    this.pendingRender = null
+    this.renderAudio = {
+      target,
+      name,
+      includeEffects: true,
+      normalize: false,
+      place: 'mute',
+      running: false,
+      progress: 0,
+      warnDb: null,
+      error: null,
+    }
+    this.emit()
+  }
+
+  setRenderChoice(patch: Partial<Pick<NonNullable<ProjectStore['renderAudio']>, 'includeEffects' | 'normalize' | 'place'>>) {
+    if (!this.renderAudio || this.renderAudio.running || this.renderAudio.warnDb != null) return
+    Object.assign(this.renderAudio, patch)
+    this.emit()
+  }
+
+  cancelRenderAudio() {
+    this.renderToken += 1
+    this.pendingRender = null
+    this.renderAudio = null
+    this.emit()
+  }
+
+  /** Offline bounce. One undo places the audio clip and mutes, replaces, or keeps the source. */
+  async runRenderAudio() {
+    const ui = this.renderAudio
+    if (!ui || ui.running || ui.warnDb != null) return
+    const token = ++this.renderToken
+    ui.running = true
+    ui.progress = 0.02
+    ui.error = null
+    this.emit()
+    try {
+      const result = await renderClipToAudio({
+        project: this.project,
+        assets: this.buffers,
+        target: ui.target,
+        includeEffects: ui.includeEffects,
+        normalize: false,
+        shouldCancel: () => {
+          if (token !== this.renderToken) throw new RenderCancelled()
+        },
+        onProgress: (ratio) => {
+          if (token !== this.renderToken || !this.renderAudio) return
+          const now = Date.now()
+          if (ratio < 1 && now - this.renderPaint < 80) return
+          this.renderPaint = now
+          this.renderAudio.progress = ratio
+          this.emit()
+        },
+      })
+      if (token !== this.renderToken) return
+      if (result.clipped && !ui.normalize) {
+        this.pendingRender = result
+        ui.running = false
+        ui.progress = 1
+        ui.warnDb = result.peakDb
+        this.emit()
+        return
+      }
+      this.commitRendered(ui.normalize ? withNormalize(result) : result, ui.place)
+    } catch (error) {
+      if (token !== this.renderToken || error instanceof RenderCancelled) return
+      if (!this.renderAudio) return
+      this.renderAudio.running = false
+      this.renderAudio.progress = 0
+      const message = error instanceof RenderEmpty
+        ? 'Nothing to render on that clip.'
+        : error instanceof LibrarySamplesMissing
+          ? error.message
+          : 'Could not render that audio.'
+      this.renderAudio.error = message
+      this.toast(message, 'warn')
+      this.emit()
+    }
+  }
+
+  /** Place a render that peaked above 0 dBFS, with or without normalize. Still one undo. */
+  confirmRendered(normalize: boolean) {
+    const pending = this.pendingRender
+    const ui = this.renderAudio
+    if (!pending || !ui) return
+    this.pendingRender = null
+    this.commitRendered(normalize ? withNormalize(pending) : pending, ui.place)
+  }
+
+  private commitRendered(result: RenderedAudio, place: RenderPlace) {
+    if (this.remoteFollow) return
+    const id = uid('rend')
+    this.buffers.set(id, {
+      id,
+      name: audioName(result.name),
+      sampleRate: result.sampleRate,
+      channels: result.channels,
+      pcmBits: 24,
+    })
+    let placed: { trackId: string; clipId: string } | null = null
+    this.mutate(() => {
+      placed = installRender(this.project, result, place, id)
+      if (!placed) return
+      this.selectedTrackId = placed.trackId
+      this.selectedClipId = placed.clipId
+      this.selectedClipIds = [placed.clipId]
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedPatternClipId = null
+      this.selectedPatternClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    }, 'Render to audio')
+    this.pendingRender = null
+    this.renderAudio = null
+    if (result.clipped) this.toast(`Rendered. Peaks at ${result.peakDb.toFixed(1)} dB will clip in the 24-bit file.`, 'warn')
+    else this.toast(`Rendered ${audioName(result.name)}`)
+  }
+
+  private renderTargetName(target: RenderTarget) {
+    if (target.kind === 'midi') {
+      for (const track of this.project.tracks) {
+        const clip = track.midiClips.find((item) => item.id === target.clipId)
+        if (clip) return clip.name || 'MIDI'
+      }
+      return null
+    }
+    if (target.kind === 'pattern') {
+      const clip = this.project.patternClips?.find((item) => item.id === target.clipId)
+      if (!clip) return null
+      return this.project.beats?.patterns.find((item) => item.id === clip.patternId)?.name || 'Pattern'
+    }
+    const track = this.project.tracks.find((item) => item.id === target.trackId)
+    if (!track) return null
+    const midi = track.midiClips.some((clip) => !clip.slotOnly && clip.scene == null)
+    const pattern = (this.project.patternClips ?? []).some((clip) => clip.trackId === track.id && clip.scene == null && !clip.suppressed)
+    return midi || pattern ? track.name || 'Track' : null
+  }
+
+  private pruneRenderBuffers() {
+    const ids = [...this.buffers.keys()].filter((id) => id.startsWith('rend_'))
+    if (!ids.length) return
+    const hay = JSON.stringify(this.project)
+    for (const id of ids) {
+      if (hay.includes(`"${id}"`) || this.journal.mentions(id)) continue
+      this.buffers.delete(id)
+    }
+  }
+
   addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0, coalesce = false) {
     if (!notes.length) return
     const write = () => {
@@ -5993,6 +6311,7 @@ export class ProjectStore {
     this.savedGeneration = 0
     if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
     if (this.padsTrackId && !project.tracks.some((track) => track.id === this.padsTrackId && track.type === 'midi')) this.padsTrackId = null
+    if (this.bassTrackId && !project.tracks.some((track) => track.id === this.bassTrackId && track.type === 'midi')) this.bassTrackId = null
     if (this.stepTrackId && !project.tracks.some((track) => track.id === this.stepTrackId)) this.stepTrackId = null
     this.padRecord = null
     this.sync.rebase(this.project)
@@ -6096,7 +6415,10 @@ export class ProjectStore {
     this.padsTrackId = null
     const opening = this.rackTrackId !== trackId
     this.rackTrackId = opening ? trackId : null
-    if (opening) this.patchTrackId = null
+    if (opening) {
+      this.patchTrackId = null
+      this.bassTrackId = null
+    }
     this.rackFlip = false
     this.rackDetail = false
     this.emit()
@@ -6130,6 +6452,7 @@ export class ProjectStore {
     }
     this.scalerTrackId = null
     this.padsTrackId = null
+    this.bassTrackId = null
     if (this.patchTrackId === trackId) {
       this.patchTrackId = null
       this.emit()
@@ -6375,6 +6698,7 @@ export class ProjectStore {
     if (!track || track.type !== 'midi' || !plugin?.steps) return
     this.project.beats = plugin.steps
     this.padsTrackId = null
+    this.bassTrackId = null
     this.scalerTrackId = null
     this.rackTrackId = null
     this.patchTrackId = null
@@ -6408,6 +6732,10 @@ export class ProjectStore {
     }
     if (choice === 'steps') {
       const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false, choice })
+      return ids[0] ?? null
+    }
+    if (choice === 'bass808') {
+      const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'bass808', input: 'mic', channels: 1, armed: false, choice: 'bass808' })
       return ids[0] ?? null
     }
     const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false, choice: 'instrument' })

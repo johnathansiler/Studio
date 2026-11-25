@@ -7,7 +7,7 @@ import type { LibraryEntry } from './types'
  * The catalog keys are not rewritten and nothing is uploaded.
  */
 
-export type DrumId = 'kick' | 'snare' | 'clap' | 'hat' | 'cymbal' | 'tom' | 'perc' | '808' | 'rim' | 'shaker' | 'fx'
+export type DrumId = 'kick' | 'snare' | 'clap' | 'hat' | 'cymbal' | 'tom' | 'perc' | '808' | 'bass' | 'rim' | 'shaker' | 'fx'
 export type DrumSub = '' | 'closed' | 'open' | 'crash' | 'ride'
 export type LoopId = 'drums' | 'bass' | 'keys' | 'guitar' | 'synth' | 'pad' | 'lead' | 'strings' | 'brass' | 'vocal' | 'fx'
 export type FastSort = 'name' | 'bpm' | 'key'
@@ -58,6 +58,7 @@ const DRUMS: { id: DrumId; label: string; short: string }[] = [
   { id: 'tom', label: 'Tom', short: 'Tm' },
   { id: 'perc', label: 'Perc', short: 'Pc' },
   { id: '808', label: '808', short: '808' },
+  { id: 'bass', label: 'Bass', short: 'Ba' },
   { id: 'rim', label: 'Rim', short: 'Rm' },
   { id: 'shaker', label: 'Shaker', short: 'Sh' },
   { id: 'fx', label: 'FX', short: 'Fx' },
@@ -100,6 +101,7 @@ const DRUM_CATEGORY: Record<string, DrumClass> = {
   percussion: { id: 'perc', sub: '' },
   '808': { id: '808', sub: '' },
   '808 bass': { id: '808', sub: '' },
+  bass: { id: 'bass', sub: '' },
   rim: { id: 'rim', sub: '' },
   rimshot: { id: 'rim', sub: '' },
   shaker: { id: 'shaker', sub: '' },
@@ -330,7 +332,7 @@ export function previewStretchMode(entry: Pick<LibraryEntry, 'name' | 'key' | 'c
   const loop = classifyLoop(entry)
   if (loop === 'drums') return 'beats'
   const drum = classifyDrum(entry)
-  if (drum && drum.id !== '808') return 'beats'
+  if (drum && drum.id !== '808' && drum.id !== 'bass') return 'beats'
   return 'pro'
 }
 

@@ -98,8 +98,14 @@ export function tableFromAudio(channel: Float32Array): Float32Array[] {
   return frames
 }
 
+const macroMemo = new WeakMap<Record<string, number>, Record<string, number>>()
+
 export function renderTone(kind: DeviceKind, ctx: ToneCtx) {
-  const params = applyMacros(ctx.params, DEVICE_PARAMS[kind])
+  let params = macroMemo.get(ctx.params)
+  if (!params) {
+    params = applyMacros(ctx.params, DEVICE_PARAMS[kind])
+    macroMemo.set(ctx.params, params)
+  }
   const shaped = { ...ctx, params }
   if (kind === 'fm') return finish(shaped, fm(shaped))
   if (kind === 'wave') return finish(shaped, wavetable(shaped))

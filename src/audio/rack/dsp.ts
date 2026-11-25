@@ -15,6 +15,7 @@ import {
   type RackState,
   type VoiceRef,
 } from '../../model/rack'
+import { bassNote, bassStep, createBassState, type Bass808State } from '../bass808/voice'
 import { knockNoteOn, knockStep, knockVoice } from './knock'
 import { renderTone, tableFromAudio, type PlayVoice, type SynthState } from './synth'
 import { drumStepIndex } from '../../model/steps'
@@ -115,6 +116,13 @@ export class RackRuntime {
   private frame = 0
   private tables = new Map<string, Float32Array[]>()
   private knockDelta = 0
+  private bass: Bass808State = createBassState()
+  private bassPending: { pitch: number; vel: number; slide: boolean }[] = []
+  private bassId = ''
+  private bassBuffer: Float32Array | null = null
+  private bassRate = 48000
+  private bassFrame = -1
+  private bassOut = 0
 
   constructor(sampleRate: number) {
     this.sampleRate = sampleRate
@@ -122,6 +130,7 @@ export class RackRuntime {
 
   note(pitch: number, vel: number, polyphony = 8, slide = false) {
     const midi = Math.round(pitch)
+    this.bassPending.push({ pitch: midi, vel, slide })
     if (vel <= 0.0001) {
       this.held = this.held.filter((note) => note !== midi)
       for (const voice of this.voices) if (voice.note === midi) voice.released = true
@@ -169,6 +178,9 @@ export class RackRuntime {
   allOff() {
     this.held = []
     for (const voice of this.voices) voice.released = true
+    this.bassPending = []
+    this.bass.released = true
+    this.bass.held = []
   }
 
   render(rack: RackState, frames: number, tempo: number, quality: 'full' | 'eco', buffers: Map<string, SampleBuffer>, lanes?: RackAutomation[], beat = 0) {
@@ -181,20 +193,30 @@ export class RackRuntime {
       extra.released = true
       extra.releaseMs = 0.3
     }
+    this.bassLookup = buffers
+    this.flushBass(rack)
     const cyclic = audioCycle(rack.cables)
     const audioCables = cyclic ? [] : rack.cables.filter((cable) => cable.toPort === 'audio' || cable.toPort === 'audio2')
     const modCables = rack.cables.filter((cable) => cable.toPort !== 'audio' && cable.toPort !== 'audio2')
     const beatSamples = Math.max(1, (60 / Math.max(1, tempo)) * this.sampleRate)
+    const wiring = rack.devices.map((device) => audioCables.filter((cable) => cable.to === device.id))
+    const widened = rack.devices.some((device) => device.kind === 'knock')
+    const moving = modCables.length > 0 || (lanes?.some((lane) => lane.points.length) ?? false)
+    const held = moving
+      ? null
+      : new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat)]))
+    const produced = new Map<string, number>()
     for (let i = 0; i < frames; i++) {
       const time = this.sampleTime + i
       this.frame = time
       this.fillControl(rack, time, beatSamples, tempo)
-      const params = new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat + i / beatSamples)]))
-      const produced = new Map<string, number>()
+      const params = held ?? new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat + i / beatSamples)]))
+      produced.clear()
       let bus = 0
       this.knockDelta = 0
-      for (const device of rack.devices) {
-        const wired = audioCables.filter((cable) => cable.to === device.id)
+      for (let d = 0; d < rack.devices.length; d++) {
+        const device = rack.devices[d]
+        const wired = wiring[d]
         const input = wired.length
           ? wired.reduce((sum, cable) => sum + (produced.get(cable.from) || 0) * cable.amount, 0)
           : bus
@@ -206,7 +228,6 @@ export class RackRuntime {
         else if (isEffect(device.kind)) bus = sample
       }
       const out = san(bus)
-      const widened = rack.devices.some((device) => device.kind === 'knock')
       left[i] = out
       right[i] = widened ? san(bus + this.knockDelta) : out * 0.98
     }
@@ -270,6 +291,7 @@ export class RackRuntime {
 
   private device(device: RackDevice, params: Record<string, number>, input: number, limit: number, buffers: Map<string, SampleBuffer>, quality: 'full' | 'eco', time: number, beatSamples: number) {
     if (device.kind === 'knock') return this.knock(device, params, buffers, quality, input, beatSamples)
+    if (device.kind === 'bass808') return this.bass808(device, params)
     if (device.kind === 'sub' || device.kind === 'fm' || device.kind === 'wave') return this.tone(device, params, quality, buffers)
     if (device.kind === 'sampler') return this.sampler(device, params, limit, buffers)
     if (device.kind === 'drum') return this.drum(device, params, buffers, time, beatSamples)
@@ -287,6 +309,39 @@ export class RackRuntime {
       return sample
     }
     return input
+  }
+
+  private flushBass(rack: RackState) {
+    const device = rack.devices.find((item) => item.kind === 'bass808')
+    const pending = this.bassPending
+    this.bassPending = []
+    this.bassId = device?.id ?? ''
+    this.bassFrame = -1
+    if (!device) {
+      this.bassBuffer = null
+      return
+    }
+    const zone = device.zones[0]
+    const asset = zone ? this.bassLookup?.get(zone.bufferId) : undefined
+    this.bassBuffer = asset?.channels[0] ?? null
+    this.bassRate = asset?.sampleRate || this.sampleRate
+    // Same ordering as renderBass808: a key release lands before the note that replaces it.
+    pending.sort((a, b) => (a.vel <= 0.0001 ? 0 : 1) - (b.vel <= 0.0001 ? 0 : 1))
+    for (const event of pending) {
+      bassNote(this.bass, event.pitch, event.vel, event.slide, device.params, this.sampleRate)
+    }
+  }
+
+  /** Set in render() so flush can see the sample map without threading it through note(). */
+  private bassLookup: Map<string, SampleBuffer> | null = null
+
+  private bass808(device: RackDevice, params: Record<string, number>) {
+    if (device.id !== this.bassId) return 0
+    if (this.bassFrame !== this.frame) {
+      this.bassFrame = this.frame
+      this.bassOut = bassStep(this.bass, params, this.sampleRate, this.bassBuffer, this.bassRate)
+    }
+    return this.bassOut
   }
 
   private knock(device: RackDevice, params: Record<string, number>, buffers: Map<string, SampleBuffer>, quality: 'full' | 'eco', side: number, beatSamples: number) {
@@ -509,25 +564,78 @@ export class RackRuntime {
   }
 }
 
-export function renderNotes(rack: RackState, events: NoteEvent[], sampleRate: number, tempo: number, length: number, buffers = new Map<string, SampleBuffer>(), lanes?: RackAutomation[]) {
+export function renderNotes(rack: RackState, events: NoteEvent[], sampleRate: number, tempo: number, length: number, buffers = new Map<string, SampleBuffer>(), lanes?: RackAutomation[], originBeat = 0) {
+  return renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, null, originBeat) as Float32Array[]
+}
+
+/**
+ * Same block loop as `renderNotes`, yielding so a long bounce can paint progress.
+ * The worklet and this loop both call `RackRuntime.render` on 128-sample blocks.
+ */
+export async function renderNotesPaced(
+  rack: RackState,
+  events: NoteEvent[],
+  sampleRate: number,
+  tempo: number,
+  length: number,
+  buffers = new Map<string, SampleBuffer>(),
+  lanes?: RackAutomation[],
+  tick?: (ratio: number) => Promise<void> | void,
+  originBeat = 0,
+): Promise<Float32Array[]> {
+  return await renderNoteBlocks(rack, events, sampleRate, tempo, length, buffers, lanes, tick ?? null, originBeat)
+}
+
+function renderNoteBlocks(
+  rack: RackState,
+  events: NoteEvent[],
+  sampleRate: number,
+  tempo: number,
+  length: number,
+  buffers: Map<string, SampleBuffer>,
+  lanes: RackAutomation[] | undefined,
+  tick: ((ratio: number) => Promise<void> | void) | null,
+  originBeat: number,
+): Float32Array[] | Promise<Float32Array[]> {
   const runtime = new RackRuntime(sampleRate)
-  const ordered = events.slice().sort((a, b) => a.sample - b.sample || b.vel - a.vel)
+  // Same order the worklet keeps: earlier notes were queued first, so a note-off
+  // lands before the next note-on on the same sample. Velocity order releases the new note.
+  const ordered = events.map((event, index) => ({ event, index })).sort((a, b) => a.event.sample - b.event.sample || a.index - b.index).map((item) => item.event)
   const left = new Float32Array(length)
   const right = new Float32Array(length)
   let cursor = 0
   let offset = 0
   const block = 128
-  while (offset < length) {
-    while (cursor < ordered.length && ordered[cursor].sample <= offset) {
-      runtime.note(ordered[cursor].pitch, ordered[cursor].vel, rack.polyphony, !!ordered[cursor].slide)
-      cursor += 1
+  const pace = Math.max(block, Math.round(sampleRate * 0.5))
+  let since = 0
+  const step = () => {
+    while (offset < length) {
+      while (cursor < ordered.length && ordered[cursor].sample <= offset) {
+        runtime.note(ordered[cursor].pitch, ordered[cursor].vel, rack.polyphony, !!ordered[cursor].slide)
+        cursor += 1
+      }
+      const next = ordered[cursor]?.sample ?? length
+      const count = Math.min(block, length - offset, Math.max(1, next - offset))
+      const beat = originBeat + (offset / sampleRate) * (tempo / 60)
+      const rendered = runtime.render(rack, count, tempo, 'full', buffers, lanes, beat)
+      left.set(rendered[0], offset)
+      right.set(rendered[1], offset)
+      offset += count
+      since += count
+      if (tick && since >= pace) return true
     }
-    const next = ordered[cursor]?.sample ?? length
-    const count = Math.min(block, length - offset, Math.max(1, next - offset))
-    const rendered = runtime.render(rack, count, tempo, 'full', buffers, lanes, (offset / sampleRate) * (tempo / 60))
-    left.set(rendered[0], offset)
-    right.set(rendered[1], offset)
-    offset += count
+    return false
   }
-  return [left, right]
+  if (!tick) {
+    step()
+    return [left, right]
+  }
+  const run = async () => {
+    while (step()) {
+      since = 0
+      await tick(length > 0 ? offset / length : 1)
+    }
+    return [left, right]
+  }
+  return run()
 }

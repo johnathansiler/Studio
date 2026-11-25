@@ -1,0 +1,210 @@
+.bass808 {
+  --accent: #73c48f;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #101714;
+  color: var(--text, #eef3ea);
+}
+
+/* The shared overlay scrolls. This panel must not: Record, Stop, and Play stay put. */
+[data-screen-overlay].bass808 {
+  overflow: hidden !important;
+}
+
+.bass808-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line, #24352c);
+  flex: 0 0 auto;
+}
+
+.bass808-bar h2 {
+  margin: 0;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.bass808-bar .bass-close {
+  margin-left: auto;
+}
+
+.bass808-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px 0;
+  flex: 0 0 auto;
+}
+
+.bass808-tabs button,
+.bass-quiet,
+.shell.phone .bass808 .bass-quiet,
+.shell.phone .bass808-tabs button {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted, #8aa094);
+  font-size: 13px;
+}
+
+.bass808-tabs button[aria-selected="true"],
+.bass-quiet.on {
+  color: #eef3ea;
+  border-color: #31443a;
+  background: #1c2b24;
+}
+
+.bass808-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.bass-tone,
+.bass-play {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bass808[data-tab="tone"] .bass-play,
+.bass808[data-tab="play"] .bass-tone {
+  display: none;
+}
+
+.bass-presets,
+.bass-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.bass-knobs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 2px;
+  justify-items: center;
+}
+
+.bass-knobs .kit-knob button {
+  width: 64px;
+  height: 64px;
+}
+
+.bass-sample {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.bass-sample select {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  background: #121a16;
+  color: inherit;
+  border: 1px solid #31443a;
+  border-radius: 8px;
+}
+
+.bass-pads {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(44px, 1fr));
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 88px;
+  touch-action: none;
+}
+
+.bass-pad {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid #31443a;
+  background: #18231d;
+  color: inherit;
+  font-size: 15px;
+  touch-action: none;
+}
+
+.bass-pad.on {
+  background: #73c48f;
+  color: #102117;
+}
+
+.bass-keys {
+  display: flex;
+  height: 72px;
+  min-height: 64px;
+  gap: 2px;
+  touch-action: none;
+  flex: 0 0 auto;
+}
+
+.bass-keys button {
+  flex: 1;
+  min-width: 0;
+  border-radius: 0 0 6px 6px;
+  border: 1px solid #cfd6d0;
+  background: #f4f7f2;
+  color: #17211c;
+  font-size: 11px;
+  touch-action: none;
+}
+
+.bass-keys button.black {
+  background: #1a120c;
+  color: #f4f7f2;
+  border-color: #1a120c;
+  margin-top: -8px;
+  height: 70%;
+  align-self: flex-start;
+}
+
+.bass-keys button.on {
+  background: #73c48f;
+  color: #102117;
+}
+
+@media (min-width: 720px) {
+  .bass808-tabs { display: none; }
+  .bass808[data-tab="play"] .bass-tone,
+  .bass808[data-tab="both"] .bass-tone { display: flex; }
+  .bass808[data-tab="tone"] .bass-play,
+  .bass808[data-tab="both"] .bass-play {
+    display: grid;
+    grid-template-rows: auto auto auto;
+    align-content: start;
+    gap: 8px;
+  }
+  .bass808-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+    align-items: start;
+  }
+  .bass-knobs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .bass-knobs .kit-knob button { width: 72px; height: 72px; }
+  .bass-pads { grid-template-rows: repeat(2, 96px); flex: none; }
+}
+
+@media (max-width: 420px) {
+  .bass-knobs .kit-knob button { width: 56px; height: 56px; }
+  .bass-knobs .kit-knob em,
+  .bass-knobs .kit-knob small { font-size: 10px; }
+}

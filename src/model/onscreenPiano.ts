@@ -4,6 +4,7 @@ const TRACK_INSTRUMENTS = new Set([
   'synth',
   'sampler',
   '808',
+  'bass808',
   'drum-machine',
   'library',
   'scaler',
@@ -19,6 +20,7 @@ const PLUGIN_INSTRUMENTS = new Set([
   'drums',
   'drum-machine',
   '808',
+  'bass808',
 ])
 
 export interface PianoTrack {

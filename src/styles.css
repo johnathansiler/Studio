@@ -679,6 +679,19 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .add-choice strong { display: block; font-size: 16px; }
 .add-choice small { display: block; color: var(--muted); font-size: 13px; }
+.add-instrument { display: flex; flex-direction: column; gap: 6px; }
+.add-sub {
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 12px 8px 52px;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 640;
+}
 .step-sequencer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #101614; }
 .step-sequencer-bar {
   display: flex; align-items: center; gap: 8px; position: relative; z-index: 8;
@@ -1988,6 +2001,38 @@ html[data-posture="tabletop"] .shell .master-sheet {
 }
 .touch-menu button { min-height: 44px; min-width: 64px; }
 .note.slide { outline: 1px dashed var(--amber); }
+.note .note-slide,
+.shell.phone .note .note-slide {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 10px;
+  line-height: 16px;
+  opacity: 0.45;
+}
+.note.slide .note-slide { opacity: 1; font-weight: 760; }
+.slide-line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.slide-line line {
+  stroke: var(--amber, #e0a15a);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
 .slide-flag { position: sticky; top: 4px; left: 4px; z-index: 2; min-height: 36px; }
 .knock-pop {
   position: fixed; inset: 0; z-index: 60; background: #101714; color: var(--text);
