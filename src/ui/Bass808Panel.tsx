@@ -55,7 +55,6 @@ export function Bass808Panel({
   const lowNote = noteLabel(pads[0] ?? 36)
   const highNote = noteLabel(pads[pads.length - 1] ?? 48)
   const rootPc = ((scale?.root ?? 0) % 12 + 12) % 12
-  const wide = typeof window !== 'undefined' && window.innerWidth >= 720
   const keys = useKeyStart('bass808', 36, 13)
   const keySlide = useKeySlide(keys.start, 32)
   const keyDrag = useRef({ x: 0, y: 0 })
@@ -121,7 +120,7 @@ export function Bass808Panel({
   const knobs = KNOBS.map((id) => specs.find((item) => item.id === id)).filter((item): item is NonNullable<typeof item> => !!item)
 
   return (
-    <div className="bass808" data-bass808="open" data-screen-overlay="" data-tab={wide ? 'both' : tab} role="dialog" aria-label="808 Bass">
+    <div className="bass808" data-bass808="open" data-screen-overlay="" data-tab={tab} role="dialog" aria-label="808 Bass">
       <header className="bass808-bar">
         <h2>808 Bass</h2>
         {onPiano && <PianoRollButton onClick={onPiano} />}
@@ -201,16 +200,8 @@ export function Bass808Panel({
           </label>
         </section>
         <section className="bass-play" aria-label="Play">
-          <button
-            type="button"
-            className="bass-quiet"
-            onClick={() => store.insertBassPattern(track.id, 0)}
-          >
-            Drill/Trap pattern
-          </button>
           <div className="bass-board">
-          <p className="bass-range">{lowNote} – {highNote}</p>
-          <div className="bass-pads" role="group" aria-label={`Bass pads ${lowNote} to ${highNote}`}>
+          <div className="bass-pads" role="group" aria-label={`Bass pads ${lowNote} – ${highNote}`}>
             {pads.map((pitch, index) => (
               <button
                 key={`${index}-${pitch}`}
@@ -238,6 +229,13 @@ export function Bass808Panel({
           </div>
           </div>
           <div className="bass-key-shift">
+            <button
+              type="button"
+              className="bass-quiet"
+              onClick={() => store.insertBassPattern(track.id, 0)}
+            >
+              Drill/Trap pattern
+            </button>
             <button type="button" className="bass-quiet key-step" aria-label="Semitone down" title="Lower the keys by one step." disabled={keys.start <= 0} onClick={() => keys.move(-1)}>&lt;</button>
             <span aria-live="polite">{noteName(keys.start)}</span>
             <button type="button" className="bass-quiet key-step" aria-label="Semitone up" title="Raise the keys by one step." disabled={keys.start >= 115} onClick={() => keys.move(1)}>&gt;</button>

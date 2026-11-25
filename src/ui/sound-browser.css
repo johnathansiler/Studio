@@ -910,7 +910,7 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .fast-jump {
   position: sticky;
   top: var(--library-sticky-h, 0px);
-  width: 28px;
+  width: 44px;
   height: min(46vh, 420px);
   margin-left: auto;
   display: flex;
@@ -922,8 +922,10 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 }
 
 .fast-jump button {
-  width: 26px;
-  min-height: 22px;
+  width: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  height: 40px;
   padding: 0;
   border: 0;
   border-radius: 6px;

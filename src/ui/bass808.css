@@ -49,6 +49,8 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
 .bass808-tabs button,
 .bass-quiet,
 .shell.phone .bass808 .bass-quiet,
+.shell.phone .bass808 .bass-pad,
+.shell.phone .bass808 .bass-keys button,
 .shell.phone .bass808-tabs button {
   min-width: 40px;
   min-height: 40px;
@@ -82,10 +84,12 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
 .bass-play {
   min-height: 0;
   min-width: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .bass808[data-tab="tone"] .bass-play,
@@ -96,9 +100,17 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
 .bass-presets,
 .bass-modes {
   display: flex;
-  flex-wrap: wrap;
+  flex-flow: row nowrap;
   gap: 4px;
   align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.bass-presets > button,
+.bass-modes > button {
+  flex: 0 0 auto;
 }
 
 .bass-knobs {
@@ -108,9 +120,20 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   justify-items: center;
 }
 
+.bass-knobs {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: center;
+  overflow: hidden;
+}
 .bass-knobs .kit-knob button {
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
+}
+.bass-knobs .kit-knob em,
+.bass-knobs .kit-knob small {
+  font-size: 10px;
+  line-height: 12px;
 }
 
 .bass-sample {
@@ -118,6 +141,7 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   gap: 6px;
   align-items: center;
   min-width: 0;
+  flex: 0 0 auto;
 }
 
 .bass-sample select {
@@ -137,29 +161,27 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
-}
-
-.bass-range {
-  margin: 0;
-  flex: 0 0 auto;
-  color: var(--muted, #8aa094);
-  font-size: 12px;
-  letter-spacing: 0.02em;
+  overflow: hidden;
 }
 
 .bass-pads {
   display: grid;
-  grid-template-columns: repeat(4, minmax(40px, 1fr));
-  grid-template-rows: repeat(4, minmax(40px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 4px;
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
   touch-action: none;
 }
 
 .bass-pad {
-  min-width: 40px;
-  min-height: 40px;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
   border-radius: 10px;
   border: 1px solid #31443a;
   background: #18231d;
@@ -181,7 +203,17 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 0 0 auto;
+  flex: 0 0 40px;
+  height: 40px;
+  min-height: 40px;
+  overflow: hidden;
+}
+.bass-key-shift > button:first-child {
+  flex: 1 1 auto;
+  min-width: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .bass-key-shift span {
   min-width: 2.4ch;
@@ -201,11 +233,13 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
 .bass-keys {
   position: relative;
   display: flex;
-  height: 72px;
-  min-height: 72px;
+  height: 44px;
+  min-height: 40px;
+  max-height: 44px;
   gap: 2px;
   touch-action: none;
-  flex: 0 0 auto;
+  flex: 0 0 44px;
+  overflow: hidden;
   transition: transform 150ms ease;
 }
 
@@ -240,34 +274,4 @@ body:has(.shell.phone) [data-bass808='open'][data-screen-overlay] {
 .bass-keys button.on {
   background: #73c48f;
   color: #102117;
-}
-
-@media (min-width: 720px) {
-  .bass808-tabs { display: none; }
-  .bass808[data-tab="play"] .bass-tone,
-  .bass808[data-tab="both"] .bass-tone { display: flex; }
-  .bass808[data-tab="tone"] .bass-play,
-  .bass808[data-tab="both"] .bass-play {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    align-content: stretch;
-    gap: 8px;
-    height: 100%;
-    min-height: 0;
-  }
-  .bass808-body {
-    display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
-    grid-template-rows: minmax(0, 1fr);
-    align-items: stretch;
-  }
-  .bass-knobs .kit-knob button { width: 68px; height: 68px; }
-  .bass-board { height: 100%; }
-  .bass-pads { height: 100%; }
-}
-
-@media (max-width: 420px) {
-  .bass-knobs .kit-knob button { width: 52px; height: 52px; }
-  .bass-knobs .kit-knob em,
-  .bass-knobs .kit-knob small { font-size: 10px; }
 }

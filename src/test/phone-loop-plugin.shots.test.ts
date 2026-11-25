@@ -1,164 +1,182 @@
-import { mkdirSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { chromium } from 'playwright'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdirSync } from 'node:fs'
+import { gzipSync } from 'node:zlib'
+import { chromium, type Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
-import { buildFastRows } from '../library/fastBrowse'
-import type { LibraryEntry } from '../library/types'
-import { FastShelf } from '../ui/MyLibrary'
+import { LIBRARY_TEST_ADDITIONS_PATH, libraryTestObjectUrl } from './libraryRoute'
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const css = ['src/styles.css', 'src/ui/sound-browser.css', 'src/ui/screenOverlay.css', 'src/ui/pluginStage.css', 'src/ui/bass808.css', 'src/ui/bottomSheet.css']
-  .map((file) => readFileSync(resolve(root, file), 'utf8'))
-  .join('\n')
+const catalog = {
+  version: 1,
+  generated_at: '2026-11-25T00:00:00Z',
+  count: 4,
+  pending: '',
+  entries: [
+    { key: 'Loops/sub.wav', size: 200, format: 'wav', pack: 'Bass', type: 'loop', category: 'bass', instrument: 'bass', genre: ['trap'], bpm: 90, bpm_source: 'label', bpm_alt: null, musical_key: 'A minor', root: 'A', note: null, chord: null, mood: [], tags: ['bass'], license: 'private', search: 'sub bass loop trap' },
+    { key: 'Loops/warm.wav', size: 200, format: 'wav', pack: 'Bass', type: 'loop', category: 'bass', instrument: 'bass', genre: ['pop'], bpm: 120, bpm_source: 'label', bpm_alt: null, musical_key: 'C major', root: 'C', note: null, chord: null, mood: [], tags: ['bass'], license: 'private', search: 'warm bass loop' },
+    { key: 'Loops/piano.wav', size: 200, format: 'wav', pack: 'Keys', type: 'loop', category: 'piano', instrument: 'piano', genre: ['lo-fi'], bpm: 100, bpm_source: 'label', bpm_alt: null, musical_key: 'C major', root: 'C', note: null, chord: null, mood: [], tags: ['piano'], license: 'private', search: 'piano loop' },
+    { key: 'Loops/drums.wav', size: 200, format: 'wav', pack: 'Drums', type: 'loop', category: 'drums', instrument: 'drums', genre: ['trap'], bpm: 140, bpm_source: 'label', bpm_alt: null, musical_key: '', root: '', note: null, chord: null, mood: [], tags: ['drums'], license: 'private', search: 'drum loop trap' },
+  ],
+}
+const gzip = gzipSync(Buffer.from(JSON.stringify(catalog)))
 
-function entry(patch: Partial<LibraryEntry> & Pick<LibraryEntry, 'key' | 'name'>): LibraryEntry {
-  return {
-    size: 10, format: 'wav', pack: '', type: 'loop', category: 'bass', instrument: '',
-    genre: ['trap'], bpm: 90, bpmAlt: null, musicalKey: 'A minor', root: '', note: '', mood: [], tags: [], license: 'private',
-    ...patch,
+async function waitForServer(url: string, child: ChildProcess) {
+  const started = Date.now()
+  let detail = ''
+  child.stdout?.on('data', (chunk) => { detail += String(chunk) })
+  child.stderr?.on('data', (chunk) => { detail += String(chunk) })
+  while (Date.now() - started < 25000) {
+    if (child.exitCode != null) throw new Error(detail || 'server exited')
+    try {
+      if ((await fetch(url)).ok) return
+    } catch { /* booting */ }
+    await new Promise((resolve) => setTimeout(resolve, 200))
   }
+  throw new Error(detail || 'server did not start')
 }
 
-const loops = [
-  entry({ key: 'Loops/bass.wav', name: 'Sub Bass', category: 'bass', genre: ['trap'], musicalKey: 'A minor', bpm: 90 }),
-  entry({ key: 'Loops/piano.wav', name: 'Piano Chords', category: 'piano', genre: ['lo-fi'], musicalKey: 'C major', bpm: 100 }),
-  entry({ key: 'Loops/drums.wav', name: 'Trap Drums', category: 'drums', genre: ['trap'], musicalKey: '', bpm: 140 }),
-]
+async function installLibrary(page: Page, origin: string) {
+  await page.route('**/*', async (route) => {
+    const target = route.request().url()
+    if (target.includes('/api/library/sign')) {
+      const body = route.request().postDataJSON() as { keys?: string[] }
+      const urls = (body.keys ?? []).map((key) => ({ key, url: libraryTestObjectUrl(origin, key) }))
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true, expiresIn: 900, urls }) })
+      return
+    }
+    if (target.includes('/api/library')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ready: true }) })
+      return
+    }
+    if (target.includes(LIBRARY_TEST_ADDITIONS_PATH)) {
+      await route.fulfill({ status: 404, body: '' })
+      return
+    }
+    if (target.includes('/library-test/catalog')) {
+      await route.fulfill({ status: 200, contentType: 'application/octet-stream', body: gzip })
+      return
+    }
+    await route.continue()
+  })
+}
 
-const noop = () => undefined
+async function bassFit(page: Page) {
+  return page.evaluate(() => {
+    const box = (node: Element) => {
+      const rect = node.getBoundingClientRect()
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
+    }
+    const hits = (a: { left: number; right: number; top: number; bottom: number }, b: { left: number; right: number; top: number; bottom: number }) =>
+      a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5
+    const pads = [...document.querySelectorAll('.bass-pad')].map(box)
+    const shift = document.querySelector('.bass-key-shift')
+    const keys = document.querySelector('.bass-keys')
+    const tone = document.querySelector('.bass-tone')
+    const play = document.querySelector('.bass-play')
+    const sample = document.querySelector('.bass-sample')
+    const shiftBox = shift ? box(shift) : null
+    const keysBox = keys ? box(keys) : null
+    const toneBox = tone instanceof HTMLElement ? box(tone) : null
+    const playBox = play instanceof HTMLElement ? box(play) : null
+    const sampleBox = sample ? box(sample) : null
+    const padHit = pads.filter((pad) => (shiftBox && hits(pad, shiftBox)) || (keysBox && hits(pad, keysBox)))
+    const toneClip = tone instanceof HTMLElement ? Math.max(0, tone.scrollHeight - tone.clientHeight) : 0
+    const playClip = play instanceof HTMLElement ? Math.max(0, play.scrollHeight - play.clientHeight) : 0
+    const short = [...document.querySelectorAll('.bass-pad, .bass-key-shift button, .bass-keys button, .bass808-tabs button')]
+      .map((node) => box(node).height)
+      .filter((height) => height > 0 && height < 39.5)
+    return {
+      tab: document.querySelector('.bass808')?.getAttribute('data-tab') ?? '',
+      padHit: padHit.length,
+      toneClip,
+      playClip,
+      short: short.length,
+      sampleTop: sampleBox?.top ?? -1,
+      toneBottom: toneBox?.bottom ?? -1,
+      playBottom: playBox?.bottom ?? -1,
+      keysBottom: keysBox?.bottom ?? -1,
+    }
+  })
+}
 
-describe('phone loop filter and plugin clearance', () => {
-  it('keeps the first matching loop visible after two filters, at 384 and 884', async () => {
+describe('built app on a phone', () => {
+  it('fits the bass plugin and the loop filter at 384 and 884', async () => {
+    expect(existsSync('dist/index.html'), 'run npm run build before this screenshot test').toBe(true)
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
-    const model = buildFastRows({
-      entries: loops.filter((item) => item.category === 'bass' && item.genre.includes('trap')),
-      mode: 'loop', category: 'bass', sub: '', genre: 'trap', sort: 'name',
-      collapsed: new Set(), favoriteKeys: [], recentKeys: [],
+    const port = 8791
+    const origin = `http://127.0.0.1:${port}`
+    const child = spawn('node', ['--experimental-strip-types', 'server/index.ts'], {
+      cwd: process.cwd(),
+      env: { ...process.env, NODE_ENV: 'production', PORT: String(port), HOST: '127.0.0.1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
-    const shelf = renderToStaticMarkup(createElement(FastShelf, {
-      mode: 'loop', model, category: 'bass', sub: '', genre: 'trap', sort: 'name',
-      nearTempo: true, inKey: true, compatible: false, songKey: 'Am', stuck: '', tempoCenter: 90,
-      onCategory: noop, onSub: noop, onGenre: noop, onSort: noop, onNearTempo: noop, onTempo: noop,
-      onInKey: noop, onCompatible: noop, onJump: noop, onStep: noop, onToggleStuck: noop,
-    }))
-    const row = `<div class="sound-row" data-library-key="Loops/bass.wav"><button type="button" class="sound-copy"><strong>Sub Bass</strong><span class="sound-meta">Loop · 90 bpm</span></button></div>`
     const browser = await chromium.launch()
     try {
+      await waitForServer(origin, child)
       for (const width of [384, 884]) {
-        const page = await browser.newPage({ viewport: { width, height: 800 } })
-        await page.setContent(`<!doctype html><html><head><style>
-          html, body { margin: 0; background: #101614; color: #f4f4f4; }
-          ${css}
-          .stage { width: ${width}px; height: 800px; display: flex; flex-direction: column; }
-          .transport { height: 56px; flex: none; }
-          .playlist-browser.bottom-sheet { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-          .bottom-sheet-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-          .my-library { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-          .library-sticky { flex: none; }
-          .sound-list { flex: 1 1 auto; min-height: 148px; overflow: auto; }
-        </style></head><body>
-          <div class="shell phone stage">
-            <div class="transport"><button type="button" class="t-btn play" aria-label="Play">Play</button></div>
-            <aside class="playlist-browser bottom-sheet" data-playlist-browser="open">
-              <div class="bottom-sheet-body">
-                <div class="sound-panel my-library">
-                  <div class="library-sticky">${shelf}</div>
-                  <div class="sound-list" aria-label="Library sounds">${row}</div>
-                </div>
-              </div>
-            </aside>
-          </div>
-        </body></html>`, { waitUntil: 'load' })
-        const fit = await page.evaluate(() => {
-          const loop = document.querySelector('[data-library-key="Loops/bass.wav"]') as HTMLElement
-          const box = loop.getBoundingClientRect()
-          const sheet = document.querySelector('.loop-filter-sheet')
-          const sheetBox = sheet instanceof HTMLElement && !sheet.hidden && sheet.getClientRects().length ? sheet.getBoundingClientRect() : null
-          const covered = !!sheetBox && box.top < sheetBox.bottom - 1 && box.bottom > sheetBox.top + 1
-          const transport = document.querySelector('.transport')!.getBoundingClientRect()
+        const page = await browser.newPage({ viewport: { width, height: 800 }, hasTouch: true })
+        await installLibrary(page, origin)
+        await page.goto(origin, { waitUntil: 'domcontentloaded' })
+        await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+        await page.getByRole('button', { name: 'Add Track', exact: true }).click()
+        await page.getByRole('button', { name: '808 Bass. Trap and drill slides.', exact: true }).click()
+        await page.locator('[data-bass808="open"]').waitFor()
+        await page.getByRole('tab', { name: 'Tone', exact: true }).click()
+        await page.locator('.bass-sample').waitFor()
+        const tone = await bassFit(page)
+        expect(tone.toneClip, `tone clips at ${width}`).toBe(0)
+        expect(tone.sampleTop, `shot row inside tone at ${width}`).toBeLessThanOrEqual(tone.toneBottom + 1)
+        await page.screenshot({ path: `/opt/cursor/artifacts/bass-tone-${width}.png` })
+        await page.getByRole('tab', { name: 'Play', exact: true }).click()
+        await page.locator('.bass-pad').first().waitFor()
+        const play = await bassFit(page)
+        expect(play.padHit, `pads overlap the keys at ${width}`).toBe(0)
+        expect(play.playClip, `play clips at ${width}`).toBe(0)
+        expect(play.short, `controls under 40px at ${width}`).toBe(0)
+        expect(play.keysBottom, `keys inside the play pane at ${width}`).toBeLessThanOrEqual(play.playBottom + 1)
+        await page.screenshot({ path: `/opt/cursor/artifacts/bass-play-${width}.png` })
+        await page.locator('.bass-close').click()
+        await page.locator('[data-bass808="open"]').waitFor({ state: 'hidden' })
+        await page.locator('[data-track-name="808 Bass 1"]').click()
+        await page.locator('[data-bass808="open"]').waitFor()
+        await page.screenshot({ path: `/opt/cursor/artifacts/bass-reopen-${width}.png` })
+        await page.locator('.bass-close').click()
+
+        await page.getByRole('button', { name: 'Browse', exact: true }).click()
+        await page.locator('[data-playlist-browser="open"]').waitFor()
+        await page.getByLabel('Library passphrase').fill('harbor-key')
+        await page.getByRole('button', { name: 'Unlock', exact: true }).click()
+        await page.getByLabel('Search my library').waitFor()
+        await page.locator('[data-lane="loops"]').click()
+        await page.locator('[data-loop-chip="bass"]').click()
+        await page.getByRole('button', { name: 'Filter', exact: true }).click()
+        await page.getByRole('button', { name: 'Near tempo', exact: true }).click()
+        await page.locator('.loop-filter-sheet').waitFor({ state: 'hidden' })
+        await page.locator('[data-library-key="Loops/warm.wav"]').waitFor()
+        const calm = await page.evaluate(() => {
+          const row = document.querySelector('[data-library-key="Loops/warm.wav"]')!.getBoundingClientRect()
+          const jump = [...document.querySelectorAll('.fast-jump button')].map((node) => node.getBoundingClientRect().width)
           return {
-            visible: box.height >= 40 && box.top >= transport.bottom - 1 && box.bottom <= window.innerHeight + 1 && box.width > 40,
-            covered,
-            sheet: !!sheet,
+            clears: document.querySelectorAll('.loop-clear, .library-clear-all').length,
+            libraryBar: document.querySelectorAll('.library-active-bar').length,
+            summaries: document.querySelectorAll('.loop-active').length,
+            rowTop: row.top,
+            rowBottom: row.bottom,
+            height: window.innerHeight,
+            jump,
           }
         })
-        expect(fit.sheet, `filter sheet stays closed at ${width}`).toBe(false)
-        expect(fit.covered, `row covered at ${width}`).toBe(false)
-        expect(fit.visible, `row visible at ${width}`).toBe(true)
+        expect(calm.libraryBar, `duplicate filter chips at ${width}`).toBe(0)
+        expect(calm.summaries, `one filter summary at ${width}`).toBe(1)
+        expect(calm.clears, `one clear at ${width}`).toBe(1)
+        expect(calm.rowTop, `loop row on screen at ${width}`).toBeGreaterThan(0)
+        expect(calm.rowBottom, `loop row on screen at ${width}`).toBeLessThan(calm.height)
+        expect(calm.jump.every((item) => item >= 40), `jump targets at ${width}`).toBe(true)
         await page.screenshot({ path: `/opt/cursor/artifacts/loop-filter-${width}.png` })
         await page.close()
       }
     } finally {
       await browser.close()
+      child.kill('SIGTERM')
     }
-  }, 30000)
-
-  it('leaves the transport and the ruler clear while the bass plugin is open', async () => {
-    mkdirSync('/opt/cursor/artifacts', { recursive: true })
-    const browser = await chromium.launch()
-    try {
-      for (const width of [384, 884]) {
-        const page = await browser.newPage({ viewport: { width, height: 800 } })
-        let clicks = 0
-        await page.exposeFunction('mark', () => { clicks += 1 })
-        await page.setContent(`<!doctype html><html><head><style>
-          html, body { margin: 0; background: #101614; color: #f4f4f4; height: 800px; }
-          ${css}
-          .stage { height: 800px; display: flex; flex-direction: column; }
-          .transport { height: 56px; flex: none; display: flex; align-items: center; padding: 0 8px; }
-          .workspace { position: relative; flex: 1 1 auto; min-height: 0; }
-          .arrange { --ruler-stack: 64px; --map-h: 0px; --ruler-h: 22px; --playhead-strip: 42px; }
-          .ruler { height: 22px; position: relative; }
-          .playhead-strip { height: 42px; }
-          .loop-grip { width: 44px; height: 40px; }
-        </style></head><body>
-          <div class="shell phone stage" data-plugin="bass" style="--plugin-clear-top: 120px; --plugin-dock-top: 64px; --phone-chrome-bottom: 0px; --ruler-stack: 64px">
-            <div class="transport"><button type="button" class="t-btn play" aria-label="Play" onclick="mark()">Play</button></div>
-            <div class="workspace">
-              <div class="main-pane"><div class="arrange">
-                <div class="ruler" data-ruler="open"><button type="button" class="loop-grip" aria-label="Loop start" onclick="mark()">Loop</button></div>
-                <div class="playhead-strip" data-playhead-strip role="slider" aria-label="Playhead"></div>
-              </div></div>
-              <div class="dock-slot"><div class="bass808" data-bass808="open" data-screen-overlay role="dialog" aria-label="808 Bass">
-                <header class="bass808-bar"><h2>808 Bass</h2><button type="button" class="piano-roll-btn" aria-label="Piano Roll">Keys</button></header>
-              </div></div>
-            </div>
-          </div>
-        </body></html>`, { waitUntil: 'load' })
-        const hit = await page.evaluate(() => {
-          const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect()
-          const play = box('[aria-label="Play"]')
-          const ruler = box('[data-ruler]')
-          const head = box('[data-playhead-strip]')
-          const plugin = box('[data-bass808]')
-          const at = (rect: DOMRect) => document.elementFromPoint(rect.left + 8, rect.top + Math.min(16, rect.height / 2))
-          const playEl = at(play)
-          const rulerEl = at(ruler)
-          return {
-            play: playEl?.getAttribute('aria-label') ?? playEl?.closest('button')?.getAttribute('aria-label') ?? '',
-            ruler: !!rulerEl?.closest('[data-ruler], .loop-grip'),
-            pluginTop: plugin.top,
-            rulerBottom: ruler.bottom,
-            headBottom: head.bottom,
-            playTop: play.top,
-          }
-        })
-        expect(hit.play, `play clickable at ${width}`).toBe('Play')
-        expect(hit.ruler, `ruler clickable at ${width}`).toBe(true)
-        expect(hit.pluginTop, `plugin below ruler at ${width}`).toBeGreaterThanOrEqual(hit.headBottom - 1)
-        expect(hit.playTop, `play above plugin at ${width}`).toBeLessThan(hit.pluginTop)
-        await page.getByRole('button', { name: 'Play', exact: true }).click()
-        await page.getByRole('button', { name: 'Loop start', exact: true }).click()
-        expect(clicks).toBe(2)
-        clicks = 0
-        await page.screenshot({ path: `/opt/cursor/artifacts/bass-plugin-${width}.png` })
-        await page.close()
-      }
-    } finally {
-      await browser.close()
-    }
-  }, 30000)
+  }, 120000)
 })

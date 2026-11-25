@@ -55,24 +55,6 @@ export function readKeyStart(instrument: string, home: number, span: number, sto
   return clampKeyStart(saved, span)
 }
 
-/** Semitone bias for an instrument that also has an octave control. 0 leaves the octave on C. */
-export function readSemitone(instrument: string, storage?: Memory): number {
-  const saved = bag(storageOf(storage))[`${instrument}:semi`]
-  if (saved == null) return 0
-  return Math.max(-48, Math.min(48, Math.round(saved)))
-}
-
-export function writeSemitone(instrument: string, semitone: number, storage?: Memory) {
-  const box = storageOf(storage)
-  try {
-    const next = bag(box)
-    next[`${instrument}:semi`] = Math.max(-48, Math.min(48, Math.round(Number.isFinite(semitone) ? semitone : 0)))
-    box?.setItem(STORAGE, JSON.stringify(next))
-  } catch {
-    /* private mode keeps the choice for this visit */
-  }
-}
-
 export function writeKeyStart(instrument: string, start: number, span: number, storage?: Memory) {
   const box = storageOf(storage)
   try {

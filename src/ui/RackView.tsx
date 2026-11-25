@@ -120,7 +120,7 @@ export function RackView({ store, engine, trackId, onOpenKnock, onPiano }: { sto
             <button type="button" className="bevel" title="Open the Knock drum instrument." onClick={() => onOpenKnock?.()}>Open Knock</button>
           )}
           {isInstrument(device.kind) && (
-            <Keyboard compact onDown={(note, velocity) => play(note, velocity)} onUp={(note) => engine.releaseRack(track.id, note)} />
+            <Keyboard compact instrument={track.instrument || device.kind} onDown={(note, velocity) => play(note, velocity)} onUp={(note) => engine.releaseRack(track.id, note)} />
           )}
         </div>
       ) : null}

@@ -980,7 +980,7 @@ export function MyLibrary({
                 </div>
               )}
           </div>}
-          {(active.length > 0 || quick) && (
+          {fastMode !== 'loop' && (active.length > 0 || quick) && (
             <div className="library-active-bar" role="group" aria-label="Active filters">
               {quick && (
                 <button type="button" className="library-active-chip" aria-label={`Clear ${quick === 'recent' ? 'Recent' : 'Favorites'}`} onClick={() => {
@@ -1094,7 +1094,7 @@ export function MyLibrary({
             {counted === 0 && <p className="sound-status">Nothing matches.</p>}
             {fastModel && fastModel.rows.length > 0 && (
               <div className="fast-list" style={{ height: fastModel.total, position: 'relative', width: '100%', maxWidth: '100%' }}>
-                <div style={{ position: 'absolute', top: fastModel.offsets[range.start] ?? 0, left: 0, right: 28, maxWidth: '100%' }}>
+                <div style={{ position: 'absolute', top: fastModel.offsets[range.start] ?? 0, left: 0, right: 48, maxWidth: '100%' }}>
                   {fastShown.map((row) => row.kind === 'head' ? (
                     <button
                       key={row.id}
@@ -1422,7 +1422,6 @@ export function FastShelf({
   const focus = model.rows.find((row) => row.kind === 'sound')
   if (mode === 'loop') {
     const active = [
-      category ? model.chips.find((chip) => chip.id === category)?.label : '',
       genre ? model.genres.find((chip) => chip.id === genre)?.label : '',
       inKey ? `In ${songKey}` : '',
       compatible ? 'Compatible' : '',
