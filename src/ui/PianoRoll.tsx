@@ -1045,7 +1045,8 @@ export function PianoRoll({
               })}
               <svg className="slide-line" aria-hidden="true">
                 {slideLinks(notes).map((link) => {
-                  const x1 = (link.from.startBeat + link.from.durationBeats) * pxBeat
+                  const leave = Math.min(link.from.startBeat + link.from.durationBeats, Math.max(link.from.startBeat, link.to.startBeat))
+                  const x1 = leave * pxBeat
                   const y1 = (HIGH - link.from.pitch) * row + row / 2
                   const x2 = link.to.startBeat * pxBeat
                   const y2 = (HIGH - link.to.pitch) * row + row / 2

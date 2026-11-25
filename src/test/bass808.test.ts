@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { renderBass808, bassActive, bassNote, createBassState, glideLength, midiHz, BASS808_ATTACK_MS } from '../audio/bass808/voice'
 import { RackRuntime, renderNotes } from '../audio/rack/dsp'
-import { bassPadPitches, slideLinks } from '../audio/bass808/pattern'
+import { bassPadPitches, drillTrapPattern, slideLinks } from '../audio/bass808/pattern'
 import { BASS808_SHOTS, shotRoot } from '../audio/bass808/shots'
 import { graphPlugins } from '../audio/arrangeSources'
 import { createPlugin, defaultParams, normalizeProject } from '../audio/plugins/catalog'
@@ -310,6 +310,19 @@ describe('808 bass presets and pattern', () => {
       { id: 'c', pitch: 40, startBeat: 3, durationBeats: 1 },
     ])
     expect(links).toEqual([{ from: expect.objectContaining({ id: 'a' }), to: expect.objectContaining({ id: 'b' }) }])
+    const overlapped = slideLinks([
+      { id: 'held', pitch: 36, startBeat: 0, durationBeats: 1.15 },
+      { id: 'into', pitch: 43, startBeat: 1, durationBeats: 0.7, slide: true },
+      { id: 'older', pitch: 40, startBeat: 0, durationBeats: 0.4 },
+    ])
+    expect(overlapped).toEqual([{ from: expect.objectContaining({ id: 'held' }), to: expect.objectContaining({ id: 'into' }) }])
+    const pattern = drillTrapPattern(9, 'aeolian').map((note, index) => ({ ...note, id: String(index) }))
+    const drawn = slideLinks(pattern)
+    expect(drawn).toHaveLength(pattern.filter((note) => note.slide).length)
+    for (const link of drawn) {
+      expect(link.from.startBeat).toBeLessThan(link.to.startBeat)
+      expect(link.from.startBeat + link.from.durationBeats).toBeGreaterThan(link.to.startBeat)
+    }
     const pads = bassPadPitches(0, 'ionian')
     expect(pads[0] % 12).toBe(0)
     expect(new Set(pads.map((pitch) => pitch % 12)).size).toBe(pads.length > 7 ? 7 : pads.length)

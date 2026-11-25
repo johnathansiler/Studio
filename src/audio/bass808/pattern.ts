@@ -24,16 +24,25 @@ export function slideLinks<T extends SlideNote>(notes: readonly T[]): { from: T;
   const links: { from: T; to: T }[] = []
   for (const note of sorted) {
     if (!note.slide) continue
-    let from: T | null = null
-    let end = -Infinity
+    let held: T | null = null
+    let heldStart = -Infinity
+    let ended: T | null = null
+    let endedStop = -Infinity
     for (const other of sorted) {
-      if (other === note) continue
+      if (other === note || other.startBeat >= note.startBeat) continue
       const stop = other.startBeat + other.durationBeats
-      if (stop <= note.startBeat + 0.02 && stop >= end) {
-        end = stop
-        from = other
+      // A slide that overlaps is leaving the note that is still sounding.
+      if (stop > note.startBeat + 1e-6) {
+        if (other.startBeat >= heldStart) {
+          heldStart = other.startBeat
+          held = other
+        }
+      } else if (stop <= note.startBeat + 0.02 && stop >= endedStop) {
+        endedStop = stop
+        ended = other
       }
     }
+    const from = held ?? ended
     if (from) links.push({ from, to: note })
   }
   return links
