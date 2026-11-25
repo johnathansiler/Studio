@@ -277,38 +277,43 @@ describe('clip key and tempo', () => {
     expect(response.hearing?.root).toBeNull()
   })
 
-  it('does not name a drum loop that is filed as drums', () => {
+  it('does not name a drum loop that is filed as drums, or a noise clip', () => {
     const rate = 22050
     const audio = progression(MAJOR_CADENCE, 0, rate, 0)
     expect(detectKey(audio, rate).clear).toBe(true)
     expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'drums' })).toBe(true)
+    expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'noise' })).toBe(true)
     expect(clipDeniesKey({ soundType: 'loop', soundCategory: 'piano' })).toBe(false)
-    const clip: AudioClip = {
-      id: 'beat',
-      name: 'Downbeat Drums',
-      bufferId: 'buf',
-      startSample: 0,
-      offsetSamples: 0,
-      durationSamples: audio.length,
-      fadeInSamples: 0,
-      fadeOutSamples: 0,
-      gain: 1,
-      source: 'import',
-      soundType: 'loop',
-      soundCategory: 'drums',
+    for (const sound of [
+      { id: 'beat', category: 'drums' },
+      { id: 'hiss', category: 'noise' },
+    ]) {
+      const response = handleClipDetect({
+        id: sound.id === 'beat' ? 10 : 11,
+        type: 'clip-detect',
+        sampleRate: rate,
+        channels: [audio],
+        clip: {
+          id: sound.id,
+          name: 'Groove',
+          bufferId: 'buf',
+          startSample: 0,
+          offsetSamples: 0,
+          durationSamples: audio.length,
+          fadeInSamples: 0,
+          fadeOutSamples: 0,
+          gain: 1,
+          source: 'import',
+          soundType: 'loop',
+          soundCategory: sound.category,
+        },
+        tempo: 120,
+      })
+      expect(response.hearing?.clearKey).toBe(false)
+      expect(response.hearing?.key).toBe('')
+      expect(response.hearing?.maybeKey ?? '').toBe('')
+      expect(response.hearing?.root).toBeNull()
     }
-    const response = handleClipDetect({
-      id: 10,
-      type: 'clip-detect',
-      sampleRate: rate,
-      channels: [audio],
-      clip,
-      tempo: 120,
-    })
-    expect(response.hearing?.clearKey).toBe(false)
-    expect(response.hearing?.key).toBe('')
-    expect(response.hearing?.maybeKey ?? '').toBe('')
-    expect(response.hearing?.root).toBeNull()
   })
 
   it('says there is no clear key on a drum loop', () => {

@@ -150,9 +150,8 @@
   font: 600 13px/1.35 var(--font, inherit);
 }
 
-.clip-hearing-maybe {
+.clip-hearing p.clip-hearing-maybe {
   color: var(--muted, #8ea097);
-  opacity: 0.72;
 }
 
 .clip-hearing button {
