@@ -36,6 +36,10 @@ export interface Bass808State {
   lp: number
   hpX: number
   hpY: number
+  /** A note has sounded, so Always and Slide can leave the last pitch. */
+  played: boolean
+  /** Attack has reached full. Decay runs after that, so the two stages do not fight. */
+  attacked: boolean
 }
 
 export function createBassState(): Bass808State {
@@ -60,11 +64,15 @@ export function createBassState(): Bass808State {
     lp: 0,
     hpX: 0,
     hpY: 0,
+    played: false,
+    attacked: false,
   }
 }
 
 /** Amplitude release time constant. Render-to-audio keeps this long enough to reach silence. */
 export const BASS808_RELEASE_SEC = 0.09
+/** Historical attack time constant. The Attack knob defaults here so existing patches stay put. */
+export const BASS808_ATTACK_MS = 1.5
 
 export function glideLength(glideMs: number, sampleRate: number) {
   if (!(glideMs > 0) || !(sampleRate > 0)) return 0
@@ -112,22 +120,28 @@ export function bassNote(state: Bass808State, pitch: number, vel: number, slide:
   const overlap = state.held.length > 0 && state.live && !state.released
   if (!state.held.includes(midi)) state.held.push(midi)
   const always = num(params, 'gmode', 1) < 0.5
-  const glide = state.live && (slide || always || overlap)
+  // Always remembers the last pitch after the voice has gone quiet. Legato needs
+  // an overlap, unless this note is marked Slide.
+  const glide = state.played && (always || slide || overlap)
   begin(state, midi, vel, glide, params, sampleRate)
 }
 
 function begin(state: Bass808State, midi: number, vel: number, glide: boolean, params: Record<string, number>, sampleRate: number) {
   const length = glide ? glideLength(num(params, 'glide', 0), sampleRate) : 0
+  const from = state.played ? state.baseMidi : midi
   state.live = true
+  state.played = true
   state.released = false
   state.vel = Math.max(0, Math.min(1, vel))
-  state.glideFrom = state.live && length > 0 ? state.baseMidi : midi
+  state.glideFrom = length > 0 ? from : midi
   state.glideTo = midi
   state.glidePos = 0
   state.glideLen = length
+  if (state.env < 0.02) state.attacked = false
   if (!glide || length <= 0) {
     state.glideFrom = midi
     state.baseMidi = midi
+    state.attacked = false
     state.dropAmt = Math.max(0, num(params, 'drop', 0))
     state.dropAge = 0
     state.clickAge = 0
@@ -164,8 +178,9 @@ export function bassStep(
     state.baseMidi = state.glideTo
     state.glidePos = state.glideLen
   }
-  const dropLen = Math.max(1, 0.04 * sr)
-  const drop = state.dropAmt * Math.exp(-state.dropAge / (dropLen * 0.45))
+  // About 50 ms. Long enough to hear the dive, gone before the body of the note.
+  const dropTau = Math.max(1, 0.05 * sr)
+  const drop = state.dropAmt * Math.exp(-state.dropAge / dropTau)
   state.dropAge += 1
   const sounded = state.baseMidi + drop
   const hz = Math.max(8, midiHz(sounded))
@@ -202,10 +217,14 @@ export function bassStep(
   const sustain = Math.max(0, Math.min(1, num(params, 'sustain', 0.4)))
   const decay = Math.max(1, (num(params, 'decay', 500) / 1000) * sr)
   const release = Math.max(1, BASS808_RELEASE_SEC * sr)
-  const attack = Math.max(1, 0.0015 * sr)
+  const attackMs = Math.max(0, Math.min(2000, num(params, 'attack', BASS808_ATTACK_MS)))
+  // Zero still fades across a few samples so a hot oscillator phase does not click.
+  const attack = attackMs <= 0 ? 12 : Math.max(1, (attackMs / 1000) * sr)
   if (!state.released) {
-    if (state.env < 0.999) state.env += (1 - state.env) * (1 - Math.exp(-1 / attack))
-    else state.env += (sustain - state.env) * (1 - Math.exp(-1 / decay))
+    if (!state.attacked) {
+      state.env += (1 - state.env) * (1 - Math.exp(-1 / attack))
+      if (state.env >= 0.999) state.attacked = true
+    } else state.env += (sustain - state.env) * (1 - Math.exp(-1 / decay))
   } else {
     state.env *= Math.exp(-1 / release)
     if (state.env < 1e-5) {

@@ -10,7 +10,7 @@ import { Knob } from './kit/controls'
 import './bass808.css'
 
 const NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
-const KNOBS = ['glide', 'drop', 'decay', 'sustain', 'tone', 'drive', 'sub', 'click', 'level'] as const
+const KNOBS = ['glide', 'drop', 'attack', 'decay', 'sustain', 'tone', 'drive', 'sub', 'click', 'level'] as const
 
 function noteLabel(midi: number) {
   const pc = ((Math.round(midi) % 12) + 12) % 12
@@ -39,6 +39,7 @@ export function Bass808Panel({
   const [shot, setShot] = useState('')
   const [busy, setBusy] = useState(false)
   const held = useRef(new Set<number>())
+  const takes = useRef(new Map<number, { clipId: string; noteId: string; start: number }>())
   useEffect(() => store.subscribe(() => setTick((value) => value + 1)), [store])
   const track = store.track(trackId)
   const device = bassDevice(track)
@@ -47,6 +48,9 @@ export function Bass808Panel({
   const scale = store.project.scale
   const pads = bassPadPitches(scale?.root ?? 0, scale?.scale)
   const wide = typeof window !== 'undefined' && window.innerWidth >= 720
+  const zone = device?.zones[0]
+  const loadedShot = BASS808_SHOTS.find((item) => item.name === (zone ? store.buffers.get(zone.bufferId)?.name : ''))?.id ?? ''
+  useEffect(() => { setShot(loadedShot) }, [loadedShot])
 
   function setParam(id: string, value: number) {
     if (!device) return
@@ -74,17 +78,30 @@ export function Bass808Panel({
       clip = store.track(track.id)?.midiClips.at(-1)
     }
     if (!clip) return
+    const start = Math.max(0, beat - clip.startBeat)
     store.addNote(track.id, clip.id, {
       pitch,
-      startBeat: Math.max(0, beat - clip.startBeat),
-      durationBeats: 0.5,
+      startBeat: start,
+      durationBeats: 0.25,
       velocity: 0.9,
       ...(slide ? { slide: true } : {}),
     })
+    const noteId = store.selectedNoteId
+    if (noteId) takes.current.set(pitch, { clipId: clip.id, noteId, start })
   }
 
   function up(pitch: number) {
     held.current.delete(pitch)
+    const take = takes.current.get(pitch)
+    takes.current.delete(pitch)
+    if (take && engine.status === 'recording') {
+      const beat = samplesToBeats(engine.currentTimelineSample(), engine.sampleRate || store.project.sampleRate, store.project.tempo)
+      const clip = store.track(trackId)?.midiClips.find((item) => item.id === take.clipId)
+      if (clip) {
+        const duration = Math.max(0.05, beat - clip.startBeat - take.start)
+        store.updateNote(trackId, take.clipId, take.noteId, { durationBeats: duration })
+      }
+    }
     engine.releaseThrough(trackId, pitch)
   }
 
@@ -206,14 +223,38 @@ export function Bass808Panel({
             ))}
           </div>
           <div className="bass-keys" aria-label="Keys">
-            {Array.from({ length: 13 }, (_, index) => 36 + index).map((pitch) => {
-              const black = [1, 3, 6, 8, 10].includes(pitch % 12)
+            {Array.from({ length: 13 }, (_, index) => 36 + index).filter((pitch) => ![1, 3, 6, 8, 10].includes(pitch % 12)).map((pitch) => (
+              <button
+                key={pitch}
+                type="button"
+                aria-label={`Key ${noteLabel(pitch)}`}
+                onPointerDown={(event) => {
+                  event.preventDefault()
+                  down(pitch)
+                  event.currentTarget.classList.add('on')
+                  try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* synthetic */ }
+                }}
+                onPointerUp={(event) => {
+                  up(pitch)
+                  event.currentTarget.classList.remove('on')
+                }}
+                onPointerCancel={(event) => {
+                  up(pitch)
+                  event.currentTarget.classList.remove('on')
+                }}
+              >
+                {pitch % 12 === 0 ? noteLabel(pitch) : ''}
+              </button>
+            ))}
+            {Array.from({ length: 13 }, (_, index) => 36 + index).filter((pitch) => [1, 3, 6, 8, 10].includes(pitch % 12)).map((pitch) => {
+              const whiteBefore = [0, 2, 4, 5, 7, 9, 11, 12].filter((pc) => pc < (pitch - 36)).length
               return (
                 <button
                   key={pitch}
                   type="button"
-                  className={black ? 'black' : ''}
+                  className="black"
                   aria-label={`Key ${noteLabel(pitch)}`}
+                  style={{ left: `calc(${whiteBefore} * 12.5% - 9px)` }}
                   onPointerDown={(event) => {
                     event.preventDefault()
                     down(pitch)
@@ -228,9 +269,7 @@ export function Bass808Panel({
                     up(pitch)
                     event.currentTarget.classList.remove('on')
                   }}
-                >
-                  {pitch % 12 === 0 ? noteLabel(pitch) : ''}
-                </button>
+                />
               )
             })}
           </div>

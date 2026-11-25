@@ -246,6 +246,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('glide', 'Glide', 0, 1000, 80, 'ms'),
     spec('gmode', 'Glide mode', 0, 1, 1),
     spec('drop', 'Drop', 0, 24, 10, 'st'),
+    spec('attack', 'Attack', 0, 2000, 1.5, 'ms'),
     spec('decay', 'Decay', 20, 4000, 520, 'ms'),
     spec('sustain', 'Sustain', 0, 1, 0.4),
     spec('tone', 'Tone', 80, 8000, 2000, 'Hz'),
