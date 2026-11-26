@@ -357,9 +357,6 @@ describe('808 bass presets and pattern', () => {
       engine: { status: 'stopped', sampleRate: 48000, unlock() {}, playThrough() {}, releaseThrough() {}, currentTimelineSample: () => 0 } as unknown as AudioEngine,
       trackId: id,
       onClose() {},
-      onRecord() {},
-      onStop() {},
-      onPlay() {},
     }))
     expect(html).toContain('808 Bass')
     expect(html).toContain('Drill Slide (140)')
@@ -370,7 +367,15 @@ describe('808 bass presets and pattern', () => {
     expect(html).toContain('Short Punch')
     expect(html).toContain('Drill/Trap pattern')
     expect(html).toContain('Legato only')
-    expect(html).toContain('aria-label="Transport"')
+    expect(html).toContain('>Close<')
+    expect(html).toContain('>Tone<')
+    expect(html).toContain('>Play<')
+    expect(html).not.toContain('plugin-transport')
+    expect(html).not.toContain('data-plugin-transport')
+    expect(html).not.toContain('aria-label="Transport"')
+    expect(html).not.toContain('aria-label="Record"')
+    expect(html).not.toContain('>Record<')
+    expect(html).not.toContain('>Stop<')
     expect(html).toContain('Glide')
     expect(html).toContain('Attack')
     expect(html).toContain('aria-label="Attack"')
