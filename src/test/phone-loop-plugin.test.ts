@@ -75,9 +75,6 @@ describe('instrument plugin reopen', () => {
       engine: { status: 'stopped', sampleRate: 48000, unlock() {}, playThrough() {}, releaseThrough() {}, currentTimelineSample: () => 0 } as unknown as AudioEngine,
       trackId: id,
       onClose() {},
-      onRecord() {},
-      onStop() {},
-      onPlay() {},
       onPiano() {},
     }))
     expect(html).toContain('aria-label="Piano Roll"')

@@ -2510,9 +2510,6 @@ async function importDropped(files: FileList) {
                 trackId={store.bassTrackId}
                 onClose={() => store.closeBass()}
                 onPiano={() => openPiano(store.bassTrackId!)}
-                onRecord={() => { engine.unlock(); void record() }}
-                onStop={() => { void stop() }}
-                onPlay={() => { engine.unlock(); void play() }}
               />
             </Suspense>
           )}

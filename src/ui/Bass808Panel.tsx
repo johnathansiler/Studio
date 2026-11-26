@@ -25,18 +25,12 @@ export function Bass808Panel({
   engine,
   trackId,
   onClose,
-  onRecord,
-  onStop,
-  onPlay,
   onPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   trackId: string
   onClose: () => void
-  onRecord: () => void
-  onStop: () => void
-  onPlay: () => void
   onPiano?: () => void
 }) {
   const [, setTick] = useState(0)
@@ -126,11 +120,6 @@ export function Bass808Panel({
         {onPiano && <PianoRollButton onClick={onPiano} />}
         <button type="button" className="bass-quiet bass-close" onClick={onClose}>Close</button>
       </header>
-      <div className="plugin-transport" data-plugin-transport="open" aria-label="Transport">
-        <button type="button" aria-label="Record" onClick={onRecord}>Record</button>
-        <button type="button" aria-label="Stop" onClick={onStop}>Stop</button>
-        <button type="button" aria-label="Play" onClick={onPlay}>Play</button>
-      </div>
       <div className="bass808-tabs" role="tablist" aria-label="808 Bass pages">
         <button type="button" role="tab" aria-selected={tab === 'tone'} onClick={() => setTab('tone')}>Tone</button>
         <button type="button" role="tab" aria-selected={tab === 'play'} onClick={() => setTab('play')}>Play</button>

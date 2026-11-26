@@ -120,6 +120,47 @@ describe('built app on a phone', () => {
         await page.getByRole('button', { name: 'Add Track', exact: true }).click()
         await page.getByRole('button', { name: '808 Bass. Trap and drill slides.', exact: true }).click()
         await page.locator('[data-bass808="open"]').waitFor()
+        const chrome = await page.evaluate(() => {
+          function target(selector: string) {
+            const node = document.querySelector(selector)
+            if (!(node instanceof HTMLElement)) return { found: false, own: false, hit: '', height: 0, bottom: 0 }
+            const box = node.getBoundingClientRect()
+            const top = document.elementFromPoint(box.left + Math.min(box.width / 2, 18), box.top + box.height / 2)
+            const own = top instanceof Node && (top === node || node.contains(top))
+            return {
+              found: true,
+              own,
+              hit: top instanceof Element ? `${top.tagName}.${String(top.className)}` : '',
+              height: box.height,
+              bottom: box.bottom,
+            }
+          }
+          const plugin = document.querySelector('[data-bass808="open"]') as HTMLElement
+          const header = document.querySelector('.bass808-bar') as HTMLElement
+          const tabs = document.querySelector('.bass808-tabs') as HTMLElement
+          const pluginBox = plugin.getBoundingClientRect()
+          const inner = plugin.querySelectorAll('.plugin-transport, [data-plugin-transport="open"], [aria-label="Transport"], [aria-label="Record"], [aria-label="Stop"]')
+          return {
+            inner: inner.length,
+            headerToTabs: tabs.getBoundingClientRect().top - header.getBoundingClientRect().bottom,
+            pluginTop: pluginBox.top,
+            play: target('.transport .t-btn.play'),
+            record: target('.transport .t-btn.rec'),
+            loop: target('[data-loop-region="arrange"] [data-loop-edge="start"]'),
+          }
+        })
+        expect(chrome.inner, `no 808 transport row at ${width}`).toBe(0)
+        expect(chrome.headerToTabs, `no empty strip under the 808 header at ${width}`).toBeLessThanOrEqual(2)
+        expect(chrome.play.found, `arrange play at ${width}`).toBe(true)
+        expect(chrome.play.own, `arrange play receives the tap at ${width} (${chrome.play.hit})`).toBe(true)
+        expect(chrome.play.height, `arrange play height at ${width}`).toBeGreaterThanOrEqual(40)
+        expect(chrome.play.bottom, `arrange play above the 808 at ${width}`).toBeLessThanOrEqual(chrome.pluginTop + 1)
+        expect(chrome.record.found, `arrange record at ${width}`).toBe(true)
+        expect(chrome.record.own, `arrange record receives the tap at ${width} (${chrome.record.hit})`).toBe(true)
+        expect(chrome.record.height, `arrange record height at ${width}`).toBeGreaterThanOrEqual(40)
+        expect(chrome.record.bottom, `arrange record above the 808 at ${width}`).toBeLessThanOrEqual(chrome.pluginTop + 1)
+        expect(chrome.loop.found, `loop grip above the 808 at ${width}`).toBe(true)
+        expect(chrome.loop.own, `loop grip receives the tap at ${width} (${chrome.loop.hit})`).toBe(true)
         await page.getByRole('tab', { name: 'Tone', exact: true }).click()
         await page.locator('.bass-sample').waitFor()
         const tone = await bassFit(page)
